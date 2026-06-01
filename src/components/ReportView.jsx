@@ -1,16 +1,17 @@
 import { ChevronLeft, Download, Printer } from 'lucide-react';
-import { db } from '../db';
+import { db, useLocais, useExportadores, useBookings } from '../db';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
-  const exporters = db.getExportadores();
-  const locations = db.getLocais();
+  const exporters = useExportadores();
+  const locations = useLocais();
+  const bookings = useBookings();
   
   const booking = reportType === 'operational' && bookingId 
-    ? db.getBookings().find(b => b.id === bookingId) 
+    ? bookings.find(b => b.id === bookingId) 
     : null;
     
   const bookingsList = reportType === 'administrative' 
-    ? db.getBookings() 
+    ? bookings 
     : [];
 
   // Exportar Word (.docx) via Blob HTML de forma robusta e compatível com Word

@@ -1,26 +1,20 @@
 import { useState } from 'react';
 import { Plus, Search, Calendar, MapPin, Eye, Trash2 } from 'lucide-react';
-import { db } from '../db';
+import { db, useBookings, useLocais, useExportadores } from '../db';
 import PullToRefresh from './PullToRefresh';
 
 export default function BookingManager({ user, onSelectBooking, onCreateBookingClick, onDataChange }) {
-  const [bookings, setBookings] = useState(db.getBookings());
+  const bookings = useBookings();
+  const exportadores = useExportadores();
+  const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const handleRefresh = () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        setBookings(db.getBookings());
-        resolve();
-      }, 1000);
-    });
-  };
+  const handleRefresh = () => { return new Promise((resolve) => { setTimeout(() => resolve(), 1000); }); };
 
-  const handleDelete = (id, e) => {
+  const handleDelete = async (id, e) => {
     e.stopPropagation();
     if (confirm('Tem certeza que deseja deletar este booking e todos os seus containers?')) {
-      db.deleteBooking(id);
-      setBookings(db.getBookings());
+      await db.deleteBooking(id);
       if (onDataChange) onDataChange();
     }
   };
@@ -29,8 +23,8 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
     const term = searchQuery.toLowerCase();
     if (!term) return true;
     
-    const exp = db.getExportadores().find(e => e.id === b.exporterId);
-    const loc = db.getLocais().find(l => l.id === b.locationId);
+    const exp = exportadores.find(e => e.id === b.exporterId);
+    const loc = locais.find(l => l.id === b.locationId);
     
     return (
       b.certificateNumber.toLowerCase().includes(term) ||
@@ -106,8 +100,8 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
               </thead>
               <tbody>
                 {filtered.map(b => {
-                  const exp = db.getExportadores().find(e => e.id === b.exporterId);
-                  const loc = db.getLocais().find(l => l.id === b.locationId);
+                  const exp = exportadores.find(e => e.id === b.exporterId);
+                  const loc = locais.find(l => l.id === b.locationId);
                   
                   const statusColors = {
                     'Pendente': 'badge-pending',
@@ -169,8 +163,8 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
           {/* Visualização Mobile (Card Stack) */}
           <div className="mobile-only-cards" style={{ display: 'flex', flexDirection: 'column', gap: '1px', backgroundColor: 'var(--border-color)' }}>
             {filtered.map(b => {
-              const exp = db.getExportadores().find(e => e.id === b.exporterId);
-              const loc = db.getLocais().find(l => l.id === b.locationId);
+              const exp = exportadores.find(e => e.id === b.exporterId);
+              const loc = locais.find(l => l.id === b.locationId);
               
               const statusColors = {
                 'Pendente': 'badge-pending',

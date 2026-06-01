@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Camera, Image, Trash2, ArrowLeft, ArrowRight, RefreshCw, X } from 'lucide-react';
-import { db } from '../db';
+import { db, useBookings, useExportadores, useLocais } from '../db';
 
 export default function MobileAppView({ user, onRoleChange, hideHeader = false }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [bookings, setBookings] = useState(() => db.getBookings());
+  const bookings = useBookings();
+  const exportadores = useExportadores();
+  const locais = useLocais();
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [selectedContainer, setSelectedContainer] = useState(null);
   const [newSealInput, setNewSealInput] = useState('');
@@ -13,29 +15,9 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
-  const handleRefreshData = useCallback(() => {
-    setBookings(db.getBookings());
-    if (selectedBooking) {
-      const updated = db.getBookings().find(b => b.id === selectedBooking.id);
-      setSelectedBooking(updated || null);
-      if (selectedContainer && updated) {
-        const updatedCont = updated.containers?.find(c => c.id === selectedContainer.id);
-        setSelectedContainer(updatedCont || null);
-      }
-    }
-  }, [selectedBooking, selectedContainer]);
+  const handleRefreshData = useCallback(() => {}, []);
 
-  useEffect(() => {
-    const doPoll = async () => {
-      const hasChanged = await db.syncPull();
-      if (hasChanged) {
-        handleRefreshData();
-      }
-    };
-    doPoll();
-    const interval = setInterval(doPoll, 3000);
-    return () => clearInterval(interval);
-  }, [handleRefreshData]);
+  useEffect(() => {}, []);
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -69,14 +51,14 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
     );
 
     // 3. Pesquisa por Exportador
-    const exp = db.getExportadores().find(e => e.id === b.exporterId);
+    const exp = exportadores.find(e => e.id === b.exporterId);
     const matchExporter = exp && exp.name.toLowerCase().includes(term);
 
     return matchBooking || matchContainer || matchExporter;
   });
 
   // Operações de Contêiner
-  const handleUpdateContainerField = (field, value) => {
+  const handleUpdateContainerField = async (field, value) => {
     if (!selectedBooking || !selectedContainer) return;
 
     const updatedCont = { ...selectedContainer, [field]: value };
@@ -89,8 +71,8 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
     const updatedBooking = { ...selectedBooking, containers: updatedContainers };
     setSelectedBooking(updatedBooking);
 
-    db.saveBooking(updatedBooking);
-    setBookings(db.getBookings());
+    await db.saveBooking(updatedBooking);
+    
   };
 
   // Lacres Provisórios
@@ -286,7 +268,7 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
               </span>
 
               {filteredBookings.map(b => {
-                const expName = db.getExportadores().find(e => e.id === b.exporterId)?.name || 'N/A';
+                const expName = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
                 const statusColor = b.status === 'Finalizado' ? '#10b981' : b.status === 'Em andamento' ? '#f59e0b' : '#ef4444';
 
                 return (
@@ -384,8 +366,8 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>
                 <div>Nº Reserva: <strong>{selectedBooking.bookingNumber}</strong></div>
-                <div>Exportador: <span>{db.getExportadores().find(e => e.id === selectedBooking.exporterId)?.name}</span></div>
-                <div>Local: <span>{db.getLocais().find(l => l.id === selectedBooking.locationId)?.name}</span></div>
+                <div>Exportador: <span>{exportadores.find(e => e.id === selectedBooking.exporterId)?.name}</span></div>
+                <div>Local: <span>{locais.find(l => l.id === selectedBooking.locationId)?.name}</span></div>
                 <div>Navio/Viagem: <span>{selectedBooking.vesselVoyage}</span></div>
               </div>
             </div>

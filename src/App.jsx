@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
-import { db } from './db';
+import { db, useBookings, useLocais, useExportadores } from './db';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -33,7 +33,9 @@ export default function App() {
   const [user, setUser] = useState(db.getUser());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverIp, setServerIp] = useState(localStorage.getItem('containtrack_server_ip') || '');
-  const [bookings, setBookings] = useState(db.getBookings());
+  const bookings = useBookings();
+  const exportadores = useExportadores();
+  const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
   
@@ -78,15 +80,7 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
 
     // Sincronização periódica em background (Polling leve de 3 segundos)
-    const doSync = async () => {
-      const hasChanged = await db.syncPull();
-      if (hasChanged) {
-        setBookings(db.getBookings());
-      }
-    };
-    // Sincroniza imediatamente na montagem
-    doSync();
-    const interval = setInterval(doSync, 3000);
+    // Sincronização via Firebase
 
     // Detecção automática de conexão online/offline
     const handleOnline = () => setIsOnline(true);
@@ -96,15 +90,12 @@ export default function App() {
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      clearInterval(interval);
-      window.removeEventListener('online', handleOnline);
+            window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  const handleRefreshData = () => {
-    setBookings(db.getBookings());
-  };
+  const handleRefreshData = () => {};
 
   // Estatísticas operacionais dos Bookings
   const countPendentes = bookings.filter(b => b.status === 'Pendente').length;
@@ -118,8 +109,8 @@ export default function App() {
       b.certificateNumber.toLowerCase().includes(term) ||
       b.bookingNumber.toLowerCase().includes(term) ||
       (b.vesselVoyage || '').toLowerCase().includes(term) ||
-      (db.getExportadores().find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
-      (db.getLocais().find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term);
+      (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
+      (locais.find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term);
 
     const matchesStatus = statusFilter === 'Todos' || b.status === statusFilter;
 
@@ -127,7 +118,7 @@ export default function App() {
   });
 
   // Criar booking (Salvar)
-  const handleCreateBooking = (e) => {
+  const handleCreateBooking = async (e) => {
     e.preventDefault();
     if (!newBookingData.bookingNumber || !newBookingData.exporterId || !newBookingData.locationId) {
       alert('Preencha os campos obrigatórios.');
@@ -136,7 +127,7 @@ export default function App() {
 
     const navioVoy = `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`;
 
-    const created = db.saveBooking({
+    const created = await db.saveBooking({
       ...newBookingData,
       vesselVoyage: navioVoy,
       bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
@@ -282,7 +273,7 @@ export default function App() {
       // 3. Exporter
       let exporterId = '';
       let exporterNameExtracted = '';
-      const exporterMatch = fullText.match(/(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/i);
+      const exporterMatch = fullText.match(/(?:exportador|exporter|shipper)[^a-zA-Z0-9]*([^\n\r]+)/i);
       if (exporterMatch && exporterMatch[1]) {
         let rawName = exporterMatch[1].trim();
         const stopKeywords = [
@@ -305,21 +296,23 @@ export default function App() {
         exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const exporters = db.getExportadores();
+      const exporters = await db.getExportadores();
+      const ignoreWordsExp = ['exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 'logistica'];
+
       if (exporterNameExtracted) {
         const exactMatch = exporters.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
         if (exactMatch) {
           exporterId = exactMatch.id;
         } else {
           const partialMatch = exporters.find(exp => {
-            const expWords = exp.name.split(' ').filter(w => w.length > 4);
+            const expWords = exp.name.split(' ').filter(w => w.length > 4 && !ignoreWordsExp.includes(w.toLowerCase()));
             return expWords.some(w => exporterNameExtracted.toLowerCase().includes(w.toLowerCase()));
           });
           if (partialMatch) {
             exporterId = partialMatch.id;
           } else {
             // Dynamically register new exporter
-            const newExp = db.saveExportador({
+            const newExp = await db.saveExportador({
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
@@ -333,8 +326,8 @@ export default function App() {
             exporterId = exp.id;
             break;
           }
-          const signWords = exp.name.split(' ').filter(w => w.length > 4);
-          if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+          const signWords = exp.name.split(' ').filter(w => w.length > 4 && !ignoreWordsExp.includes(w.toLowerCase()));
+          if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
             exporterId = exp.id;
             break;
           }
@@ -343,14 +336,16 @@ export default function App() {
 
       // 4. Location of Operation
       let locationId = '';
-      const locais = db.getLocais();
+      const locais = await db.getLocais();
+      const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
+      
       for (const loc of locais) {
         if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
           locationId = loc.id;
           break;
         }
-        const signWords = loc.name.split(' ').filter(w => w.length > 4);
-        if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+        const signWords = loc.name.split(' ').filter(w => w.length > 4 && !ignoreWordsLoc.includes(w.toLowerCase()));
+        if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
           locationId = loc.id;
           break;
         }
@@ -637,20 +632,20 @@ export default function App() {
   };
 
   // Ações da Tabela
-  const handleFinalizeBooking = (id, e) => {
+  const handleFinalizeBooking = async (id, e) => {
     e.stopPropagation();
     const bk = bookings.find(b => b.id === id);
     if (bk) {
       bk.status = 'Finalizado';
-      db.saveBooking(bk);
+      await db.saveBooking(bk);
       handleRefreshData();
     }
   };
 
-  const handleDeleteBooking = (id, e) => {
+  const handleDeleteBooking = async (id, e) => {
     e.stopPropagation();
     if (confirm('Deseja excluir este booking e todos os seus containers?')) {
-      db.deleteBooking(id);
+      await db.deleteBooking(id);
       handleRefreshData();
     }
   };
@@ -1125,8 +1120,8 @@ export default function App() {
                       </thead>
                       <tbody>
                         {filteredBookings.map(b => {
-                          const exp = db.getExportadores().find(e => e.id === b.exporterId)?.name || 'N/A';
-                          const loc = db.getLocais().find(l => l.id === b.locationId)?.name || 'N/A';
+                          const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                          const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
                           
                           const statusColors = {
                             'Pendente': 'badge-pending',
@@ -1185,8 +1180,8 @@ export default function App() {
                   {/* Lista de Cards de Bookings (Apenas no mobile) */}
                   <div className="bookings-cards-mobile">
                     {filteredBookings.map(b => {
-                      const exp = db.getExportadores().find(e => e.id === b.exporterId)?.name || 'N/A';
-                      const loc = db.getLocais().find(l => l.id === b.locationId)?.name || 'N/A';
+                      const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                      const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
                       const statusColors = {
                         'Pendente': 'badge-pending',
                         'Em andamento': 'badge-progress',
@@ -1492,7 +1487,7 @@ export default function App() {
                 <label>Nº Certificado (Auto)</label>
                 <input 
                   type="text" 
-                  value={db.generateNextCertificateNumber(bookings)}
+                  value="Gerado Automaticamente"
                   disabled
                   style={{ 
                     backgroundColor: 'var(--bg-tertiary)', 
@@ -1584,7 +1579,7 @@ export default function App() {
                   required
                 >
                   <option value="">Selecione...</option>
-                  {db.getExportadores().map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
+                  {exportadores.map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
                 </select>
               </div>
 
@@ -1596,7 +1591,7 @@ export default function App() {
                   required
                 >
                   <option value="">Selecione...</option>
-                  {db.getLocais().map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                  {locais.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                 </select>
               </div>
 

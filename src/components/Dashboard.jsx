@@ -1,21 +1,15 @@
 import { useState } from 'react';
 import { Search, Plus, Clipboard, Loader2, PlayCircle, CheckCircle, ArrowRight } from 'lucide-react';
-import { db } from '../db';
+import { db, useBookings, useExportadores } from '../db';
 import PullToRefresh from './PullToRefresh';
 
 export default function Dashboard({ user, onSelectBooking, onCreateBookingClick }) {
-  const [bookings, setBookings] = useState(db.getBookings());
+  const bookings = useBookings();
+  const exportadores = useExportadores();
   const [searchQuery, setSearchQuery] = useState('');
   
   // Recarrega dados com simulação de rede (Pull-to-refresh)
-  const handleRefresh = () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        setBookings(db.getBookings());
-        resolve();
-      }, 1000);
-    });
-  };
+  const handleRefresh = () => { return new Promise((resolve) => { setTimeout(() => resolve(), 1000); }); };
 
   // Cálculos de Status
   const pendentes = bookings.filter(b => b.status === 'Pendente').length;
@@ -195,7 +189,7 @@ export default function Dashboard({ user, onSelectBooking, onCreateBookingClick 
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {filteredBookings.map(b => {
-              const exp = db.getExportadores().find(e => e.id === b.exporterId);
+              const exp = exportadores.find(e => e.id === b.exporterId);
               const statusColors = {
                 'Pendente': 'badge-pending',
                 'Em andamento': 'badge-progress',

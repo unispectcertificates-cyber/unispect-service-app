@@ -1,24 +1,30 @@
 import { useState } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight } from 'lucide-react';
-import { db } from '../db';
+import { db, useBookings, useInspectors, useLocais, useExportadores } from '../db';
+import { useEffect } from 'react';
 import ContainerDetail from './ContainerDetail';
 
 export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport }) {
+  
+  const bookings = useBookings();
+  const inspectors = useInspectors();
+  const exportadores = useExportadores();
+  const locais = useLocais();
   const [prevBookingId, setPrevBookingId] = useState(bookingId);
-  const [booking, setBooking] = useState(() => db.getBookings().find(b => b.id === bookingId));
+  const [booking, setBooking] = useState(() => bookings.find(b => b.id === bookingId));
   const [selectedInspectorId, setSelectedInspectorId] = useState(() => {
-    const bk = db.getBookings().find(b => b.id === bookingId);
+    const bk = bookings.find(b => b.id === bookingId);
     return bk?.inspectorId || '';
   });
 
-  if (bookingId !== prevBookingId) {
-    setPrevBookingId(bookingId);
-    const bk = db.getBookings().find(b => b.id === bookingId);
-    setBooking(bk);
-    setSelectedInspectorId(bk?.inspectorId || '');
-  }
+  useEffect(() => {
+    const bk = bookings.find(b => b.id === bookingId);
+    if (bk) {
+      setBooking(bk);
+      setSelectedInspectorId(bk.inspectorId || '');
+    }
+  }, [bookings, bookingId]);
 
-  const inspectors = db.getInspectors();
   
   // Modais de segundo nível
   const [showAddContainer, setShowAddContainer] = useState(false);
@@ -46,17 +52,17 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const isAdm = user.role === 'ADM';
   const canEdit = isAdm || isInspector;
 
-  const handleInspectorChange = (e) => {
+  const handleInspectorChange = async (e) => {
     const insId = e.target.value;
     setSelectedInspectorId(insId);
     
     const updated = { ...booking, inspectorId: insId };
     setBooking(updated);
-    db.saveBooking(updated);
+    await db.saveBooking(updated);
     if (onDataChange) onDataChange();
   };
 
-  const handleSaveContainer = (e) => {
+  const handleSaveContainer = async (e) => {
     e.preventDefault();
     if (!newContainer.containerNumber.trim()) return;
 
@@ -89,7 +95,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const updatedBooking = { ...booking, containers: updatedContainers };
     
     setBooking(updatedBooking);
-    db.saveBooking(updatedBooking);
+    await db.saveBooking(updatedBooking);
     if (onDataChange) onDataChange();
 
     // Reset Form
@@ -109,23 +115,23 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     setShowAddContainer(false);
   };
 
-  const handleDeleteContainer = (contId) => {
+  const handleDeleteContainer = async (contId) => {
     if (confirm('Tem certeza que deseja excluir este container?')) {
       const updatedContainers = (booking.containers || []).filter(c => c.id !== contId);
       const updatedBooking = { ...booking, containers: updatedContainers };
       setBooking(updatedBooking);
-      db.saveBooking(updatedBooking);
+      await db.saveBooking(updatedBooking);
       if (onDataChange) onDataChange();
     }
   };
 
-  const handleUpdateContainerPhotos = (updatedCont) => {
+  const handleUpdateContainerPhotos = async (updatedCont) => {
     const updatedContainers = (booking.containers || []).map(c => 
       c.id === updatedCont.id ? updatedCont : c
     );
     const updatedBooking = { ...booking, containers: updatedContainers };
     setBooking(updatedBooking);
-    db.saveBooking(updatedBooking);
+    await db.saveBooking(updatedBooking);
     if (onDataChange) onDataChange();
   };
 
@@ -175,8 +181,8 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     handleUpdateContainerPhotos(updatedCont);
   };
 
-  const expName = db.getExportadores().find(e => e.id === booking.exporterId)?.name || '-';
-  const locName = db.getLocais().find(l => l.id === booking.locationId)?.name || '-';
+  const expName = exportadores.find(e => e.id === booking.exporterId)?.name || '-';
+  const locName = locais.find(l => l.id === booking.locationId)?.name || '-';
 
   return (
     <div style={{

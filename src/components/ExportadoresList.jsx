@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Plus, Mail, Phone, UserPlus } from 'lucide-react';
-import { db } from '../db';
+import { db, useExportadores } from '../db';
 
 export default function ExportadoresList({ onDataChange }) {
-  const [exportadores, setExportadores] = useState(db.getExportadores());
+  const exportadores = useExportadores();
   const [showModal, setShowModal] = useState(false);
   const [editingExp, setEditingExp] = useState(null);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '' });
@@ -20,27 +20,23 @@ export default function ExportadoresList({ onDataChange }) {
     setShowModal(true);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('Tem certeza que deseja excluir este exportador?')) {
-      db.deleteExportador(id);
-      const updated = db.getExportadores();
-      setExportadores(updated);
-      if (onDataChange) onDataChange();
+      await db.deleteExportador(id);
+            if (onDataChange) onDataChange();
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    db.saveExportador({
+    await db.saveExportador({
       id: editingExp ? editingExp.id : undefined,
       ...formData
     });
 
-    const updated = db.getExportadores();
-    setExportadores(updated);
-    setShowModal(false);
+        setShowModal(false);
     if (onDataChange) onDataChange();
   };
 
