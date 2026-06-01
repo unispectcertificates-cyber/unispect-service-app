@@ -17,7 +17,25 @@ export default function App() {
       setIsMobileOrTablet(window.innerWidth <= 1024);
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    
+    // DEBUG: Global error handler to catch silent UI freezes
+    const origError = window.onerror;
+    window.onerror = function(msg, url, line, col, error) {
+      alert("ERRO NO SISTEMA: " + msg + "\nLinha: " + line);
+      if (origError) return origError(msg, url, line, col, error);
+      return false;
+    };
+    const origUnhandled = window.onunhandledrejection;
+    window.onunhandledrejection = function(event) {
+      alert("ERRO ASSÍNCRONO: " + (event.reason ? event.reason.message || event.reason : 'Unknown'));
+      if (origUnhandled) return origUnhandled(event);
+    };
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.onerror = origError;
+      window.onunhandledrejection = origUnhandled;
+    };
   }, []);
 
   const [currentTab, setCurrentTab] = useState(() => {
@@ -296,7 +314,7 @@ export default function App() {
         exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const exporters = await db.getExportadores();
+      const exporters = exportadores;
       const ignoreWordsExp = ['exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 'logistica'];
 
       if (exporterNameExtracted) {
@@ -311,13 +329,15 @@ export default function App() {
           if (partialMatch) {
             exporterId = partialMatch.id;
           } else {
-            // Dynamically register new exporter
-            const newExp = await db.saveExportador({
+            // Dynamically register new exporter (Sync ID generation to prevent UI freeze if Firebase is slow)
+            const newId = 'exp_' + Date.now();
+            db.saveExportador({
+              id: newId,
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
-            });
-            exporterId = newExp.id;
+            }).catch(e => console.error("Erro background saveExportador:", e));
+            exporterId = newId;
           }
         }
       } else {
@@ -336,7 +356,6 @@ export default function App() {
 
       // 4. Location of Operation
       let locationId = '';
-      const locais = await db.getLocais();
       const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
       
       for (const loc of locais) {
