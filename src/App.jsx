@@ -17,16 +17,16 @@ export default function App() {
       setIsMobileOrTablet(window.innerWidth <= 1024);
     };
     window.addEventListener('resize', handleResize);
-    
+
     // DEBUG: Global error handler to catch silent UI freezes
     const origError = window.onerror;
-    window.onerror = function(msg, url, line, col, error) {
+    window.onerror = function (msg, url, line, col, error) {
       alert("ERRO NO SISTEMA: " + msg + "\nLinha: " + line);
       if (origError) return origError(msg, url, line, col, error);
       return false;
     };
     const origUnhandled = window.onunhandledrejection;
-    window.onunhandledrejection = function(event) {
+    window.onunhandledrejection = function (event) {
       alert("ERRO ASSÍNCRONO: " + (event.reason ? event.reason.message || event.reason : 'Unknown'));
       if (origUnhandled) return origUnhandled(event);
     };
@@ -56,7 +56,7 @@ export default function App() {
   const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
-  
+
   // Modais e Menu Dropdown
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -108,12 +108,12 @@ export default function App() {
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-            window.removeEventListener('online', handleOnline);
+      window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  const handleRefreshData = () => {};
+  const handleRefreshData = () => { };
 
   // Estatísticas operacionais dos Bookings
   const countPendentes = bookings.filter(b => b.status === 'Pendente').length;
@@ -123,7 +123,7 @@ export default function App() {
   // Filtragem dos Bookings
   const filteredBookings = bookings.filter(b => {
     const term = searchQuery.toLowerCase();
-    const matchesSearch = term === '' || 
+    const matchesSearch = term === '' ||
       b.certificateNumber.toLowerCase().includes(term) ||
       b.bookingNumber.toLowerCase().includes(term) ||
       (b.vesselVoyage || '').toLowerCase().includes(term) ||
@@ -211,7 +211,7 @@ export default function App() {
 
     try {
       const reader = new FileReader();
-      
+
       const readAsArrayBuffer = (f) => new Promise((resolve, reject) => {
         reader.onload = () => resolve(reader.result);
         reader.onerror = () => reject(reader.error);
@@ -219,12 +219,12 @@ export default function App() {
       });
 
       const arrayBuffer = await readAsArrayBuffer(file);
-      
+
       const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
-      
+
       let fullText = '';
-      
+
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
@@ -238,7 +238,7 @@ export default function App() {
       console.log('PDF Extracted Text:', fullText);
 
       // HEURISTIC REGEX PARSING
-      
+
       // 1. Booking Number
       let bookingNumber = '';
       const bookingRegexes = [
@@ -257,7 +257,7 @@ export default function App() {
       // 2. Vessel Name & Voyage
       let vesselName = '';
       let vesselVoyageNum = '';
-      
+
       const vesselMatch = fullText.match(/(?:vessel|navio)[^a-zA-Z0-9]*([^\n\r]+)/i);
       if (vesselMatch && vesselMatch[1]) {
         let rawVessel = vesselMatch[1].trim();
@@ -292,64 +292,49 @@ export default function App() {
       // 3. Exporter
       let exporterId = '';
       let exporterNameExtracted = '';
-      
-      const expMatchIndex = fullText.search(/\b(?:exportador|exporter|shipper|remetente|embarcador)\b/i);
-      if (expMatchIndex !== -1) {
-        let chunk = fullText.substring(expMatchIndex, expMatchIndex + 300);
-        let lines = chunk.split(/\n|\r/);
-        for (let line of lines) {
-          // Remove a palavra chave do inicio, se houver
-          let cleanLine = line.replace(/^(?:exportador|exporter|shipper|remetente|embarcador)[\s:]*/i, '').trim();
-          cleanLine = cleanLine.replace(/^[:\-\s]+/, '').trim();
-          
-          if (cleanLine.length > 3) {
-            const stopKeywords = [/\bcnpj\b/i, /\bimportador\b/i, /\bdestino\b/i, /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\bmarca\b/i, /\bendereco\b/i, /\baddress\b/i, /\bnavio\b/i, /\bviagem\b/i, /\bbooking\b/i];
-            for (const kw of stopKeywords) {
-              const idx = cleanLine.search(kw);
-              if (idx !== -1) cleanLine = cleanLine.substring(0, idx).trim();
-            }
-            
-            if (cleanLine.length > 4) {
-              exporterNameExtracted = cleanLine.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-              break;
-            }
+      const exporterMatch = fullText.match(/(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/i);
+      if (exporterMatch && exporterMatch[1]) {
+        let rawName = exporterMatch[1].trim();
+        const stopKeywords = [
+          /\bcnpj\b/i,
+          /\bimportador\b/i,
+          /\bdestino\b/i,
+          /\barmador\b/i,
+          /\bagente\b/i,
+          /\brecinto\b/i,
+          /\bquantidade\b/i,
+          /\bmercadoria\b/i,
+          /\bmarca\b/i
+        ];
+        for (const kw of stopKeywords) {
+          const idx = rawName.search(kw);
+          if (idx !== -1) {
+            rawName = rawName.substring(0, idx).trim();
           }
         }
+        exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const exporters = exportadores;
-
+      const exporters = db.getExportadores();
       if (exporterNameExtracted) {
         const exactMatch = exporters.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
         if (exactMatch) {
           exporterId = exactMatch.id;
         } else {
           const partialMatch = exporters.find(exp => {
-            const normalize = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(exportacao|importacao|exportadora|comercio|ltda|s\.a\.|s\/a|sa|cia|companhia|logistica|cafe|industria|agroindustrial|e|de|da|do|dos|das)\b/g, '').replace(/\s+/g, ' ').trim();
-            
-            const cleanDb = normalize(exp.name);
-            const cleanExt = normalize(exporterNameExtracted);
-            
-            if (cleanDb.length > 2 && cleanExt.length > 2) {
-              return cleanDb.includes(cleanExt) || cleanExt.includes(cleanDb);
-            }
-            return false;
+            const expWords = exp.name.split(' ').filter(w => w.length > 4);
+            return expWords.some(w => exporterNameExtracted.toLowerCase().includes(w.toLowerCase()));
           });
           if (partialMatch) {
             exporterId = partialMatch.id;
           } else {
-            // Dynamically register new exporter (Sync ID generation to prevent UI freeze if Firebase is slow)
-            const newId = 'exp_' + Date.now();
-            const newExp = {
-              id: newId,
+            // Dynamically register new exporter
+            const newExp = db.saveExportador({
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
-            };
-            db.saveExportador(newExp).catch(e => console.error("Erro background saveExportador:", e));
-            exporterId = newId;
-            // Push exporter directly via real-time firebase updates instead of setExportadores
-            // as useExportadores doesn't expose a setter and will trigger a crash.
+            });
+            exporterId = newExp.id;
           }
         }
       } else {
@@ -359,8 +344,8 @@ export default function App() {
             exporterId = exp.id;
             break;
           }
-          const signWords = exp.name.split(' ').filter(w => w.length > 4 && !ignoreFallback.includes(w.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
-          if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+          const signWords = exp.name.split(' ').filter(w => w.length > 4);
+          if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
             exporterId = exp.id;
             break;
           }
@@ -370,7 +355,7 @@ export default function App() {
       // 4. Location of Operation
       let locationId = '';
       const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
-      
+
       for (const loc of locais) {
         if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
           locationId = loc.id;
@@ -481,7 +466,7 @@ export default function App() {
       let match;
       while ((match = containerRegex.exec(fullText)) !== null) {
         const rawNum = match[1].trim().toUpperCase();
-        
+
         // Verificação extra forçada no Javascript (à prova de falhas de regex)
         const prefixChars = rawNum.replace(/[^A-Z]/g, '');
         if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) {
@@ -490,7 +475,7 @@ export default function App() {
         if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) {
           continue; // Força ignorar qualquer coisa que comece com MLB (Maersk Line Booking) ou contenha MLBR (Lacres)
         }
-        
+
         containerMatches.push({
           number: rawNum,
           index: match.index,
@@ -503,14 +488,14 @@ export default function App() {
       for (let i = 0; i < containerMatches.length; i++) {
         const currentMatch = containerMatches[i];
         const nextMatch = containerMatches[i + 1];
-        
+
         const startIndex = currentMatch.index;
         const endIndex = nextMatch ? nextMatch.index : fullText.length;
         const segment = fullText.substring(startIndex, endIndex);
-        
+
         const containerNumber = currentMatch.number;
         const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
-        
+
         const maxSearch = Math.min(rawTokens.length, 15);
         let brandIndex = -1;
         for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
@@ -531,12 +516,12 @@ export default function App() {
             break;
           }
         }
-        
+
         if (typeIndex === -1) {
           for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
             if (rawTokens[tIdx] === '40' || rawTokens[tIdx] === '20') {
-               typeIndex = tIdx;
-               break;
+              typeIndex = tIdx;
+              break;
             }
           }
         }
@@ -571,7 +556,7 @@ export default function App() {
           } else if (typeStr.includes('reefer')) {
             containerType = "40' Reefer";
           }
-          
+
           const allMetricsTokens = rawTokens.slice(typeIndex + 1);
           // Filter to keep only tokens that contain digits and are formatted as numbers
           const metricsTokens = allMetricsTokens.filter(t => /^\d+([.,]\d+)*$/.test(t));
@@ -639,7 +624,7 @@ export default function App() {
       }));
 
       setPdfParseStatus('success');
-      
+
       let fieldsFound = [];
       if (bookingNumber) fieldsFound.push('Booking');
       if (vesselName) fieldsFound.push('Navio');
@@ -647,7 +632,7 @@ export default function App() {
       if (exporterId) fieldsFound.push('Exportador');
       if (bagsQuantity) fieldsFound.push('Qtd Sacas');
       if (portoDestino) fieldsFound.push('Destino');
-      
+
       if (fieldsFound.length > 0) {
         let msg = `Sucesso! Preenchido: ${fieldsFound.join(', ')}.`;
         if (parsedContainers.length > 0) {
@@ -701,12 +686,12 @@ export default function App() {
   // Funções do Menu Dropdown
   const handleMenuOptionClick = (option) => {
     setMenuOpen(false);
-    
+
     // Fecha visualizações detalhadas ativas antes de navegar
     setSelectedBookingId(null);
     setActiveReport(null);
 
-    switch(option) {
+    switch (option) {
       case 'new_booking':
         setShowCreateModal(true);
         break;
@@ -763,13 +748,13 @@ export default function App() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ 
-              width: '8px', 
-              height: '8px', 
-              borderRadius: '50%', 
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
               backgroundColor: isOnline ? '#10b981' : '#ef4444'
             }} />
-            <button 
+            <button
               onClick={async () => {
                 await db.syncPull();
                 await db.syncPush();
@@ -798,7 +783,7 @@ export default function App() {
 
       {/* CABEÇALHO UNISPECT */}
       <header className="app-header app-header-desktop no-print">
-        
+
         {/* Logo Unispect */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <div style={{
@@ -829,35 +814,35 @@ export default function App() {
         {/* Controles de Cabeçalho */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {/* Toggle Online */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px', 
-            backgroundColor: 'var(--bg-tertiary)', 
-            padding: '8px 14px', 
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: 'var(--bg-tertiary)',
+            padding: '8px 14px',
             borderRadius: 'var(--radius-full)',
             border: '1px solid var(--border-color)'
           }} className="no-select">
-            <span style={{ 
-              width: '8px', 
-              height: '8px', 
-              borderRadius: '50%', 
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
               backgroundColor: isOnline ? '#10b981' : '#ef4444',
-              display: 'inline-block' 
+              display: 'inline-block'
             }} />
             <span style={{ fontSize: '11px', fontWeight: '700', color: isOnline ? '#10b981' : 'var(--text-muted)' }}>
               {isOnline ? 'ONLINE' : 'OFFLINE'}
             </span>
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={isOnline}
               onChange={() => setIsOnline(!isOnline)}
               style={{ width: '32px', height: '16px', borderRadius: '10px', cursor: 'pointer' }}
             />
           </div>
 
-          <select 
-            value={user.role} 
+          <select
+            value={user.role}
             onChange={e => handleRoleChange(e.target.value)}
             style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontWeight: '600', color: 'var(--text-primary)' }}
           >
@@ -868,9 +853,9 @@ export default function App() {
 
           {/* BOTÃO DE MENU DROPDOWN NO CANTO SUPERIOR DIREITO */}
           <div ref={menuRef} style={{ position: 'relative' }}>
-            <button 
-              onClick={() => setMenuOpen(!menuOpen)} 
-              className="btn btn-secondary" 
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="btn btn-secondary"
               style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid var(--text-secondary)' }}
             >
               <Menu size={16} />
@@ -892,8 +877,8 @@ export default function App() {
                 display: 'flex',
                 flexDirection: 'column'
               }}>
-                <button 
-                  onClick={() => handleMenuOptionClick('dashboard')} 
+                <button
+                  onClick={() => handleMenuOptionClick('dashboard')}
                   style={{
                     padding: '12px 20px',
                     textAlign: 'left',
@@ -910,109 +895,109 @@ export default function App() {
                 >
                   📊 Ver Painel / Dashboard
                 </button>
-                
-                    <button 
-                      onClick={() => handleMenuOptionClick('new_booking')} 
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        borderTop: '1px solid var(--border-color)'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      1 + Novo Certificado
-                    </button>
-                    <button 
-                      onClick={() => handleMenuOptionClick('exportador')} 
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      2 Cadastro e consulta Exportador
-                    </button>
-                    <button 
-                      onClick={() => handleMenuOptionClick('locais')} 
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      3 Locais de Operação e Cadastro
-                    </button>
-                    <button 
-                      onClick={() => handleMenuOptionClick('inspetor')} 
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      4 Cadastro de Inspetor
-                    </button>
 
-                    {/* Configuração de rede para sincronizar de fora (Wifi / 5G / VPN) */}
-                    <div style={{
-                      padding: '12px 20px',
-                      borderTop: '1px solid var(--border-color)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.02)'
-                    }}>
-                      <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                        SERVIDOR DE SINCRONIZAÇÃO
-                      </span>
-                      <input 
-                        type="text"
-                        placeholder="IP do Servidor (ex: 192.168.1.15)"
-                        value={serverIp}
-                        onChange={e => handleServerIpChange(e.target.value)}
-                        style={{
-                          fontSize: '11px',
-                          padding: '6px 10px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          color: '#fff',
-                          borderRadius: '4px',
-                          outline: 'none',
-                          width: '100%'
-                        }}
-                      />
-                      <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: '1.2' }}>
-                        Deixe em branco para usar o IP atual ({window.location.hostname}). Funciona em Wi-Fi, 5G ou VPN (Tailscale).
-                      </span>
-                    </div>
+                <button
+                  onClick={() => handleMenuOptionClick('new_booking')}
+                  style={{
+                    padding: '12px 20px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    borderTop: '1px solid var(--border-color)'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  1 + Novo Certificado
+                </button>
+                <button
+                  onClick={() => handleMenuOptionClick('exportador')}
+                  style={{
+                    padding: '12px 20px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  2 Cadastro e consulta Exportador
+                </button>
+                <button
+                  onClick={() => handleMenuOptionClick('locais')}
+                  style={{
+                    padding: '12px 20px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  3 Locais de Operação e Cadastro
+                </button>
+                <button
+                  onClick={() => handleMenuOptionClick('inspetor')}
+                  style={{
+                    padding: '12px 20px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  4 Cadastro de Inspetor
+                </button>
+
+                {/* Configuração de rede para sincronizar de fora (Wifi / 5G / VPN) */}
+                <div style={{
+                  padding: '12px 20px',
+                  borderTop: '1px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.02)'
+                }}>
+                  <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+                    SERVIDOR DE SINCRONIZAÇÃO
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="IP do Servidor (ex: 192.168.1.15)"
+                    value={serverIp}
+                    onChange={e => handleServerIpChange(e.target.value)}
+                    style={{
+                      fontSize: '11px',
+                      padding: '6px 10px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      color: '#fff',
+                      borderRadius: '4px',
+                      outline: 'none',
+                      width: '100%'
+                    }}
+                  />
+                  <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: '1.2' }}>
+                    Deixe em branco para usar o IP atual ({window.location.hostname}). Funciona em Wi-Fi, 5G ou VPN (Tailscale).
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -1025,28 +1010,28 @@ export default function App() {
 
       {/* CONTEÚDO PRINCIPAL */}
       <main className="main-content app-main-content">
-        
+
         {activeReport ? (
-          <ReportView 
-            bookingId={activeReport.id} 
-            reportType={activeReport.type} 
+          <ReportView
+            bookingId={activeReport.id}
+            reportType={activeReport.type}
             onBack={() => {
               setActiveReport(null);
               if (activeReport.id) setSelectedBookingId(activeReport.id);
-            }} 
+            }}
           />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            
+
             {/* Boas-vindas e Estatísticas no topo do conteúdo */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h1 style={{ fontSize: '24px', fontWeight: '800' }}>Controle de Certificados Unispect</h1>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Bem-vindo, {user.username}</p>
               </div>
-              
+
               {currentTab !== 'bookings' && currentTab !== 'field-portal' && currentTab !== 'settings' && (
-                <button 
+                <button
                   onClick={() => {
                     const isMobile = window.innerWidth <= 1024;
                     if (isMobile && (currentTab === 'locais' || currentTab === 'inspectors')) {
@@ -1054,8 +1039,8 @@ export default function App() {
                     } else {
                       setCurrentTab('bookings');
                     }
-                  }} 
-                  className="btn btn-secondary" 
+                  }}
+                  className="btn btn-secondary"
                   style={{ padding: '8px 14px' }}
                 >
                   ← Voltar
@@ -1108,9 +1093,9 @@ export default function App() {
                         <label>Busca por Booking ou Certificado</label>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <Search size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-                          <input 
-                            type="text" 
-                            placeholder="Buscar..." 
+                          <input
+                            type="text"
+                            placeholder="Buscar..."
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             style={{ paddingLeft: '36px' }}
@@ -1129,9 +1114,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    <button 
-                      onClick={() => setActiveReport({ id: null, type: 'administrative' })} 
-                      className="btn btn-secondary" 
+                    <button
+                      onClick={() => setActiveReport({ id: null, type: 'administrative' })}
+                      className="btn btn-secondary"
                       style={{ alignSelf: 'center', padding: '10px 24px', fontSize: '13px' }}
                     >
                       📄 Gerar Relatório Geral
@@ -1159,7 +1144,7 @@ export default function App() {
                         {filteredBookings.map(b => {
                           const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
                           const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
-                          
+
                           const statusColors = {
                             'Pendente': 'badge-pending',
                             'Em andamento': 'badge-progress',
@@ -1185,7 +1170,7 @@ export default function App() {
                                   }} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px', border: '1px solid var(--text-muted)' }}>
                                     Gerenciar
                                   </button>
-                                  
+
                                   {b.status !== 'Finalizado' && user.role !== 'Exportador' && (
                                     <button onClick={(e) => handleFinalizeBooking(b.id, e)} className="btn btn-success" style={{ padding: '6px 12px', fontSize: '11px' }}>
                                       Finalizar
@@ -1233,19 +1218,19 @@ export default function App() {
                               {(b.status || 'Pendente').toUpperCase()}
                             </span>
                           </div>
-                          
+
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
                             <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
                             <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
                             <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
                             <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
                           </div>
-                          
+
                           <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
                             <button onClick={() => setSelectedBookingId(b.id)} className="btn btn-secondary" style={{ padding: '8px 12px', fontSize: '12px', flex: 1, border: '1px solid var(--text-muted)' }}>
                               Gerenciar
                             </button>
-                            
+
                             {b.status !== 'Finalizado' && user.role !== 'Exportador' && (
                               <button onClick={(e) => handleFinalizeBooking(b.id, e)} className="btn btn-success" style={{ padding: '8px 12px', fontSize: '12px', flex: 1 }}>
                                 Finalizar
@@ -1301,11 +1286,11 @@ export default function App() {
                     <h3 style={{ fontSize: '16px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)', textTransform: 'uppercase', margin: 0 }}>
                       Configurações do Dispositivo
                     </h3>
-                    
+
                     <div>
                       <label>Perfil Simulador</label>
-                      <select 
-                        value={user.role} 
+                      <select
+                        value={user.role}
                         onChange={e => handleRoleChange(e.target.value)}
                         style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: '#fff', fontWeight: '600' }}
                       >
@@ -1317,7 +1302,7 @@ export default function App() {
 
                     <div>
                       <label>Servidor de Sincronização</label>
-                      <input 
+                      <input
                         type="text"
                         placeholder="IP do Servidor (ex: 192.168.1.15)"
                         value={serverIp}
@@ -1336,8 +1321,8 @@ export default function App() {
                         <span style={{ fontSize: '12px', fontWeight: '700', color: isOnline ? '#10b981' : 'var(--text-muted)', marginRight: '8px' }}>
                           {isOnline ? 'ONLINE' : 'OFFLINE'}
                         </span>
-                        <input 
-                          type="checkbox" 
+                        <input
+                          type="checkbox"
                           checked={isOnline}
                           onChange={() => setIsOnline(!isOnline)}
                           style={{ width: '32px', height: '16px', borderRadius: '10px', cursor: 'pointer' }}
@@ -1351,7 +1336,7 @@ export default function App() {
                       <h4 style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase', margin: 0 }}>
                         Administração
                       </h4>
-                      <button 
+                      <button
                         onClick={() => setCurrentTab('locais')}
                         className="btn btn-secondary"
                         style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', width: '100%' }}
@@ -1359,7 +1344,7 @@ export default function App() {
                         <span>📍 Locais de Operação</span>
                         <span>→</span>
                       </button>
-                      <button 
+                      <button
                         onClick={() => setCurrentTab('inspectors')}
                         className="btn btn-secondary"
                         style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', width: '100%' }}
@@ -1370,7 +1355,7 @@ export default function App() {
                     </div>
                   )}
 
-                  <button 
+                  <button
                     onClick={() => handleRoleChange('Exportador')}
                     className="btn btn-danger"
                     style={{ padding: '14px', fontWeight: '800' }}
@@ -1428,7 +1413,7 @@ export default function App() {
             </div>
 
             {/* Campo Drag & Drop PDF */}
-            <div 
+            <div
               className={`pdf-drag-drop-zone ${isDragOver ? 'dragover' : ''} ${pdfParseStatus || ''}`}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -1444,10 +1429,10 @@ export default function App() {
               }}
               onClick={() => document.getElementById('booking-pdf-input').click()}
             >
-              <input 
+              <input
                 id="booking-pdf-input"
-                type="file" 
-                accept="application/pdf" 
+                type="file"
+                accept="application/pdf"
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
@@ -1479,8 +1464,8 @@ export default function App() {
             <div className="form-grid">
               <div>
                 <label>Número do Booking *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newBookingData.bookingNumber}
                   onChange={e => setNewBookingData({ ...newBookingData, bookingNumber: e.target.value })}
                   placeholder="BK-XXXXXX"
@@ -1490,12 +1475,12 @@ export default function App() {
 
               <div>
                 <label>Tipo de Operação *</label>
-                <select 
+                <select
                   value={newBookingData.type}
                   onChange={e => {
                     const newType = e.target.value;
-                    setNewBookingData({ 
-                      ...newBookingData, 
+                    setNewBookingData({
+                      ...newBookingData,
                       type: newType,
                       stuffingReportNumber: newType === 'Redex Operation Report' ? '' : newBookingData.stuffingReportNumber
                     });
@@ -1510,8 +1495,8 @@ export default function App() {
               {newBookingData.type === 'Container Stuffing Report' && (
                 <div>
                   <label>Stuffing Report Number *</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={newBookingData.stuffingReportNumber}
                     onChange={e => setNewBookingData({ ...newBookingData, stuffingReportNumber: e.target.value })}
                     placeholder="Ex: SR-XXXXXX"
@@ -1522,14 +1507,14 @@ export default function App() {
 
               <div>
                 <label>Nº Certificado (Auto)</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value="Gerado Automaticamente"
                   disabled
-                  style={{ 
-                    backgroundColor: 'var(--bg-tertiary)', 
-                    color: 'var(--color-brand)', 
-                    fontWeight: 'bold', 
+                  style={{
+                    backgroundColor: 'var(--bg-tertiary)',
+                    color: 'var(--color-brand)',
+                    fontWeight: 'bold',
                     border: '1px solid var(--border-color)',
                     cursor: 'not-allowed'
                   }}
@@ -1538,7 +1523,7 @@ export default function App() {
 
               <div>
                 <label>Mercadoria *</label>
-                <select 
+                <select
                   value={newBookingData.mercadoria}
                   onChange={e => setNewBookingData({ ...newBookingData, mercadoria: e.target.value })}
                   required
@@ -1553,8 +1538,8 @@ export default function App() {
 
               <div>
                 <label>Porto de Destino *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newBookingData.portoDestino}
                   onChange={e => setNewBookingData({ ...newBookingData, portoDestino: e.target.value })}
                   placeholder="Ex: Porto de Roterdã"
@@ -1564,8 +1549,8 @@ export default function App() {
 
               <div>
                 <label>Navio *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newBookingData.vesselName}
                   onChange={e => setNewBookingData({ ...newBookingData, vesselName: e.target.value })}
                   placeholder="Ex: MSC INGRID"
@@ -1575,8 +1560,8 @@ export default function App() {
 
               <div>
                 <label>Viagem *</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newBookingData.vesselVoyageNum}
                   onChange={e => setNewBookingData({ ...newBookingData, vesselVoyageNum: e.target.value })}
                   placeholder="Ex: 26A"
@@ -1586,8 +1571,8 @@ export default function App() {
 
               <div>
                 <label>Armador / Linha</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newBookingData.armador}
                   onChange={e => setNewBookingData({ ...newBookingData, armador: e.target.value })}
                   placeholder="Ex: Maersk"
@@ -1596,7 +1581,7 @@ export default function App() {
 
               <div>
                 <label>Embalagem *</label>
-                <select 
+                <select
                   value={newBookingData.embalagem}
                   onChange={e => setNewBookingData({ ...newBookingData, embalagem: e.target.value })}
                   required
@@ -1610,7 +1595,7 @@ export default function App() {
 
               <div>
                 <label>Exportador *</label>
-                <select 
+                <select
                   value={newBookingData.exporterId}
                   onChange={e => setNewBookingData({ ...newBookingData, exporterId: e.target.value })}
                   required
@@ -1622,7 +1607,7 @@ export default function App() {
 
               <div>
                 <label>Local da Operação *</label>
-                <select 
+                <select
                   value={newBookingData.locationId}
                   onChange={e => setNewBookingData({ ...newBookingData, locationId: e.target.value })}
                   required
@@ -1634,8 +1619,8 @@ export default function App() {
 
               <div>
                 <label>Quantidade de Sacas *</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={newBookingData.bagsQuantity}
                   onChange={e => setNewBookingData({ ...newBookingData, bagsQuantity: e.target.value })}
                   placeholder="Qtd Sacas"
@@ -1645,8 +1630,8 @@ export default function App() {
 
               <div>
                 <label>Quantidade de Containers</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   placeholder="Quantidade de Containers na reserva"
                   style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                   value={newBookingData.containers && newBookingData.containers.length > 0 ? newBookingData.containers.length : ''}
@@ -1704,7 +1689,7 @@ export default function App() {
       {isMobileOrTablet && (
         <nav className="mobile-bottom-nav no-print no-select">
           {(user.role === 'Inspector' || user.role === 'ADM') && (
-            <button 
+            <button
               onClick={() => setCurrentTab('field-portal')}
               className={`mobile-nav-item ${currentTab === 'field-portal' ? 'active' : ''}`}
             >
@@ -1713,7 +1698,7 @@ export default function App() {
             </button>
           )}
 
-          <button 
+          <button
             onClick={() => setCurrentTab('bookings')}
             className={`mobile-nav-item ${currentTab === 'bookings' ? 'active' : ''}`}
           >
@@ -1722,7 +1707,7 @@ export default function App() {
           </button>
 
           {user.role === 'ADM' && (
-            <button 
+            <button
               onClick={() => setCurrentTab('exportadores')}
               className={`mobile-nav-item ${currentTab === 'exportadores' ? 'active' : ''}`}
             >
@@ -1731,7 +1716,7 @@ export default function App() {
             </button>
           )}
 
-          <button 
+          <button
             onClick={() => setCurrentTab('settings')}
             className={`mobile-nav-item ${currentTab === 'settings' ? 'active' : ''}`}
           >
@@ -1743,8 +1728,8 @@ export default function App() {
 
       {/* Floating Action Button on Mobile */}
       {isMobileOrTablet && currentTab === 'bookings' && user.role === 'ADM' && (
-        <button 
-          onClick={() => setShowCreateModal(true)} 
+        <button
+          onClick={() => setShowCreateModal(true)}
           className="mobile-fab"
         >
           <Plus size={24} />
