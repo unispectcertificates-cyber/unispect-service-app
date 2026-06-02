@@ -329,12 +329,15 @@ export default function App() {
             exporterId = partialMatch.id;
           } else {
             // Dynamically register new exporter
-            const newExp = await db.saveExportador({
+            const newId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+            const newExp = {
+              id: newId,
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
-            });
-            exporterId = newExp.id;
+            };
+            db.saveExportador(newExp).catch(e => console.error("Erro background saveExportador:", e));
+            exporterId = newId;
           }
         }
       } else {
