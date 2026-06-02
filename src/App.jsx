@@ -205,6 +205,21 @@ export default function App() {
       return;
     }
 
+    // Helper to parse numbers formatting (supporting Brazilian comma decimals and dot thousands)
+    const parseBrazilianOrStandardFloat = (str) => {
+      if (!str) return 0;
+      let clean = str.trim();
+      if (clean.includes(',')) {
+        // Has a comma, so it's Brazilian decimal. Remove dots, replace comma with dot.
+        clean = clean.replace(/\./g, '').replace(/,/g, '.');
+      } else if (/\.\d{3}$/.test(clean)) {
+        // No comma, but ends with a dot followed by exactly 3 digits (e.g. "1.080", "3.700").
+        // This is a thousands separator in Brazilian format. Remove the dot.
+        clean = clean.replace(/\./g, '');
+      }
+      return parseFloat(clean) || 0;
+    };
+
     setIsParsingPdf(true);
     setPdfParseStatus(null);
     setPdfParseMessage('Lendo arquivo PDF...');
@@ -567,8 +582,8 @@ export default function App() {
           // Heuristic to fix MSMU-303940-3 issue: if the first two tokens are small (< 100), the first is likely Pallets and the second is Bags.
           let bagsIdx = 0;
           if (metricsTokens.length >= 2) {
-            const m0 = parseFloat(metricsTokens[0].replace(/,/g, ''));
-            const m1 = parseFloat(metricsTokens[1].replace(/,/g, ''));
+            const m0 = parseBrazilianOrStandardFloat(metricsTokens[0]);
+            const m1 = parseBrazilianOrStandardFloat(metricsTokens[1]);
             if (m0 < 150 && m1 < 150) {
               bagsIdx = 1;
             }
@@ -602,7 +617,7 @@ export default function App() {
           definiteSealDate: new Date().toISOString().split('T')[0],
           notes: '',
           photos: [],
-          bagsQuantity: containerBagsQuantity ? parseInt(containerBagsQuantity, 10) || 0 : 0,
+          bagsQuantity: containerBagsQuantity ? Math.round(parseBrazilianOrStandardFloat(containerBagsQuantity)) || 0 : 0,
           netWeight: netWeight || '',
           tara: tara || '',
           grossWeight: grossWeight || '',
