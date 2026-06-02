@@ -1,8 +1,14 @@
-const LOCALS_KEY = 'containtrack_locais';
-const EXPORTERS_KEY = 'containtrack_exportadores';
-const BOOKINGS_KEY = 'containtrack_bookings';
-const USER_KEY = 'containtrack_user';
-const INSPECTORS_KEY = 'containtrack_inspectors';
+import { useState, useEffect } from 'react';
+import { dbFirestore, storage } from './firebase';
+import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, getDoc } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+
+// Coleções
+const LOCALS_COL = 'locais';
+const EXPORTERS_COL = 'exportadores';
+const BOOKINGS_COL = 'bookings';
+const INSPECTORS_COL = 'inspectors';
+const USER_KEY = 'containtrack_user'; // Mantemos usuário local para simplificar auth por enquanto
 
 const defaultLocais = [
   { id: '1', name: 'Interport Logistica' },
@@ -23,210 +29,102 @@ const defaultInspectors = [
   { id: 'ins_2', name: 'Marcos Oliveira', email: 'marcos@unispect.com', phone: '(27) 99882-3344' }
 ];
 
-const defaultBookings = [
-  {
-    id: 'b1',
-    certificateNumber: 'UN1000/2026',
-    bookingNumber: 'BK-552091',
-    exporterId: '1',
-    startDate: '2026-05-28',
-    vesselVoyage: 'MSC INGRID - 26A',
-    bagsQuantity: 1250,
-    locationId: '1',
-    status: 'Finalizado',
-    type: 'Container Stuffing Report',
-    stuffingReportNumber: 'SR-998822',
-    mercadoria: 'café',
-    portoDestino: 'Porto de Roterdã',
-    containers: [
-      {
-        id: 'c1',
-        containerNumber: 'MSCU1234567',
-        containerType: "40' HC",
-        provisionalSeals: ['P-998811', 'P-998812'], // Múltiplos lacres provisórios
-        definiteSeal: 'D-112233',
-        fumigationDate: '2026-05-28',
-        fitoDate: '2026-05-28',
-        definiteSealDate: '2026-05-28',
-        notes: 'Estufagem realizada com sucesso. Carga sem avarias.',
-        photos: [
-          { id: 'ph1', url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=400&h=300&q=80', name: 'Porta Aberta' },
-          { id: 'ph2', url: 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?auto=format&fit=crop&w=400&h=300&q=80', name: 'Meio Lote' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'b2',
-    certificateNumber: 'UN1001/2026',
-    bookingNumber: 'BK-778210',
-    exporterId: '2',
-    startDate: '2026-05-29',
-    vesselVoyage: 'MAERSK LIMA - 410B',
-    bagsQuantity: 960,
-    locationId: '3',
-    status: 'Em andamento',
-    type: 'Redex Operation Report',
-    stuffingReportNumber: '',
-    mercadoria: 'Pimenta Preta',
-    portoDestino: 'Porto de Hamburgo',
-    containers: [
-      {
-        id: 'c2',
-        containerNumber: 'MRKU7766551',
-        containerType: "20' Dry",
-        provisionalSeals: ['P-443322'],
-        definiteSeal: '',
-        fumigationDate: '2026-05-29',
-        fitoDate: '',
-        definiteSealDate: '',
-        notes: 'Em processo de fumigação.',
-        photos: []
-      }
-    ]
+// Funções de Inicialização (se a coleção estiver vazia)
+async function initializeCollectionIfEmpty(colName, defaultData) {
+  const snap = await getDocs(collection(dbFirestore, colName));
+  if (snap.empty) {
+    for (const item of defaultData) {
+      await setDoc(doc(dbFirestore, colName, item.id), item);
+    }
   }
-];
+}
 
 export const db = {
-  init() {
-    // Limpa dados antigos incompatíveis para forçar carregamento da nova estrutura
-    const oldBookings = localStorage.getItem(BOOKINGS_KEY);
-    if (oldBookings) {
-      try {
-        const parsed = JSON.parse(oldBookings);
-        if (parsed.length > 0 && !Object.prototype.hasOwnProperty.call(parsed[0], 'mercadoria')) {
-          localStorage.removeItem(BOOKINGS_KEY);
-          localStorage.removeItem(LOCALS_KEY);
-          localStorage.removeItem(EXPORTERS_KEY);
-          localStorage.removeItem(USER_KEY);
-        }
-      } catch {
-        localStorage.clear();
-      }
-    }
-
-    if (!localStorage.getItem(LOCALS_KEY)) {
-      localStorage.setItem(LOCALS_KEY, JSON.stringify(defaultLocais));
-    }
-    if (!localStorage.getItem(EXPORTERS_KEY)) {
-      localStorage.setItem(EXPORTERS_KEY, JSON.stringify(defaultExportadores));
-    }
-    if (!localStorage.getItem(INSPECTORS_KEY)) {
-      localStorage.setItem(INSPECTORS_KEY, JSON.stringify(defaultInspectors));
-    }
-    if (!localStorage.getItem(BOOKINGS_KEY)) {
-      localStorage.setItem(BOOKINGS_KEY, JSON.stringify(defaultBookings));
-    }
+  async init() {
+    await initializeCollectionIfEmpty(LOCALS_COL, defaultLocais);
+    await initializeCollectionIfEmpty(EXPORTERS_COL, defaultExportadores);
+    await initializeCollectionIfEmpty(INSPECTORS_COL, defaultInspectors);
+    
     if (!localStorage.getItem(USER_KEY)) {
       localStorage.setItem(USER_KEY, JSON.stringify({ role: 'ADM', username: 'Supervisor Admin' }));
     }
   },
 
   // Locais
-  getLocais() {
-    this.init();
-    return JSON.parse(localStorage.getItem(LOCALS_KEY));
+  async getLocais() {
+    const snap = await getDocs(collection(dbFirestore, LOCALS_COL));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
-  saveLocal(local) {
-    const locais = this.getLocais();
-    if (local.id) {
-      const idx = locais.findIndex(l => l.id === local.id);
-      if (idx !== -1) locais[idx] = local;
-    } else {
-      local.id = 'loc_' + Date.now();
-      locais.push(local);
-    }
-    localStorage.setItem(LOCALS_KEY, JSON.stringify(locais));
-    this.syncPush();
+  async saveLocal(local) {
+    const id = local.id || 'loc_' + Date.now();
+    local.id = id;
+    await setDoc(doc(dbFirestore, LOCALS_COL, id), local);
     return local;
   },
-  deleteLocal(id) {
-    const locais = this.getLocais().filter(l => l.id !== id);
-    localStorage.setItem(LOCALS_KEY, JSON.stringify(locais));
-    this.syncPush();
+  async deleteLocal(id) {
+    await deleteDoc(doc(dbFirestore, LOCALS_COL, id));
   },
 
   // Exportadores
-  getExportadores() {
-    this.init();
-    return JSON.parse(localStorage.getItem(EXPORTERS_KEY));
+  async getExportadores() {
+    const snap = await getDocs(collection(dbFirestore, EXPORTERS_COL));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
-  saveExportador(exporter) {
-    const exporters = this.getExportadores();
-    if (exporter.id) {
-      const idx = exporters.findIndex(e => e.id === exporter.id);
-      if (idx !== -1) exporters[idx] = exporter;
-    } else {
-      exporter.id = 'exp_' + Date.now();
-      exporters.push(exporter);
-    }
-    localStorage.setItem(EXPORTERS_KEY, JSON.stringify(exporters));
-    this.syncPush();
+  async saveExportador(exporter) {
+    const id = exporter.id || 'exp_' + Date.now();
+    exporter.id = id;
+    await setDoc(doc(dbFirestore, EXPORTERS_COL, id), exporter);
     return exporter;
   },
-  deleteExportador(id) {
-    const exporters = this.getExportadores().filter(e => e.id !== id);
-    localStorage.setItem(EXPORTERS_KEY, JSON.stringify(exporters));
-    this.syncPush();
+  async deleteExportador(id) {
+    await deleteDoc(doc(dbFirestore, EXPORTERS_COL, id));
   },
 
   // Inspetores
-  getInspectors() {
-    this.init();
-    return JSON.parse(localStorage.getItem(INSPECTORS_KEY)) || defaultInspectors;
+  async getInspectors() {
+    const snap = await getDocs(collection(dbFirestore, INSPECTORS_COL));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
-  saveInspector(inspector) {
-    const inspectors = this.getInspectors();
-    if (inspector.id) {
-      const idx = inspectors.findIndex(i => i.id === inspector.id);
-      if (idx !== -1) inspectors[idx] = inspector;
-    } else {
-      inspector.id = 'ins_' + Date.now();
-      inspectors.push(inspector);
-    }
-    localStorage.setItem(INSPECTORS_KEY, JSON.stringify(inspectors));
-    this.syncPush();
+  async saveInspector(inspector) {
+    const id = inspector.id || 'ins_' + Date.now();
+    inspector.id = id;
+    await setDoc(doc(dbFirestore, INSPECTORS_COL, id), inspector);
     return inspector;
   },
-  deleteInspector(id) {
-    const inspectors = this.getInspectors().filter(i => i.id !== id);
-    localStorage.setItem(INSPECTORS_KEY, JSON.stringify(inspectors));
-    this.syncPush();
+  async deleteInspector(id) {
+    await deleteDoc(doc(dbFirestore, INSPECTORS_COL, id));
   },
 
   // Bookings
-  getBookings() {
-    this.init();
-    return JSON.parse(localStorage.getItem(BOOKINGS_KEY));
+  async getBookings() {
+    const snap = await getDocs(collection(dbFirestore, BOOKINGS_COL));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
-  saveBooking(booking) {
-    const bookings = this.getBookings();
-    if (booking.id) {
-      const idx = bookings.findIndex(b => b.id === booking.id);
-      if (idx !== -1) bookings[idx] = booking;
-    } else {
-      booking.id = 'bk_' + Date.now();
-      booking.certificateNumber = this.generateNextCertificateNumber(bookings);
-      booking.containers = booking.containers || [];
-      bookings.push(booking);
+  async saveBooking(booking) {
+    const id = booking.id || 'bk_' + Date.now();
+    booking.id = id;
+    
+    if (!booking.certificateNumber) {
+      booking.certificateNumber = await this.generateNextCertificateNumber();
     }
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(bookings));
-    this.syncPush();
+    if (!booking.containers) booking.containers = [];
+    
+    await setDoc(doc(dbFirestore, BOOKINGS_COL, id), booking);
     return booking;
   },
-  deleteBooking(id) {
-    const bookings = this.getBookings().filter(b => b.id !== id);
-    localStorage.setItem(BOOKINGS_KEY, JSON.stringify(bookings));
-    this.syncPush();
+  async deleteBooking(id) {
+    await deleteDoc(doc(dbFirestore, BOOKINGS_COL, id));
   },
-  generateNextCertificateNumber(bookingsList) {
-    const list = bookingsList || this.getBookings();
+  async generateNextCertificateNumber() {
+    const list = await this.getBookings();
     let maxNum = 999;
     list.forEach(b => {
-      const match = b.certificateNumber.match(/^UN(\d+)\/2026$/);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxNum) maxNum = num;
+      if (b.certificateNumber) {
+        const match = b.certificateNumber.match(/^UN(\d+)\/2026$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
       }
     });
     return `UN${maxNum + 1}/2026`;
@@ -234,20 +132,11 @@ export const db = {
 
   // Perfil ativo
   getUser() {
-    this.init();
-    return JSON.parse(localStorage.getItem(USER_KEY));
+    const usr = localStorage.getItem(USER_KEY);
+    return usr ? JSON.parse(usr) : { role: 'ADM', username: 'Supervisor Admin' };
   },
   setUser(user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
-  },
-
-  getServerUrl() {
-    const savedIp = localStorage.getItem('containtrack_server_ip');
-    if (savedIp) {
-      const base = savedIp.includes('://') ? savedIp : `http://${savedIp}:3000`;
-      return `${base}/api/data`;
-    }
-    return '/api/data';
   },
 
   async uploadPhoto(file) {
@@ -256,31 +145,16 @@ export const db = {
       reader.onloadend = async () => {
         const base64 = reader.result;
         const extension = file.name.split('.').pop() || 'jpg';
-        const filename = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
+        const filename = `photos/photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
         
         try {
-          const savedIp = localStorage.getItem('containtrack_server_ip');
-          let urlPath = '/api/upload';
-          if (savedIp) {
-            const base = savedIp.includes('://') ? savedIp : `http://${savedIp}:3000`;
-            urlPath = `${base}/api/upload`;
-          }
-          const response = await fetch(urlPath, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename, base64 })
-          });
-          
-          if (!response.ok) {
-            throw new Error('Upload failed');
-          }
-          
-          const result = await response.json();
-          // Normalize URL to relative path to allow proxying and prevent port 3000 firewall blocks
-          const relativeUrl = result.url.replace(/^https?:\/\/[^/]+/, '');
-          resolve(relativeUrl);
+          const storageRef = ref(storage, filename);
+          await uploadString(storageRef, base64, 'data_url');
+          const downloadURL = await getDownloadURL(storageRef);
+          resolve(downloadURL);
         } catch (error) {
-          console.warn("Upload server offline, falling back to base64", error);
+          console.error("Firebase Storage Upload failed, fallback to base64", error);
+          // If storage fails, we just save base64 (not recommended for production, but a fallback)
           resolve(base64);
         }
       };
@@ -291,43 +165,30 @@ export const db = {
     });
   },
 
-  async syncPull() {
-    try {
-      const response = await fetch(this.getServerUrl());
-      if (!response.ok) return false;
-      const data = await response.json();
-      
-      const oldBookings = localStorage.getItem(BOOKINGS_KEY);
-      const newBookings = JSON.stringify(data.bookings || []);
-      const hasChanged = oldBookings !== newBookings;
-      
-      if (data.bookings) localStorage.setItem(BOOKINGS_KEY, newBookings);
-      if (data.locais) localStorage.setItem(LOCALS_KEY, JSON.stringify(data.locais));
-      if (data.exportadores) localStorage.setItem(EXPORTERS_KEY, JSON.stringify(data.exportadores));
-      if (data.inspectors) localStorage.setItem(INSPECTORS_KEY, JSON.stringify(data.inspectors));
-      
-      return hasChanged;
-    } catch {
-      return false;
-    }
-  },
-
-  async syncPush() {
-    try {
-      const payload = {
-        bookings: JSON.parse(localStorage.getItem(BOOKINGS_KEY)) || [],
-        locais: JSON.parse(localStorage.getItem(LOCALS_KEY)) || [],
-        exportadores: JSON.parse(localStorage.getItem(EXPORTERS_KEY)) || [],
-        inspectors: JSON.parse(localStorage.getItem(INSPECTORS_KEY)) || []
-      };
-
-      await fetch(this.getServerUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    } catch {
-      // Ignora erro se o servidor estiver offline
-    }
-  }
+  // Métodos de Sync Obsoletos (mantidos vazios para não quebrar componentes não migrados)
+  async syncPull() { return false; },
+  async syncPush() {}
 };
+
+// --- REACT HOOKS PARA TEMPO REAL --- //
+
+export function useCollectionRealtime(colName) {
+  const [data, setData] = useState([]);
+  
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(dbFirestore, colName), (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setData(items);
+    }, (error) => {
+      console.error(`Error fetching ${colName}:`, error);
+    });
+    return () => unsubscribe();
+  }, [colName]);
+  
+  return data;
+}
+
+export function useLocais() { return useCollectionRealtime(LOCALS_COL); }
+export function useExportadores() { return useCollectionRealtime(EXPORTERS_COL); }
+export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
+export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }

@@ -1,21 +1,22 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, Plus, FileText, X } from 'lucide-react';
-import { db } from '../db';
+import { db, useBookings, useLocais, useExportadores } from '../db';
 import ContainerDetail from './ContainerDetail';
 import BottomDrawer from './BottomDrawer';
 
 export default function BookingDetail({ bookingId, user, onBack, onOpenReport, onDataChange }) {
+  
+  const bookings = useBookings();
+  const exporters = useExportadores();
+  const locations = useLocais();
   const [prevBookingId, setPrevBookingId] = useState(bookingId);
-  const [booking, setBooking] = useState(() => db.getBookings().find(b => b.id === bookingId));
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [booking, setBooking] = useState(() => bookings.find(b => b.id === bookingId));
 
-  if (bookingId !== prevBookingId) {
-    setPrevBookingId(bookingId);
-    setBooking(db.getBookings().find(b => b.id === bookingId));
-  }
+  useEffect(() => {
+    const bk = bookings.find(b => b.id === bookingId);
+    if (bk) setBooking(bk);
+  }, [bookings, bookingId]);
 
-  const exporters = db.getExportadores();
-  const locations = db.getLocais();
 
   // States para gerenciar os drawers no Mobile
   const [drawerOpen, setDrawerOpen] = useState(null);
@@ -42,13 +43,13 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
   const canAddContainer = isAdm || isInspector;
 
   // Salvar alterações de campos do booking
-  const updateBookingField = (field, value) => {
+  const updateBookingField = async (field, value) => {
     const updated = { ...booking, [field]: value };
     if (field === 'type' && value === 'Redex Operation Report') {
       updated.stuffingReportNumber = '';
     }
     setBooking(updated);
-    db.saveBooking(updated);
+    await db.saveBooking(updated);
     if (onDataChange) onDataChange();
   };
 

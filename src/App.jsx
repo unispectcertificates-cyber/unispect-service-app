@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
-import { db } from './db';
+import { db, useBookings, useLocais, useExportadores } from './db';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -17,7 +17,25 @@ export default function App() {
       setIsMobileOrTablet(window.innerWidth <= 1024);
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    
+    // DEBUG: Global error handler to catch silent UI freezes
+    const origError = window.onerror;
+    window.onerror = function(msg, url, line, col, error) {
+      alert("ERRO NO SISTEMA: " + msg + "\nLinha: " + line);
+      if (origError) return origError(msg, url, line, col, error);
+      return false;
+    };
+    const origUnhandled = window.onunhandledrejection;
+    window.onunhandledrejection = function(event) {
+      alert("ERRO ASSÍNCRONO: " + (event.reason ? event.reason.message || event.reason : 'Unknown'));
+      if (origUnhandled) return origUnhandled(event);
+    };
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.onerror = origError;
+      window.onunhandledrejection = origUnhandled;
+    };
   }, []);
 
   const [currentTab, setCurrentTab] = useState(() => {
@@ -33,7 +51,9 @@ export default function App() {
   const [user, setUser] = useState(db.getUser());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverIp, setServerIp] = useState(localStorage.getItem('containtrack_server_ip') || '');
-  const [bookings, setBookings] = useState(db.getBookings());
+  const bookings = useBookings();
+  const exportadores = useExportadores();
+  const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
   
@@ -78,15 +98,7 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
 
     // Sincronização periódica em background (Polling leve de 3 segundos)
-    const doSync = async () => {
-      const hasChanged = await db.syncPull();
-      if (hasChanged) {
-        setBookings(db.getBookings());
-      }
-    };
-    // Sincroniza imediatamente na montagem
-    doSync();
-    const interval = setInterval(doSync, 3000);
+    // Sincronização via Firebase
 
     // Detecção automática de conexão online/offline
     const handleOnline = () => setIsOnline(true);
@@ -96,15 +108,12 @@ export default function App() {
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      clearInterval(interval);
-      window.removeEventListener('online', handleOnline);
+            window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  const handleRefreshData = () => {
-    setBookings(db.getBookings());
-  };
+  const handleRefreshData = () => {};
 
   // Estatísticas operacionais dos Bookings
   const countPendentes = bookings.filter(b => b.status === 'Pendente').length;
@@ -118,8 +127,8 @@ export default function App() {
       b.certificateNumber.toLowerCase().includes(term) ||
       b.bookingNumber.toLowerCase().includes(term) ||
       (b.vesselVoyage || '').toLowerCase().includes(term) ||
-      (db.getExportadores().find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
-      (db.getLocais().find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term);
+      (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
+      (locais.find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term);
 
     const matchesStatus = statusFilter === 'Todos' || b.status === statusFilter;
 
@@ -127,7 +136,7 @@ export default function App() {
   });
 
   // Criar booking (Salvar)
-  const handleCreateBooking = (e) => {
+  const handleCreateBooking = async (e) => {
     e.preventDefault();
     if (!newBookingData.bookingNumber || !newBookingData.exporterId || !newBookingData.locationId) {
       alert('Preencha os campos obrigatórios.');
@@ -136,7 +145,7 @@ export default function App() {
 
     const navioVoy = `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`;
 
-    const created = db.saveBooking({
+    const created = await db.saveBooking({
       ...newBookingData,
       vesselVoyage: navioVoy,
       bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
@@ -280,61 +289,78 @@ export default function App() {
       }
 
       // 3. Exporter
+      // 3. Exporter
       let exporterId = '';
       let exporterNameExtracted = '';
-      const exporterMatch = fullText.match(/(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/i);
-      if (exporterMatch && exporterMatch[1]) {
-        let rawName = exporterMatch[1].trim();
-        const stopKeywords = [
-          /\bcnpj\b/i,
-          /\bimportador\b/i,
-          /\bdestino\b/i,
-          /\barmador\b/i,
-          /\bagente\b/i,
-          /\brecinto\b/i,
-          /\bquantidade\b/i,
-          /\bmercadoria\b/i,
-          /\bmarca\b/i
-        ];
-        for (const kw of stopKeywords) {
-          const idx = rawName.search(kw);
-          if (idx !== -1) {
-            rawName = rawName.substring(0, idx).trim();
+      
+      const expMatchIndex = fullText.search(/\b(?:exportador|exporter|shipper|remetente|embarcador)\b/i);
+      if (expMatchIndex !== -1) {
+        let chunk = fullText.substring(expMatchIndex, expMatchIndex + 300);
+        let lines = chunk.split(/\n|\r/);
+        for (let line of lines) {
+          // Remove a palavra chave do inicio, se houver
+          let cleanLine = line.replace(/^(?:exportador|exporter|shipper|remetente|embarcador)[\s:]*/i, '').trim();
+          cleanLine = cleanLine.replace(/^[:\-\s]+/, '').trim();
+          
+          if (cleanLine.length > 3) {
+            const stopKeywords = [/\bcnpj\b/i, /\bimportador\b/i, /\bdestino\b/i, /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\bmarca\b/i, /\bendereco\b/i, /\baddress\b/i, /\bnavio\b/i, /\bviagem\b/i, /\bbooking\b/i];
+            for (const kw of stopKeywords) {
+              const idx = cleanLine.search(kw);
+              if (idx !== -1) cleanLine = cleanLine.substring(0, idx).trim();
+            }
+            
+            if (cleanLine.length > 4) {
+              exporterNameExtracted = cleanLine.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+              break;
+            }
           }
         }
-        exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const exporters = db.getExportadores();
+      const exporters = exportadores;
+
       if (exporterNameExtracted) {
         const exactMatch = exporters.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
         if (exactMatch) {
           exporterId = exactMatch.id;
         } else {
           const partialMatch = exporters.find(exp => {
-            const expWords = exp.name.split(' ').filter(w => w.length > 4);
-            return expWords.some(w => exporterNameExtracted.toLowerCase().includes(w.toLowerCase()));
+            const normalize = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(exportacao|importacao|exportadora|comercio|ltda|s\.a\.|s\/a|sa|cia|companhia|logistica|cafe|industria|agroindustrial|e|de|da|do|dos|das)\b/g, '').replace(/\s+/g, ' ').trim();
+            
+            const cleanDb = normalize(exp.name);
+            const cleanExt = normalize(exporterNameExtracted);
+            
+            if (cleanDb.length > 2 && cleanExt.length > 2) {
+              return cleanDb.includes(cleanExt) || cleanExt.includes(cleanDb);
+            }
+            return false;
           });
           if (partialMatch) {
             exporterId = partialMatch.id;
           } else {
-            // Dynamically register new exporter
-            const newExp = db.saveExportador({
+            // Dynamically register new exporter (Sync ID generation to prevent UI freeze if Firebase is slow)
+            const newId = 'exp_' + Date.now();
+            const newExp = {
+              id: newId,
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
-            });
-            exporterId = newExp.id;
+            };
+            db.saveExportador(newExp).catch(e => console.error("Erro background saveExportador:", e));
+            exporterId = newId;
+            // Push exporter directly via real-time firebase updates instead of setExportadores
+            // as useExportadores doesn't expose a setter and will trigger a crash.
           }
         }
       } else {
+        const ignoreFallback = ['exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria'];
         for (const exp of exporters) {
           if (fullText.toLowerCase().includes(exp.name.toLowerCase())) {
             exporterId = exp.id;
             break;
           }
-          const signWords = exp.name.split(' ').filter(w => w.length > 4);
-          if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+          const signWords = exp.name.split(' ').filter(w => w.length > 4 && !ignoreFallback.includes(w.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+          if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
             exporterId = exp.id;
             break;
           }
@@ -343,14 +369,15 @@ export default function App() {
 
       // 4. Location of Operation
       let locationId = '';
-      const locais = db.getLocais();
+      const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
+      
       for (const loc of locais) {
         if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
           locationId = loc.id;
           break;
         }
-        const signWords = loc.name.split(' ').filter(w => w.length > 4);
-        if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+        const signWords = loc.name.split(' ').filter(w => w.length > 4 && !ignoreWordsLoc.includes(w.toLowerCase()));
+        if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
           locationId = loc.id;
           break;
         }
@@ -449,12 +476,23 @@ export default function App() {
       }
 
       // 10. Parse Containers and Seals
-      const containerRegex = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
+      const containerRegex = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/gi;
       const containerMatches = [];
       let match;
       while ((match = containerRegex.exec(fullText)) !== null) {
+        const rawNum = match[1].trim().toUpperCase();
+        
+        // Verificação extra forçada no Javascript (à prova de falhas de regex)
+        const prefixChars = rawNum.replace(/[^A-Z]/g, '');
+        if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) {
+          continue; // Se a 4ª letra não for U, J ou Z, ignora.
+        }
+        if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) {
+          continue; // Força ignorar qualquer coisa que comece com MLB (Maersk Line Booking) ou contenha MLBR (Lacres)
+        }
+        
         containerMatches.push({
-          number: match[1].trim().toUpperCase(),
+          number: rawNum,
           index: match.index,
           length: match[0].length
         });
@@ -473,16 +511,12 @@ export default function App() {
         const containerNumber = currentMatch.number;
         const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
         
+        const maxSearch = Math.min(rawTokens.length, 15);
         let brandIndex = -1;
-        for (let tIdx = 0; tIdx < rawTokens.length; tIdx++) {
+        for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
           if (rawTokens[tIdx].includes('/') && rawTokens[tIdx].split('/').length === 3) {
-            brandIndex = tIdx;
-            break;
-          }
-        }
-        if (brandIndex === -1) {
-          for (let tIdx = 0; tIdx < rawTokens.length; tIdx++) {
-            if (rawTokens[tIdx].match(/\d+\/\d+\/\d+/)) {
+            // Ignorar datas
+            if (!rawTokens[tIdx].match(/\d{2}\/\d{2}\/\d{2,4}/)) {
               brandIndex = tIdx;
               break;
             }
@@ -490,21 +524,19 @@ export default function App() {
         }
 
         let typeIndex = -1;
-        if (brandIndex !== -1) {
-          for (let tIdx = brandIndex + 1; tIdx < rawTokens.length; tIdx++) {
-            const lowerToken = rawTokens[tIdx].toLowerCase();
-            if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer') || lowerToken.includes('"') || lowerToken.includes('\'')) {
-              typeIndex = tIdx;
-              break;
-            }
+        for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
+          const lowerToken = rawTokens[tIdx].toLowerCase();
+          if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer') || lowerToken.includes('"') || lowerToken.includes('\'')) {
+            typeIndex = tIdx;
+            break;
           }
         }
+        
         if (typeIndex === -1) {
-          for (let tIdx = 1; tIdx < rawTokens.length; tIdx++) {
-            const lowerToken = rawTokens[tIdx].toLowerCase();
-            if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer')) {
-              typeIndex = tIdx;
-              break;
+          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
+            if (rawTokens[tIdx] === '40' || rawTokens[tIdx] === '20') {
+               typeIndex = tIdx;
+               break;
             }
           }
         }
@@ -637,20 +669,20 @@ export default function App() {
   };
 
   // Ações da Tabela
-  const handleFinalizeBooking = (id, e) => {
+  const handleFinalizeBooking = async (id, e) => {
     e.stopPropagation();
     const bk = bookings.find(b => b.id === id);
     if (bk) {
       bk.status = 'Finalizado';
-      db.saveBooking(bk);
+      await db.saveBooking(bk);
       handleRefreshData();
     }
   };
 
-  const handleDeleteBooking = (id, e) => {
+  const handleDeleteBooking = async (id, e) => {
     e.stopPropagation();
     if (confirm('Deseja excluir este booking e todos os seus containers?')) {
-      db.deleteBooking(id);
+      await db.deleteBooking(id);
       handleRefreshData();
     }
   };
@@ -1125,8 +1157,8 @@ export default function App() {
                       </thead>
                       <tbody>
                         {filteredBookings.map(b => {
-                          const exp = db.getExportadores().find(e => e.id === b.exporterId)?.name || 'N/A';
-                          const loc = db.getLocais().find(l => l.id === b.locationId)?.name || 'N/A';
+                          const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                          const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
                           
                           const statusColors = {
                             'Pendente': 'badge-pending',
@@ -1185,8 +1217,8 @@ export default function App() {
                   {/* Lista de Cards de Bookings (Apenas no mobile) */}
                   <div className="bookings-cards-mobile">
                     {filteredBookings.map(b => {
-                      const exp = db.getExportadores().find(e => e.id === b.exporterId)?.name || 'N/A';
-                      const loc = db.getLocais().find(l => l.id === b.locationId)?.name || 'N/A';
+                      const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                      const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
                       const statusColors = {
                         'Pendente': 'badge-pending',
                         'Em andamento': 'badge-progress',
@@ -1492,7 +1524,7 @@ export default function App() {
                 <label>Nº Certificado (Auto)</label>
                 <input 
                   type="text" 
-                  value={db.generateNextCertificateNumber(bookings)}
+                  value="Gerado Automaticamente"
                   disabled
                   style={{ 
                     backgroundColor: 'var(--bg-tertiary)', 
@@ -1584,7 +1616,7 @@ export default function App() {
                   required
                 >
                   <option value="">Selecione...</option>
-                  {db.getExportadores().map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
+                  {exportadores.map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
                 </select>
               </div>
 
@@ -1596,7 +1628,7 @@ export default function App() {
                   required
                 >
                   <option value="">Selecione...</option>
-                  {db.getLocais().map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                  {locais.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                 </select>
               </div>
 

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Plus, Edit2, Trash2, MapPin } from 'lucide-react';
-import { db } from '../db';
+import { db, useLocais } from '../db';
 
 export default function LocaisList({ onDataChange }) {
-  const [locais, setLocais] = useState(db.getLocais());
+  const locais = useLocais();
   const [showModal, setShowModal] = useState(false);
   const [editingLocal, setEditingLocal] = useState(null);
   const [formData, setFormData] = useState({ name: '' });
@@ -20,27 +20,23 @@ export default function LocaisList({ onDataChange }) {
     setShowModal(true);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('Tem certeza que deseja excluir este local?')) {
-      db.deleteLocal(id);
-      const updated = db.getLocais();
-      setLocais(updated);
-      if (onDataChange) onDataChange();
+      await db.deleteLocal(id);
+            if (onDataChange) onDataChange();
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    db.saveLocal({
+    await db.saveLocal({
       id: editingLocal ? editingLocal.id : undefined,
       ...formData
     });
 
-    const updated = db.getLocais();
-    setLocais(updated);
-    setShowModal(false);
+        setShowModal(false);
     if (onDataChange) onDataChange();
   };
 

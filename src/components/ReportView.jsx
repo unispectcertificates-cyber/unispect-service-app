@@ -1,16 +1,17 @@
 import { ChevronLeft, Download, Printer } from 'lucide-react';
-import { db } from '../db';
+import { db, useLocais, useExportadores, useBookings } from '../db';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
-  const exporters = db.getExportadores();
-  const locations = db.getLocais();
+  const exporters = useExportadores();
+  const locations = useLocais();
+  const bookings = useBookings();
   
   const booking = reportType === 'operational' && bookingId 
-    ? db.getBookings().find(b => b.id === bookingId) 
+    ? bookings.find(b => b.id === bookingId) 
     : null;
     
   const bookingsList = reportType === 'administrative' 
-    ? db.getBookings() 
+    ? bookings 
     : [];
 
   // Exportar Word (.docx) via Blob HTML de forma robusta e compatível com Word
@@ -157,8 +158,8 @@ export default function ReportView({ bookingId, reportType, onBack }) {
 
           <p style="font-size: 16pt; text-align: justify; margin: 15px 0; line-height: 1.5; font-family: Arial, sans-serif;">
             ${booking.type === 'Container Stuffing Report' 
-              ? `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of INTERPORT LOGISTICA LTDA, supervised the coffee cargo stuffing operation, fumigation process, MAPA (Brazilian Ministry of Agriculture) inspection, and the application of the carrier's final seal to the containers at Interport Terminal.<br/><br/>The operation was carried out under our supervision, and all activities were performed in accordance with the applicable procedures, regulations, and instructions in force at the time of loading.`
-              : `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of INTERPORT LOGISTICA LTDA, supervised all operations carried out within the REDEX bonded area, including the receiving process of the containers, the inspection conducted by MAPA (Brazilian Ministry of Agriculture and Livestock), and the application of the carrier's final seal at the Interport REDEX Facility in Vila Velha, Brazil.<br/><br/>All operations were performed under our supervision, and all activities were conducted in accordance with the applicable procedures, regulations, and requirements in force at the time of the operation.`
+              ? `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of ${exp.toUpperCase()}, supervised the coffee cargo stuffing operation, fumigation process, MAPA (Brazilian Ministry of Agriculture) inspection, and the application of the carrier's final seal to the containers at ${loc}.<br/><br/>The operation was carried out under our supervision, and all activities were performed in accordance with the applicable procedures, regulations, and instructions in force at the time of loading.`
+              : `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of ${exp.toUpperCase()}, supervised all operations carried out within the REDEX bonded area, including the receiving process of the containers, the inspection conducted by MAPA (Brazilian Ministry of Agriculture and Livestock), and the application of the carrier's final seal at the ${loc} Facility in Vila Velha, Brazil.<br/><br/>All operations were performed under our supervision, and all activities were conducted in accordance with the applicable procedures, regulations, and requirements in force at the time of the operation.`
             }
           </p>
 
@@ -494,8 +495,8 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       {/* Parágrafo de Certificação Exato */}
                       <p style={{ fontSize: '16px', textAlign: 'justify', margin: '8px 0', color: '#111', lineHeight: '1.5', fontWeight: '500', whiteSpace: 'pre-line' }}>
                         {booking.type === 'Container Stuffing Report'
-                          ? `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of INTERPORT LOGISTICA LTDA, supervised the coffee cargo stuffing operation, fumigation process, MAPA (Brazilian Ministry of Agriculture) inspection, and the application of the carrier's final seal to the containers at Interport Terminal.\n\nThe operation was carried out under our supervision, and all activities were performed in accordance with the applicable procedures, regulations, and instructions in force at the time of loading.`
-                          : `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of INTERPORT LOGISTICA LTDA, supervised all operations carried out within the REDEX bonded area, including the receiving process of the containers, the inspection conducted by MAPA (Brazilian Ministry of Agriculture and Livestock), and the application of the carrier's final seal at the Interport REDEX Facility in Vila Velha, Brazil.\n\nAll operations were performed under our supervision, and all activities were conducted in accordance with the applicable procedures, regulations, and requirements in force at the time of the operation.`
+                          ? `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of ${page.expName.toUpperCase()}, supervised the coffee cargo stuffing operation, fumigation process, MAPA (Brazilian Ministry of Agriculture) inspection, and the application of the carrier's final seal to the containers at ${page.locName}.\n\nThe operation was carried out under our supervision, and all activities were performed in accordance with the applicable procedures, regulations, and instructions in force at the time of loading.`
+                          : `WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of ${page.expName.toUpperCase()}, supervised all operations carried out within the REDEX bonded area, including the receiving process of the containers, the inspection conducted by MAPA (Brazilian Ministry of Agriculture and Livestock), and the application of the carrier's final seal at the ${page.locName} Facility in Vila Velha, Brazil.\n\nAll operations were performed under our supervision, and all activities were conducted in accordance with the applicable procedures, regulations, and requirements in force at the time of the operation.`
                         }
                       </p>
 

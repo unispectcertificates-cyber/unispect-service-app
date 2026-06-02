@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Plus, Mail, Phone, UserPlus } from 'lucide-react';
-import { db } from '../db';
+import { db, useInspectors } from '../db';
 
 export default function InspectorsList({ onDataChange }) {
-  const [inspectors, setInspectors] = useState(db.getInspectors());
+  const inspectors = useInspectors();
   const [showModal, setShowModal] = useState(false);
   const [editingIns, setEditingIns] = useState(null);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '' });
@@ -20,27 +20,23 @@ export default function InspectorsList({ onDataChange }) {
     setShowModal(true);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('Tem certeza que deseja excluir este inspetor?')) {
-      db.deleteInspector(id);
-      const updated = db.getInspectors();
-      setInspectors(updated);
-      if (onDataChange) onDataChange();
+      await db.deleteInspector(id);
+            if (onDataChange) onDataChange();
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    db.saveInspector({
+    await db.saveInspector({
       id: editingIns ? editingIns.id : undefined,
       ...formData
     });
 
-    const updated = db.getInspectors();
-    setInspectors(updated);
-    setShowModal(false);
+        setShowModal(false);
     if (onDataChange) onDataChange();
   };
 
