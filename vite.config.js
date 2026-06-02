@@ -4,7 +4,7 @@ import babel from '@rolldown/plugin-babel'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/unispectservice/',
+  base: '/unispect-service-app/',
   plugins: [
     react(),
     babel({
