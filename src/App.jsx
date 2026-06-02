@@ -315,7 +315,7 @@ export default function App() {
         exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const exporters = db.getExportadores();
+      const exporters = exportadores;
       if (exporterNameExtracted) {
         const exactMatch = exporters.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
         if (exactMatch) {
@@ -329,7 +329,7 @@ export default function App() {
             exporterId = partialMatch.id;
           } else {
             // Dynamically register new exporter
-            const newExp = db.saveExportador({
+            const newExp = await db.saveExportador({
               name: exporterNameExtracted,
               email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
               phone: ''
