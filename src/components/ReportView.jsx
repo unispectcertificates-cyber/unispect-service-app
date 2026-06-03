@@ -304,6 +304,43 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     document.body.removeChild(link);
   };
 
+  const handleExportExcel = () => {
+    const filename = `Relatorio_Geral_Administrativo_${new Date().toISOString().split('T')[0]}.csv`;
+    
+    // Configura o separador para que o Excel abra corretamente
+    let csvContent = "sep=;\n";
+    
+    // Cabeçalho
+    csvContent += "Certificado;Booking;Exportador;Navio / Viagem;Local de Operação;Qtd. Containers;Qtd. Sacas;Status\n";
+    
+    // Linhas
+    bookingsList.forEach(b => {
+      const exp = exporters.find(e => e.id === b.exporterId)?.name || 'N/A';
+      const loc = locations.find(l => l.id === b.locationId)?.name || 'N/A';
+      
+      // Sanitiza strings para não quebrar o CSV
+      const cert = b.certificateNumber || '';
+      const book = b.bookingNumber || '';
+      const expName = exp.replace(/;/g, ',');
+      const vessel = (b.vesselVoyage || '').replace(/;/g, ',');
+      const locName = loc.replace(/;/g, ',');
+      const containersCount = b.containers?.length || 0;
+      const bags = b.bagsQuantity || 0;
+      const status = (b.status || 'Pendente').toUpperCase();
+      
+      csvContent += `${cert};${book};${expName};${vessel};${locName};${containersCount};${bags};${status}\n`;
+    });
+    
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Algoritmo matemático para distribuir as fotos minimizando espaços vazios e número de páginas
   const distributePhotos = (N) => {
     if (N === 0) return [];
@@ -433,6 +470,11 @@ export default function ReportView({ bookingId, reportType, onBack }) {
         </button>
 
         <div style={{ display: 'flex', gap: '8px' }}>
+          {reportType === 'administrative' && (
+            <button onClick={handleExportExcel} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700' }}>
+              📊 Exportar Excel
+            </button>
+          )}
           <button onClick={handleExportWord} className="btn btn-secondary" style={{ backgroundColor: 'var(--bg-tertiary)', border: 'none' }}>
             <Download size={16} /> Export Word
           </button>
