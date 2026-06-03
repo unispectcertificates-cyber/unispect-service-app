@@ -1050,10 +1050,6 @@ export default function App() {
               </div>
             )}
           </div>
-
-          <button onClick={handleLogout} className="btn btn-secondary" style={{ padding: '8px 14px' }}>
-            Sair
-          </button>
         </div>
       </header>
 
