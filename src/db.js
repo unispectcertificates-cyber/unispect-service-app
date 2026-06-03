@@ -8,7 +8,8 @@ const LOCALS_COL = 'locais';
 const EXPORTERS_COL = 'exportadores';
 const BOOKINGS_COL = 'bookings';
 const INSPECTORS_COL = 'inspectors';
-const USER_KEY = 'containtrack_user'; // Mantemos usuário local para simplificar auth por enquanto
+const USERS_COL = 'usuarios';
+const USER_KEY = 'containtrack_user';
 
 const defaultLocais = [
   { id: '1', name: 'Interport Logistica' },
@@ -29,6 +30,11 @@ const defaultInspectors = [
   { id: 'ins_2', name: 'Marcos Oliveira', email: 'marcos@unispect.com', phone: '(27) 99882-3344' }
 ];
 
+const defaultUsers = [
+  { id: 'usr_master', name: 'Master Supervisor', login: 'admin', password: '123', role: 'ADM' },
+  { id: 'usr_inspector', name: 'Carlos Santos', login: 'carlos', password: '123', role: 'Inspector' }
+];
+
 // Funções de Inicialização (se a coleção estiver vazia)
 async function initializeCollectionIfEmpty(colName, defaultData) {
   const snap = await getDocs(collection(dbFirestore, colName));
@@ -44,10 +50,7 @@ export const db = {
     await initializeCollectionIfEmpty(LOCALS_COL, defaultLocais);
     await initializeCollectionIfEmpty(EXPORTERS_COL, defaultExportadores);
     await initializeCollectionIfEmpty(INSPECTORS_COL, defaultInspectors);
-    
-    if (!localStorage.getItem(USER_KEY)) {
-      localStorage.setItem(USER_KEY, JSON.stringify({ role: 'ADM', username: 'Supervisor Admin' }));
-    }
+    await initializeCollectionIfEmpty(USERS_COL, defaultUsers);
   },
 
   // Locais
@@ -133,10 +136,29 @@ export const db = {
   // Perfil ativo
   getUser() {
     const usr = localStorage.getItem(USER_KEY);
-    return usr ? JSON.parse(usr) : { role: 'ADM', username: 'Supervisor Admin' };
+    return usr ? JSON.parse(usr) : null;
   },
   setUser(user) {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_KEY);
+    }
+  },
+
+  // Usuários
+  async getUsers() {
+    const snap = await getDocs(collection(dbFirestore, USERS_COL));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  async saveUser(user) {
+    const id = user.id || 'usr_' + Date.now();
+    user.id = id;
+    await setDoc(doc(dbFirestore, USERS_COL, id), user);
+    return user;
+  },
+  async deleteUser(id) {
+    await deleteDoc(doc(dbFirestore, USERS_COL, id));
   },
 
   async uploadPhoto(file) {
@@ -223,3 +245,4 @@ export function useLocais() { return useCollectionRealtime(LOCALS_COL); }
 export function useExportadores() { return useCollectionRealtime(EXPORTERS_COL); }
 export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
+export function useUsers() { return useCollectionRealtime(USERS_COL); }

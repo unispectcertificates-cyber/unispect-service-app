@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Camera, Image, Trash2, ArrowLeft, ArrowRight, RefreshCw, X } from 'lucide-react';
 import { db, useBookings, useExportadores, useLocais } from '../db';
 
-export default function MobileAppView({ user, onRoleChange, hideHeader = false }) {
+export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   const [searchQuery, setSearchQuery] = useState('');
   const bookings = useBookings();
   const exportadores = useExportadores();
@@ -199,25 +199,24 @@ export default function MobileAppView({ user, onRoleChange, hideHeader = false }
             <span>{isSyncing ? 'Sincronizando...' : syncStatus === 'success' ? 'Sincronizado!' : 'Sincronizar'}</span>
           </button>
 
-          {/* Testar Role */}
-          <select 
-            value={user.role} 
-            onChange={e => onRoleChange(e.target.value)}
-            style={{
-              padding: '6px 10px',
-              fontSize: '11px',
-              backgroundColor: '#1b2341',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '6px',
-              color: '#fff',
-              fontWeight: '700',
-              cursor: 'pointer'
-            }}
-          >
-            <option value="ADM">ADM</option>
-            <option value="Inspector">Inspetor</option>
-            <option value="Exporter">Cliente</option>
-          </select>
+          {/* Sair */}
+          {onLogout && (
+            <button 
+              onClick={onLogout}
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '6px',
+                color: '#ef4444',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              Sair
+            </button>
+          )}
         </div>
       </header>
       )}

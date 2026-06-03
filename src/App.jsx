@@ -8,6 +8,8 @@ import LocaisList from './components/LocaisList';
 import InspectorsList from './components/InspectorsList';
 import ReportView from './components/ReportView';
 import MobileAppView from './components/MobileAppView';
+import Login from './components/Login';
+import UsersList from './components/UsersList';
 
 export default function App() {
   const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth <= 1024);
@@ -690,15 +692,11 @@ export default function App() {
     }
   };
 
-  // Simulador de Perfil
-  const handleRoleChange = (role) => {
-    let username = 'Usuário';
-    if (role === 'ADM') username = 'Supervisor Admin';
-    if (role === 'Inspector') username = 'Carlos (Inspetor)';
-    if (role === 'Exporter') username = 'Café Atlântica (Exportador)';
-    const updated = { role, username };
-    setUser(updated);
-    db.setUser(updated);
+  // Logout
+  const handleLogout = () => {
+    setUser(null);
+    db.setUser(null);
+    setCurrentTab('bookings');
   };
 
   // Funções do Menu Dropdown
@@ -722,6 +720,9 @@ export default function App() {
       case 'inspetor':
         setCurrentTab('inspectors');
         break;
+      case 'usuarios':
+        setCurrentTab('usuarios');
+        break;
       case 'dashboard':
         setCurrentTab('bookings');
         break;
@@ -738,6 +739,10 @@ export default function App() {
     exit: { opacity: 0, y: -10 },
     transition: { duration: 0.2 }
   };
+
+  if (!user) {
+    return <Login onLogin={setUser} />;
+  }
 
   return (
     <div className="app-container">
@@ -859,15 +864,20 @@ export default function App() {
             />
           </div>
 
-          <select
-            value={user.role}
-            onChange={e => handleRoleChange(e.target.value)}
-            style={{ width: 'auto', padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontWeight: '600', color: 'var(--text-primary)' }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{user.name}</span>
+            <span className={`badge ${user.role === 'ADM' ? 'badge-progress' : 'badge-success'}`} style={{ padding: '3px 8px', fontSize: '9px' }}>
+              {user.role === 'ADM' ? 'MASTER' : 'INSPETOR'}
+            </span>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="btn btn-secondary"
+            style={{ padding: '6px 12px', fontSize: '11px', color: 'var(--color-danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
           >
-            <option value="ADM">ADM (Supervisor)</option>
-            <option value="Inspector">Inspetor (Carlos)</option>
-            <option value="Exporter">Exportador (Cliente)</option>
-          </select>
+            Sair
+          </button>
 
           {/* BOTÃO DE MENU DROPDOWN NO CANTO SUPERIOR DIREITO */}
           <div ref={menuRef} style={{ position: 'relative' }}>
@@ -914,75 +924,96 @@ export default function App() {
                   📊 Ver Painel / Dashboard
                 </button>
 
-                <button
-                  onClick={() => handleMenuOptionClick('new_booking')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    borderTop: '1px solid var(--border-color)'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  1 + Novo Certificado
-                </button>
-                <button
-                  onClick={() => handleMenuOptionClick('exportador')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  2 Cadastro e consulta Exportador
-                </button>
-                <button
-                  onClick={() => handleMenuOptionClick('locais')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  3 Locais de Operação e Cadastro
-                </button>
-                <button
-                  onClick={() => handleMenuOptionClick('inspetor')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  4 Cadastro de Inspetor
-                </button>
+                {user.role === 'ADM' && (
+                  <>
+                    <button
+                      onClick={() => handleMenuOptionClick('new_booking')}
+                      style={{
+                        padding: '12px 20px',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        borderTop: '1px solid var(--border-color)'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      1 + Novo Certificado
+                    </button>
+                    <button
+                      onClick={() => handleMenuOptionClick('exportador')}
+                      style={{
+                        padding: '12px 20px',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      2 Cadastro e consulta Exportador
+                    </button>
+                    <button
+                      onClick={() => handleMenuOptionClick('locais')}
+                      style={{
+                        padding: '12px 20px',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      3 Locais de Operação e Cadastro
+                    </button>
+                    <button
+                      onClick={() => handleMenuOptionClick('inspetor')}
+                      style={{
+                        padding: '12px 20px',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      4 Cadastro de Inspetor
+                    </button>
+                    <button
+                      onClick={() => handleMenuOptionClick('usuarios')}
+                      style={{
+                        padding: '12px 20px',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      5 Gerenciar Usuários
+                    </button>
+                  </>
+                )}
 
                 {/* Configuração de rede para sincronizar de fora (Wifi / 5G / VPN) */}
                 <div style={{
@@ -1020,7 +1051,7 @@ export default function App() {
             )}
           </div>
 
-          <button onClick={() => handleRoleChange('Exportador')} className="btn btn-secondary" style={{ padding: '8px 14px' }}>
+          <button onClick={handleLogout} className="btn btn-secondary" style={{ padding: '8px 14px' }}>
             Sair
           </button>
         </div>
@@ -1292,9 +1323,15 @@ export default function App() {
                 </motion.div>
               )}
 
+              {currentTab === 'usuarios' && user.role === 'ADM' && (
+                <motion.div key="tab-usuarios" {...pageTransition}>
+                  <UsersList onDataChange={handleRefreshData} />
+                </motion.div>
+              )}
+
               {currentTab === 'field-portal' && (
                 <motion.div key="tab-field-portal" {...pageTransition}>
-                  <MobileAppView user={user} onRoleChange={handleRoleChange} hideHeader={true} />
+                  <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} />
                 </motion.div>
               )}
 
@@ -1304,19 +1341,6 @@ export default function App() {
                     <h3 style={{ fontSize: '16px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)', textTransform: 'uppercase', margin: 0 }}>
                       Configurações do Dispositivo
                     </h3>
-
-                    <div>
-                      <label>Perfil Simulador</label>
-                      <select
-                        value={user.role}
-                        onChange={e => handleRoleChange(e.target.value)}
-                        style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: '#fff', fontWeight: '600' }}
-                      >
-                        <option value="ADM">ADM (Supervisor)</option>
-                        <option value="Inspector">Inspetor (Carlos)</option>
-                        <option value="Exporter">Exportador (Cliente)</option>
-                      </select>
-                    </div>
 
                     <div>
                       <label>Servidor de Sincronização</label>
@@ -1370,11 +1394,19 @@ export default function App() {
                         <span>👤 Cadastro de Inspetores</span>
                         <span>→</span>
                       </button>
+                      <button
+                        onClick={() => setCurrentTab('usuarios')}
+                        className="btn btn-secondary"
+                        style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', width: '100%' }}
+                      >
+                        <span>👥 Gerenciar Usuários</span>
+                        <span>→</span>
+                      </button>
                     </div>
                   )}
 
                   <button
-                    onClick={() => handleRoleChange('Exportador')}
+                    onClick={handleLogout}
                     className="btn btn-danger"
                     style={{ padding: '14px', fontWeight: '800' }}
                   >
