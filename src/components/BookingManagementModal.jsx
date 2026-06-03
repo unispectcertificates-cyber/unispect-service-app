@@ -16,12 +16,17 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const bk = bookings.find(b => b.id === bookingId);
     return bk?.inspectorId || '';
   });
+  const [bookingStatus, setBookingStatus] = useState(() => {
+    const bk = bookings.find(b => b.id === bookingId);
+    return bk?.status || 'Pendente';
+  });
 
   useEffect(() => {
     const bk = bookings.find(b => b.id === bookingId);
     if (bk) {
       setBooking(bk);
       setSelectedInspectorId(bk.inspectorId || '');
+      setBookingStatus(bk.status || 'Pendente');
     }
   }, [bookings, bookingId]);
 
@@ -52,14 +57,25 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const isAdm = user.role === 'ADM';
   const canEdit = isAdm || isInspector;
 
-  const handleInspectorChange = async (e) => {
-    const insId = e.target.value;
-    setSelectedInspectorId(insId);
-    
-    const updated = { ...booking, inspectorId: insId };
-    setBooking(updated);
-    await db.saveBooking(updated);
-    if (onDataChange) onDataChange();
+  const handleInspectorChange = (e) => {
+    setSelectedInspectorId(e.target.value);
+  };
+
+  const handleSaveBooking = async () => {
+    try {
+      const updated = {
+        ...booking,
+        inspectorId: selectedInspectorId,
+        status: bookingStatus
+      };
+      setBooking(updated);
+      await db.saveBooking(updated);
+      if (onDataChange) onDataChange();
+      onClose();
+    } catch (error) {
+      console.error("Error saving booking:", error);
+      alert("Erro ao salvar as alterações.");
+    }
   };
 
   const handleSaveContainer = async (e) => {
@@ -270,6 +286,33 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               </div>
             </div>
           )}
+
+          {/* Box Status do Booking */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Status do Booking</div>
+            <select
+              disabled={!canEdit}
+              value={bookingStatus}
+              onChange={e => setBookingStatus(e.target.value)}
+              style={{
+                fontSize: '13px',
+                fontWeight: '700',
+                color: 'var(--text-primary)',
+                marginTop: '4px',
+                padding: '4px 8px',
+                backgroundColor: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                width: '100%',
+                cursor: 'pointer',
+                height: '32px'
+              }}
+            >
+              <option value="Pendente">🔴 Pendente</option>
+              <option value="Em andamento">🟡 Em Andamento</option>
+              <option value="Finalizado">🟢 Finalizado</option>
+            </select>
+          </div>
         </div>
 
         {/* Banner Assinatura Inspetor (Screenshot 2) */}
@@ -403,9 +446,12 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         </div>
 
         {/* Rodapé do Modal */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
-          <button onClick={onClose} className="btn btn-secondary" style={{ padding: '8px 18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '8px 18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
             Fechar Janela
+          </button>
+          <button type="button" onClick={handleSaveBooking} className="btn btn-success" style={{ padding: '8px 24px', fontWeight: '700' }}>
+            Salvar
           </button>
         </div>
 
