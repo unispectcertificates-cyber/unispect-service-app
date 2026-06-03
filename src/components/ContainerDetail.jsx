@@ -135,25 +135,13 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
             Container: {localContainer.containerNumber} {localContainer.containerType ? `(${localContainer.containerType})` : ''}
           </h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status Operação:</span>
             {isSaving && <RefreshCw size={12} className="rotating" style={{ color: 'var(--color-brand)', animation: 'spin 1s linear infinite' }} />}
             {saveSuccess && <span style={{ fontSize: '11px', color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '4px' }}><CheckCircle2 size={12} /> Salvo!</span>}
           </div>
         </div>
 
-        {/* Controles de Status e Exclusão */}
+        {/* Controles e Exclusão */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <select
-            disabled={!canEdit}
-            value={localContainer.status || 'Pendente'}
-            onChange={e => handleStatusChange(e.target.value)}
-            style={{ padding: '4px 10px', fontSize: '13px', width: 'auto', fontWeight: '700', backgroundColor: 'var(--bg-tertiary)' }}
-          >
-            <option value="Pendente">🔴 Pendente</option>
-            <option value="Em Carregamento">🟡 Em Andamento</option>
-            <option value="Estufado">🟢 Finalizado</option>
-          </select>
-
           {isAdm && (
             <button 
               onClick={() => onDeleteContainer(localContainer.id)} 

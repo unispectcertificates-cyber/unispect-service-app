@@ -98,8 +98,8 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">DEFINITE SEAL</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.definiteSeal || '-'}</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">INSPECTION STATUS</td>
-              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: ${cont.status === 'Estufado' ? '#10b981' : '#f59e0b'};">
-                ${cont.status === 'Estufado' ? 'FINISHED' : 'IN_PROGRESS'}
+              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: ${booking.status === 'Finalizado' ? '#10b981' : '#f59e0b'};">
+                ${booking.status === 'Finalizado' ? 'FINISHED' : 'IN_PROGRESS'}
               </td>
             </tr>
             <tr>
@@ -612,8 +612,8 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSeal || '-'}</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>INSPECTION STATUS</td>
-                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold', color: page.container.status === 'Estufado' ? '#10b981' : '#f59e0b' }}>
-                              {page.container.status === 'Estufado' ? 'FINISHED' : 'IN_PROGRESS'}
+                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold', color: booking.status === 'Finalizado' ? '#10b981' : '#f59e0b' }}>
+                              {booking.status === 'Finalizado' ? 'FINISHED' : 'IN_PROGRESS'}
                             </td>
                           </tr>
                           <tr>

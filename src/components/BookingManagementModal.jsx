@@ -403,10 +403,6 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <span className={`badge ${statusColors[cont.status] || 'badge-progress'}`} style={{ fontSize: '10px', padding: '3px 8px' }}>
-                      {(cont.status || 'Pendente').toUpperCase()}
-                    </span>
-
                     <button 
                       onClick={() => setSelectedContainerToManage(cont)}
                       className="btn btn-secondary"
@@ -493,31 +489,17 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div>
-                <label>Tipo do Container</label>
-                <select 
-                  value={newContainer.containerType}
-                  onChange={e => setNewContainer({ ...newContainer, containerType: e.target.value })}
-                >
-                  <option value="20' Dry Van (Carga Seca)">20' Dry Van (Carga Seca)</option>
-                  <option value="40' Dry Van (Carga Seca)">40' Dry Van (Carga Seca)</option>
-                  <option value="40' HC (High Cube)">40' HC (High Cube)</option>
-                  <option value="40' Reefer (Refrigerado)">40' Reefer (Refrigerado)</option>
-                </select>
-              </div>
-
-              <div>
-                <label>Status</label>
-                <select 
-                  value={newContainer.status}
-                  onChange={e => setNewContainer({ ...newContainer, status: e.target.value })}
-                >
-                  <option value="Pendente">🔴 Pendente</option>
-                  <option value="Em Carregamento">🟡 Em Andamento</option>
-                  <option value="Estufado">🟢 Concluído</option>
-                </select>
-              </div>
+            <div>
+              <label>Tipo do Container</label>
+              <select 
+                value={newContainer.containerType}
+                onChange={e => setNewContainer({ ...newContainer, containerType: e.target.value })}
+              >
+                <option value="20' Dry Van (Carga Seca)">20' Dry Van (Carga Seca)</option>
+                <option value="40' Dry Van (Carga Seca)">40' Dry Van (Carga Seca)</option>
+                <option value="40' HC (High Cube)">40' HC (High Cube)</option>
+                <option value="40' Reefer (Refrigerado)">40' Reefer (Refrigerado)</option>
+              </select>
             </div>
 
             {/* Lacres Provisórios: 3 caixas de texto (Conforme pedido) */}

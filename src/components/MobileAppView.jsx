@@ -398,14 +398,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{
-                        fontSize: '9px',
-                        padding: '3px 6px',
-                        borderRadius: '4px',
-                        backgroundColor: c.status === 'Estufado' || c.status === 'Finalizado' ? 'rgba(16,185,129,0.15)' : c.status === 'Em Carregamento' || c.status === 'Em andamento' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                        color: c.status === 'Estufado' || c.status === 'Finalizado' ? '#10b981' : c.status === 'Em Carregamento' || c.status === 'Em andamento' ? '#f59e0b' : '#ef4444',
-                        fontWeight: '800'
-                      }}>{(c.status || 'Pendente').toUpperCase()}</span>
                       <ArrowRight size={16} style={{ color: '#c5a880' }} />
                     </div>
                   </div>
@@ -448,85 +440,18 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
 
             {/* Ficha Resumo do Container */}
             <div style={{
-              padding: '16px 20px',
-              backgroundColor: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '12px',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
+              backgroundColor: 'rgba(255,255,255,0.03)',
+              padding: '12px 16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.05)'
             }}>
               <div>
                 <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', fontWeight: '800' }}>CONTAINER</span>
                 <h3 style={{ fontSize: '18px', fontWeight: '800', margin: 0 }}>{selectedContainer.containerNumber}</h3>
                 <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>{selectedContainer.containerType}</span>
-              </div>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', fontWeight: '800' }}>STATUS ATUAL</span>
-                <span style={{
-                  fontSize: '10px',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: selectedContainer.status === 'Estufado' || selectedContainer.status === 'Finalizado' ? 'rgba(16,185,129,0.15)' : selectedContainer.status === 'Em Carregamento' || selectedContainer.status === 'Em andamento' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: selectedContainer.status === 'Estufado' || selectedContainer.status === 'Finalizado' ? '#10b981' : selectedContainer.status === 'Em Carregamento' || selectedContainer.status === 'Em andamento' ? '#f59e0b' : '#ef4444',
-                  fontWeight: '800'
-                }}>{(selectedContainer.status || 'Pendente').toUpperCase()}</span>
-              </div>
-            </div>
-
-            {/* SEÇÃO 5: INFORMAR STATUS */}
-            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '800', color: '#c5a880', margin: 0 }}>
-                5. Informar Status
-              </h3>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                <button 
-                  onClick={() => handleUpdateContainerField('status', 'Pendente')}
-                  style={{
-                    padding: '10px 4px',
-                    borderRadius: '8px',
-                    border: selectedContainer.status === 'Pendente' ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.1)',
-                    backgroundColor: selectedContainer.status === 'Pendente' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.02)',
-                    color: selectedContainer.status === 'Pendente' ? '#ef4444' : '#fff',
-                    fontWeight: '700',
-                    fontSize: '11px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🔴 Pendente
-                </button>
-                <button 
-                  onClick={() => handleUpdateContainerField('status', 'Em Carregamento')}
-                  style={{
-                    padding: '10px 4px',
-                    borderRadius: '8px',
-                    border: selectedContainer.status === 'Em Carregamento' || selectedContainer.status === 'Em andamento' ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
-                    backgroundColor: selectedContainer.status === 'Em Carregamento' || selectedContainer.status === 'Em andamento' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.02)',
-                    color: selectedContainer.status === 'Em Carregamento' || selectedContainer.status === 'Em andamento' ? '#f59e0b' : '#fff',
-                    fontWeight: '700',
-                    fontSize: '11px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🟡 Em Andamento
-                </button>
-                <button 
-                  onClick={() => handleUpdateContainerField('status', 'Estufado')}
-                  style={{
-                    padding: '10px 4px',
-                    borderRadius: '8px',
-                    border: selectedContainer.status === 'Estufado' || selectedContainer.status === 'Finalizado' ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
-                    backgroundColor: selectedContainer.status === 'Estufado' || selectedContainer.status === 'Finalizado' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.02)',
-                    color: selectedContainer.status === 'Estufado' || selectedContainer.status === 'Finalizado' ? '#10b981' : '#fff',
-                    fontWeight: '700',
-                    fontSize: '11px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🟢 Concluído
-                </button>
               </div>
             </div>
 
