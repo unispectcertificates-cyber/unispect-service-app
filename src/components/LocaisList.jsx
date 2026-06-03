@@ -27,16 +27,16 @@ export default function LocaisList({ onDataChange }) {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    await db.saveLocal({
+    db.saveLocal({
       id: editingLocal ? editingLocal.id : undefined,
       ...formData
     });
 
-        setShowModal(false);
+    setShowModal(false);
     if (onDataChange) onDataChange();
   };
 

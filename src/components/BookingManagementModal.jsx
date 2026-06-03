@@ -95,7 +95,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const updatedBooking = { ...booking, containers: updatedContainers };
     
     setBooking(updatedBooking);
-    await db.saveBooking(updatedBooking);
+    db.saveBooking(updatedBooking).catch(err => console.error(err));
     if (onDataChange) onDataChange();
 
     // Reset Form

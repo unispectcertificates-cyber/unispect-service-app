@@ -27,16 +27,16 @@ export default function InspectorsList({ onDataChange }) {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    await db.saveInspector({
+    db.saveInspector({
       id: editingIns ? editingIns.id : undefined,
       ...formData
     });
 
-        setShowModal(false);
+    setShowModal(false);
     if (onDataChange) onDataChange();
   };
 

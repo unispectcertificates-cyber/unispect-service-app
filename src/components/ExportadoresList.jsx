@@ -27,16 +27,16 @@ export default function ExportadoresList({ onDataChange }) {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    await db.saveExportador({
+    db.saveExportador({
       id: editingExp ? editingExp.id : undefined,
       ...formData
     });
 
-        setShowModal(false);
+    setShowModal(false);
     if (onDataChange) onDataChange();
   };
 
