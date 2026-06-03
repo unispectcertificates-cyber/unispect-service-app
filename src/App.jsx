@@ -69,6 +69,7 @@ export default function App() {
     bookingNumber: '',
     exporterId: '',
     startDate: new Date().toISOString().split('T')[0],
+    launchDate: new Date().toISOString().split('T')[0],
     vesselVoyage: '',
     vesselName: '',
     vesselVoyageNum: '',
@@ -165,6 +166,7 @@ export default function App() {
       bookingNumber: '',
       exporterId: '',
       startDate: new Date().toISOString().split('T')[0],
+      launchDate: new Date().toISOString().split('T')[0],
       vesselVoyage: '',
       vesselName: '',
       vesselVoyageNum: '',
@@ -1515,6 +1517,16 @@ export default function App() {
                   value={newBookingData.bookingNumber}
                   onChange={e => setNewBookingData({ ...newBookingData, bookingNumber: e.target.value })}
                   placeholder="BK-XXXXXX"
+                  required
+                />
+              </div>
+
+              <div>
+                <label>Data de Lançamento / Entrada *</label>
+                <input
+                  type="date"
+                  value={newBookingData.launchDate}
+                  onChange={e => setNewBookingData({ ...newBookingData, launchDate: e.target.value })}
                   required
                 />
               </div>

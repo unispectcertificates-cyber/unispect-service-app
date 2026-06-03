@@ -89,6 +89,7 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
                   <th style={{ padding: '18px 24px' }}>Nº Certificado</th>
                   <th style={{ padding: '18px 24px' }}>Booking</th>
                   <th style={{ padding: '18px 24px' }}>Exportador</th>
+                  <th style={{ padding: '18px 24px' }}>Lançamento</th>
                   <th style={{ padding: '18px 24px' }}>Data Início</th>
                   <th style={{ padding: '18px 24px' }}>Navio / Viagem</th>
                   <th style={{ padding: '18px 24px' }}>Containers</th>
@@ -124,6 +125,7 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
                       <td style={{ padding: '18px 24px', fontWeight: '800', color: 'var(--color-brand)' }}>{b.certificateNumber}</td>
                       <td style={{ padding: '18px 24px', fontWeight: '600' }}>{b.bookingNumber}</td>
                       <td style={{ padding: '18px 24px', fontWeight: '500' }}>{exp ? exp.name : 'N/A'}</td>
+                      <td style={{ padding: '18px 24px', color: 'var(--text-secondary)' }}>{b.launchDate || b.startDate}</td>
                       <td style={{ padding: '18px 24px', color: 'var(--text-secondary)' }}>{b.startDate}</td>
                       <td style={{ padding: '18px 24px', color: 'var(--text-secondary)', fontWeight: '600' }}>{b.vesselVoyage}</td>
                       <td style={{ padding: '18px 24px', fontWeight: '700', textAlign: 'center' }}>
@@ -190,8 +192,9 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                    <div><Calendar size={12} style={{ marginRight: '4px' }} /> {b.startDate}</div>
-                    <div><MapPin size={12} style={{ marginRight: '4px' }} /> {loc ? loc.name : 'N/A'}</div>
+                    <div><Calendar size={12} style={{ marginRight: '4px' }} /> Início: {b.startDate}</div>
+                    <div><Calendar size={12} style={{ marginRight: '4px' }} /> Lançamento: {b.launchDate || b.startDate}</div>
+                    <div style={{ gridColumn: '1 / -1' }}><MapPin size={12} style={{ marginRight: '4px' }} /> {loc ? loc.name : 'N/A'}</div>
                     <div style={{ gridColumn: '1 / -1' }}><strong>Navio:</strong> {b.vesselVoyage}</div>
                     <div style={{ gridColumn: '1 / -1' }}><strong>Containers:</strong> {b.containers?.length || 0} | <strong>Sacas:</strong> {b.bagsQuantity}</div>
                   </div>

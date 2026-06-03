@@ -250,6 +250,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
             <td style="border: 1px solid #ccc; padding: 6px; font-weight: bold;">${b.certificateNumber}</td>
             <td style="border: 1px solid #ccc; padding: 6px;">${b.bookingNumber}</td>
             <td style="border: 1px solid #ccc; padding: 6px;">${exp}</td>
+            <td style="border: 1px solid #ccc; padding: 6px;">${b.launchDate || b.startDate || '-'}</td>
             <td style="border: 1px solid #ccc; padding: 6px;">${b.vesselVoyage}</td>
             <td style="border: 1px solid #ccc; padding: 6px;">${loc}</td>
             <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${b.containers?.length || 0}</td>
@@ -278,6 +279,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                 <th>Certificate</th>
                 <th>Booking</th>
                 <th>Exporter</th>
+                <th>Launch Date</th>
                 <th>Vessel / Voyage</th>
                 <th>Site</th>
                 <th style="text-align: center;">Containers</th>
@@ -311,7 +313,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     let csvContent = "sep=;\n";
     
     // Cabeçalho
-    csvContent += "Certificado;Booking;Exportador;Navio / Viagem;Local de Operação;Qtd. Containers;Qtd. Sacas;Status\n";
+    csvContent += "Certificado;Booking;Exportador;Lançamento;Navio / Viagem;Local de Operação;Qtd. Containers;Qtd. Sacas;Status\n";
     
     // Linhas
     bookingsList.forEach(b => {
@@ -322,13 +324,14 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       const cert = b.certificateNumber || '';
       const book = b.bookingNumber || '';
       const expName = exp.replace(/;/g, ',');
+      const launch = b.launchDate || b.startDate || '';
       const vessel = (b.vesselVoyage || '').replace(/;/g, ',');
       const locName = loc.replace(/;/g, ',');
       const containersCount = b.containers?.length || 0;
       const bags = b.bagsQuantity || 0;
       const status = (b.status || 'Pendente').toUpperCase();
       
-      csvContent += `${cert};${book};${expName};${vessel};${locName};${containersCount};${bags};${status}\n`;
+      csvContent += `${cert};${book};${expName};${launch};${vessel};${locName};${containersCount};${bags};${status}\n`;
     });
     
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -819,6 +822,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                   <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Certificate</th>
                   <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Booking</th>
                   <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Exporter</th>
+                  <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Launch Date</th>
                   <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Vessel / Voyage</th>
                   <th style={{ padding: '8px', textAlign: 'left', color: '#000' }}>Site</th>
                   <th style={{ padding: '8px', textAlign: 'center', color: '#000' }}>Containers</th>
@@ -835,6 +839,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       <td style={{ padding: '8px', fontWeight: 'bold' }}>{b.certificateNumber}</td>
                       <td style={{ padding: '8px' }}>{b.bookingNumber}</td>
                       <td style={{ padding: '8px' }}>{exp}</td>
+                      <td style={{ padding: '8px' }}>{b.launchDate || b.startDate}</td>
                       <td style={{ padding: '8px' }}>{b.vesselVoyage}</td>
                       <td style={{ padding: '8px' }}>{loc}</td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>{b.containers?.length || 0}</td>

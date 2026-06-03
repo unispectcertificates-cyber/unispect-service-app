@@ -405,7 +405,6 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
             )}
           </div>
 
-          {/* Detalhes de Navio / Carga */}
           <div>
             <label>Data de Início</label>
             <input 
@@ -413,6 +412,16 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
               disabled={!canEditBookingFields}
               value={booking.startDate} 
               onChange={e => updateBookingField('startDate', e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label>Data de Lançamento / Entrada</label>
+            <input 
+              type="date" 
+              disabled={!canEditBookingFields}
+              value={booking.launchDate || booking.startDate || new Date().toISOString().split('T')[0]} 
+              onChange={e => updateBookingField('launchDate', e.target.value)}
             />
           </div>
 
