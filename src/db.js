@@ -142,21 +142,52 @@ export const db = {
   async uploadPhoto(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result;
-        const extension = file.name.split('.').pop() || 'jpg';
-        const filename = `photos/photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
-        
-        try {
-          const storageRef = ref(storage, filename);
-          await uploadString(storageRef, base64, 'data_url');
-          const downloadURL = await getDownloadURL(storageRef);
-          resolve(downloadURL);
-        } catch (error) {
-          console.error("Firebase Storage Upload failed, fallback to base64", error);
-          // If storage fails, we just save base64 (not recommended for production, but a fallback)
-          resolve(base64);
-        }
+      reader.onloadend = () => {
+        const tempImg = new Image();
+        tempImg.onload = async () => {
+          // Determina as novas dimensões preservando o aspect ratio
+          let width = tempImg.width;
+          let height = tempImg.height;
+          
+          // Limites de resolução mantendo a orientação
+          const maxWidth = width > height ? 1024 : 768;
+          const maxHeight = width > height ? 768 : 1024;
+          
+          if (width > maxWidth) {
+            height = Math.round(height * (maxWidth / width));
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = Math.round(width * (maxHeight / height));
+            height = maxHeight;
+          }
+          
+          // Redimensiona usando Canvas
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(tempImg, 0, 0, width, height);
+          
+          // Compacta em JPEG com qualidade 0.8
+          const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+          const filename = `photos/photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.jpg`;
+          
+          try {
+            const storageRef = ref(storage, filename);
+            await uploadString(storageRef, resizedBase64, 'data_url');
+            const downloadURL = await getDownloadURL(storageRef);
+            resolve(downloadURL);
+          } catch (error) {
+            console.error("Firebase Storage Upload failed, fallback to base64", error);
+            // Se falhar o upload, retorna o base64 redimensionado (que é muito menor e cabe no Firestore)
+            resolve(resizedBase64);
+          }
+        };
+        tempImg.onerror = () => {
+          reject(new Error('Image loading failed'));
+        };
+        tempImg.src = reader.result;
       };
       reader.onerror = () => {
         reject(new Error('File reading failed'));
