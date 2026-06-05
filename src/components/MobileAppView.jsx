@@ -107,9 +107,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
       }));
 
       const updatedPhotos = [...(selectedContainer.photos || []), ...newPhotos];
-      handleUpdateContainerField('photos', updatedPhotos);
+      await handleUpdateContainerField('photos', updatedPhotos);
     } catch (err) {
       console.error("Error uploading photos:", err);
+      alert(err.message || "Ocorreu um erro ao enviar/salvar as fotos no sistema.");
     }
   };
 

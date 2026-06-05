@@ -201,9 +201,10 @@ export const db = {
             const downloadURL = await getDownloadURL(storageRef);
             resolve(downloadURL);
           } catch (error) {
-            console.error("Firebase Storage Upload failed, fallback to base64", error);
-            // Se falhar o upload, retorna o base64 redimensionado (que é muito menor e cabe no Firestore)
-            resolve(resizedBase64);
+            console.error("Firebase Storage Upload failed:", error);
+            reject(new Error("Não foi possível enviar a imagem para o Firebase Storage. " +
+                              "Verifique se o serviço Storage está ativo no Console do Firebase e se as Regras de Segurança (Rules) " +
+                              "permitem gravação pública (sem autenticação). Detalhes: " + (error.message || error)));
           }
         };
         tempImg.onerror = () => {

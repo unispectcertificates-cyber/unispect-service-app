@@ -170,9 +170,10 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       const updatedCont = { ...showPhotoManager, photos: updatedPhotos };
       
       setShowPhotoManager(updatedCont);
-      handleUpdateContainerPhotos(updatedCont);
+      await handleUpdateContainerPhotos(updatedCont);
     } catch (error) {
       console.error("Error uploading photo", error);
+      alert(error.message || "Ocorreu um erro ao enviar/salvar as fotos no sistema.");
     }
   };
 

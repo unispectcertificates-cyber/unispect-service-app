@@ -77,9 +77,10 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
       const updatedPhotos = [...(localContainer.photos || []), ...newPhotos];
       const updated = { ...localContainer, photos: updatedPhotos };
       setLocalContainer(updated);
-      onUpdateContainer(updated);
+      await onUpdateContainer(updated);
     } catch (error) {
-      console.error("Error uploading photos in ContainerDetail", error);
+      console.error("Error uploading photos in ContainerDetail:", error);
+      alert(error.message || "Ocorreu um erro ao enviar/salvar as fotos no sistema.");
     }
   };
 

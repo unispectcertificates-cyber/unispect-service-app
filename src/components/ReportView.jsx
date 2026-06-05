@@ -697,6 +697,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               <img 
                                 src={photo.url} 
                                 alt={photo.name} 
+                                crossOrigin="anonymous"
                                 style={{ 
                                   width: '100%', 
                                   height: '100%',
@@ -756,6 +757,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               <img 
                                 src={photo.url} 
                                 alt={photo.name} 
+                                crossOrigin="anonymous"
                                 style={{ 
                                   width: '100%', 
                                   height: '100%',

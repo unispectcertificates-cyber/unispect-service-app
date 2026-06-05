@@ -308,12 +308,21 @@ export default function App() {
       }
 
       // 3. Exporter
-      // 3. Exporter
       let exporterId = '';
       let exporterNameExtracted = '';
-      const exporterMatch = fullText.match(/(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/i);
-      if (exporterMatch && exporterMatch[1]) {
-        let rawName = exporterMatch[1].trim();
+      const regex = /(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/gi;
+      let expMatch;
+      while ((expMatch = regex.exec(fullText)) !== null) {
+        const candidateRaw = expMatch[1];
+        const matchIndex = expMatch.index;
+        
+        // Verifica se a palavra "CNPJ" precede a palavra "Exportador" nos 15 caracteres anteriores
+        const precedingText = fullText.substring(Math.max(0, matchIndex - 15), matchIndex).toLowerCase();
+        if (precedingText.includes('cnpj')) {
+          continue;
+        }
+        
+        let candidate = candidateRaw.trim();
         const stopKeywords = [
           /\bcnpj\b/i,
           /\bimportador\b/i,
@@ -326,12 +335,16 @@ export default function App() {
           /\bmarca\b/i
         ];
         for (const kw of stopKeywords) {
-          const idx = rawName.search(kw);
+          const idx = candidate.search(kw);
           if (idx !== -1) {
-            rawName = rawName.substring(0, idx).trim();
+            candidate = candidate.substring(0, idx).trim();
           }
         }
-        exporterNameExtracted = rawName.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+        candidate = candidate.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+        if (candidate && !/^\d+$/.test(candidate) && candidate.length > 2) {
+          exporterNameExtracted = candidate;
+          break;
+        }
       }
 
       const exporters = exportadores;
@@ -340,9 +353,23 @@ export default function App() {
         if (exactMatch) {
           exporterId = exactMatch.id;
         } else {
+          const commonWords = [
+            'exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 
+            'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria', 'indústria', 
+            'trading', 'cafe', 'café', 'coffee', 'cooperativa', 'coop', 'sa', 'limitada', 'group', 
+            'grupo', 'brasil', 'brazil', 'alimentos', 'comercial'
+          ];
           const partialMatch = exporters.find(exp => {
-            const expWords = exp.name.split(' ').filter(w => w.length > 4);
-            return expWords.some(w => exporterNameExtracted.toLowerCase().includes(w.toLowerCase()));
+            const expWords = exp.name.split(' ')
+              .map(w => w.toLowerCase().replace(/[^a-z0-9à-ú]/gi, '').trim())
+              .filter(w => w.length > 4 && !commonWords.includes(w));
+            
+            if (expWords.length === 0) return false;
+            
+            const normalizedExtracted = exporterNameExtracted.toLowerCase().replace(/[^a-z0-9à-ú]/gi, ' ');
+            const extractedWords = normalizedExtracted.split(/\s+/).filter(Boolean);
+            
+            return expWords.some(w => extractedWords.includes(w));
           });
           if (partialMatch) {
             exporterId = partialMatch.id;
@@ -360,14 +387,25 @@ export default function App() {
           }
         }
       } else {
-        const ignoreFallback = ['exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria'];
+        const commonWords = [
+          'exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 
+          'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria', 'indústria', 
+          'trading', 'cafe', 'café', 'coffee', 'cooperativa', 'coop', 'sa', 'limitada', 'group', 
+          'grupo', 'brasil', 'brazil', 'alimentos', 'comercial'
+        ];
         for (const exp of exporters) {
           if (fullText.toLowerCase().includes(exp.name.toLowerCase())) {
             exporterId = exp.id;
             break;
           }
-          const signWords = exp.name.split(' ').filter(w => w.length > 4);
-          if (signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
+          const signWords = exp.name.split(' ')
+            .map(w => w.toLowerCase().replace(/[^a-z0-9à-ú]/gi, '').trim())
+            .filter(w => w.length > 4 && !commonWords.includes(w));
+          
+          if (signWords.length > 0 && signWords.some(w => {
+            const normalizedText = fullText.toLowerCase().replace(/[^a-z0-9à-ú]/gi, ' ');
+            return normalizedText.split(/\s+/).includes(w);
+          })) {
             exporterId = exp.id;
             break;
           }
