@@ -1226,6 +1226,7 @@ export default function App() {
                           <th>Vessel / Navio</th>
                           <th>Local</th>
                           <th>Status</th>
+                          <th>Pendente</th>
                           <th style={{ textAlign: 'right' }}>Ações</th>
                         </tr>
                       </thead>
@@ -1250,6 +1251,24 @@ export default function App() {
                                 <span className={`badge ${statusColors[b.status] || 'badge-pending'}`}>
                                   {(b.status || 'Pendente').toUpperCase()}
                                 </span>
+                              </td>
+                              <td>
+                                {b.pendingItem ? (
+                                  <span style={{ 
+                                    padding: '4px 8px', 
+                                    borderRadius: '4px', 
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                                    color: '#ef4444', 
+                                    fontSize: '12px', 
+                                    fontWeight: '700',
+                                    border: '1px solid #ef4444',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    ⚠️ {b.pendingItem}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
+                                )}
                               </td>
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -1278,7 +1297,7 @@ export default function App() {
 
                         {activeBookings.length === 0 && (
                           <tr>
-                            <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                            <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                               Nenhum booking ativo encontrado.
                             </td>
                           </tr>
@@ -1302,6 +1321,7 @@ export default function App() {
                           <th>Vessel / Navio</th>
                           <th>Local</th>
                           <th>Status</th>
+                          <th>Pendente</th>
                           <th style={{ textAlign: 'right' }}>Ações</th>
                         </tr>
                       </thead>
@@ -1321,6 +1341,24 @@ export default function App() {
                                 <span className="badge badge-success">
                                   FINALIZADO
                                 </span>
+                              </td>
+                              <td>
+                                {b.pendingItem ? (
+                                  <span style={{ 
+                                    padding: '4px 8px', 
+                                    borderRadius: '4px', 
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                                    color: '#ef4444', 
+                                    fontSize: '12px', 
+                                    fontWeight: '700',
+                                    border: '1px solid #ef4444',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    ⚠️ {b.pendingItem}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
+                                )}
                               </td>
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -1343,7 +1381,7 @@ export default function App() {
 
                         {finalizedBookings.length === 0 && (
                           <tr>
-                            <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                            <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                               Nenhum booking finalizado encontrado.
                             </td>
                           </tr>
@@ -1371,9 +1409,25 @@ export default function App() {
                           <div key={b.id} className="booking-card glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontWeight: '700', color: 'var(--color-brand)', fontSize: '15px' }}>{b.certificateNumber}</span>
-                              <span className={`badge ${statusColors[b.status] || 'badge-pending'}`} style={{ fontSize: '10px' }}>
-                                {(b.status || 'Pendente').toUpperCase()}
-                              </span>
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                {b.pendingItem && (
+                                  <span style={{ 
+                                    padding: '2px 6px', 
+                                    borderRadius: '4px', 
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                                    color: '#ef4444', 
+                                    fontSize: '10px', 
+                                    fontWeight: '700',
+                                    border: '1px solid #ef4444',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {b.pendingItem}
+                                  </span>
+                                )}
+                                <span className={`badge ${statusColors[b.status] || 'badge-pending'}`} style={{ fontSize: '10px' }}>
+                                  {(b.status || 'Pendente').toUpperCase()}
+                                </span>
+                              </div>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
@@ -1424,9 +1478,25 @@ export default function App() {
                           <div key={b.id} className="booking-card glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontWeight: '700', color: 'var(--color-brand)', fontSize: '15px' }}>{b.certificateNumber}</span>
-                              <span className="badge badge-success" style={{ fontSize: '10px' }}>
-                                FINALIZADO
-                              </span>
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                {b.pendingItem && (
+                                  <span style={{ 
+                                    padding: '2px 6px', 
+                                    borderRadius: '4px', 
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                                    color: '#ef4444', 
+                                    fontSize: '10px', 
+                                    fontWeight: '700',
+                                    border: '1px solid #ef4444',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {b.pendingItem}
+                                  </span>
+                                )}
+                                <span className="badge badge-success" style={{ fontSize: '10px' }}>
+                                  FINALIZADO
+                                </span>
+                              </div>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>

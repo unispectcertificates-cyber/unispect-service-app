@@ -20,6 +20,10 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const bk = bookings.find(b => b.id === bookingId);
     return bk?.status || 'Pendente';
   });
+  const [pendingItem, setPendingItem] = useState(() => {
+    const bk = bookings.find(b => b.id === bookingId);
+    return bk?.pendingItem || '';
+  });
 
   useEffect(() => {
     const bk = bookings.find(b => b.id === bookingId);
@@ -27,6 +31,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       setBooking(bk);
       setSelectedInspectorId(bk.inspectorId || '');
       setBookingStatus(bk.status || 'Pendente');
+      setPendingItem(bk.pendingItem || '');
     }
   }, [bookings, bookingId]);
 
@@ -66,7 +71,8 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       const updated = {
         ...booking,
         inspectorId: selectedInspectorId,
-        status: bookingStatus
+        status: bookingStatus,
+        pendingItem: pendingItem
       };
       setBooking(updated);
       await db.saveBooking(updated);
@@ -312,6 +318,34 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               <option value="Pendente">🔴 Pendente</option>
               <option value="Em andamento">🟡 Em Andamento</option>
               <option value="Finalizado">🟢 Finalizado</option>
+            </select>
+          </div>
+
+          {/* Box O que está faltando */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>O que está faltando</div>
+            <select
+              disabled={!canEdit}
+              value={pendingItem}
+              onChange={e => setPendingItem(e.target.value)}
+              style={{
+                fontSize: '13px',
+                fontWeight: '700',
+                color: 'var(--text-primary)',
+                marginTop: '4px',
+                padding: '4px 8px',
+                backgroundColor: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                width: '100%',
+                cursor: 'pointer',
+                height: '32px'
+              }}
+            >
+              <option value="">🟢 Nenhum (Completo)</option>
+              <option value="Fumigação">Fumigação</option>
+              <option value="Fito">Fito</option>
+              <option value="Lacre Definitivo">Lacre Definitivo</option>
             </select>
           </div>
         </div>

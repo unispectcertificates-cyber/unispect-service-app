@@ -289,15 +289,30 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: '#c5a880', fontWeight: '800', fontSize: '15px' }}>{b.certificateNumber}</span>
-                      <span style={{
-                        fontSize: '9px',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        backgroundColor: `${statusColor}18`,
-                        color: statusColor,
-                        fontWeight: '800',
-                        textTransform: 'uppercase'
-                      }}>{b.status}</span>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {b.pendingItem && (
+                          <span style={{
+                            fontSize: '9px',
+                            padding: '3px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            color: '#ef4444',
+                            fontWeight: '800',
+                            border: '1px solid #ef4444',
+                            textTransform: 'uppercase',
+                            whiteSpace: 'nowrap'
+                          }}>{b.pendingItem}</span>
+                        )}
+                        <span style={{
+                          fontSize: '9px',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: `${statusColor}18`,
+                          color: statusColor,
+                          fontWeight: '800',
+                          textTransform: 'uppercase'
+                        }}>{b.status}</span>
+                      </div>
                     </div>
 
                     <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>
