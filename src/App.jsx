@@ -43,7 +43,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState(() => {
     const isMobile = window.innerWidth <= 1024;
     const usr = db.getUser();
-    if (isMobile && (usr.role === 'Inspector' || usr.role === 'ADM')) {
+    if (isMobile && usr && (usr.role === 'Inspector' || usr.role === 'ADM')) {
       return 'field-portal';
     }
     return 'bookings';
