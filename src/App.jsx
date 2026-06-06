@@ -138,6 +138,9 @@ export default function App() {
     return matchesSearch && matchesStatus;
   });
 
+  const activeBookings = filteredBookings.filter(b => b.status !== 'Finalizado');
+  const finalizedBookings = filteredBookings.filter(b => b.status === 'Finalizado');
+
   // Criar booking (Salvar)
   const handleCreateBooking = async (e) => {
     e.preventDefault();
@@ -1208,11 +1211,12 @@ export default function App() {
                     </button>
                   </div>
 
-                  <h2 style={{ fontSize: '16px', color: 'var(--color-brand)', marginBottom: '16px', fontFamily: 'var(--font-display)' }}>
-                    Lista de Bookings
+                  {/* --- BOOKINGS ATIVOS (DESKTOP) --- */}
+                  <h2 style={{ fontSize: '16px', color: 'var(--color-brand)', marginBottom: '16px', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    📋 Bookings em Aberto (Pendentes / Em Andamento) <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '10px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: 'var(--color-brand)', fontWeight: '755' }}>{activeBookings.length}</span>
                   </h2>
 
-                  <div className="glass-panel bookings-table-desktop" style={{ overflowX: 'auto', border: '1px solid var(--border-color)' }}>
+                  <div className="glass-panel bookings-table-desktop" style={{ overflowX: 'auto', border: '1px solid var(--border-color)', marginBottom: '32px' }}>
                     <table style={{ minWidth: '800px' }}>
                       <thead>
                         <tr>
@@ -1226,14 +1230,13 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredBookings.map(b => {
+                        {activeBookings.map(b => {
                           const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
                           const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
 
                           const statusColors = {
                             'Pendente': 'badge-pending',
-                            'Em andamento': 'badge-progress',
-                            'Finalizado': 'badge-success'
+                            'Em andamento': 'badge-progress'
                           };
 
                           return (
@@ -1273,10 +1276,75 @@ export default function App() {
                           );
                         })}
 
-                        {filteredBookings.length === 0 && (
+                        {activeBookings.length === 0 && (
                           <tr>
                             <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                              Nenhum booking encontrado.
+                              Nenhum booking ativo encontrado.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* --- BOOKINGS FINALIZADOS (DESKTOP) --- */}
+                  <h2 style={{ fontSize: '16px', color: '#10b981', marginBottom: '16px', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    ✅ Bookings Concluídos (Finalizados) <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: '755' }}>{finalizedBookings.length}</span>
+                  </h2>
+
+                  <div className="glass-panel bookings-table-desktop" style={{ overflowX: 'auto', border: '1px solid var(--border-color)', marginBottom: '32px' }}>
+                    <table style={{ minWidth: '800px' }}>
+                      <thead>
+                        <tr>
+                          <th>Certificado</th>
+                          <th>Booking</th>
+                          <th>Exportador</th>
+                          <th>Vessel / Navio</th>
+                          <th>Local</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'right' }}>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {finalizedBookings.map(b => {
+                          const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                          const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
+
+                          return (
+                            <tr key={b.id}>
+                              <td style={{ fontWeight: '700', color: 'var(--color-brand)' }}>{b.certificateNumber}</td>
+                              <td style={{ fontWeight: '600' }}>{b.bookingNumber}</td>
+                              <td>{exp}</td>
+                              <td>{b.vesselVoyage}</td>
+                              <td>{loc}</td>
+                              <td>
+                                <span className="badge badge-success">
+                                  FINALIZADO
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                  <button onClick={() => {
+                                    setSelectedBookingId(b.id);
+                                  }} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '11px', border: '1px solid var(--text-muted)' }}>
+                                    Gerenciar
+                                  </button>
+
+                                  {user.role === 'ADM' && (
+                                    <button onClick={(e) => handleDeleteBooking(b.id, e)} className="btn btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }}>
+                                      Excluir
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        {finalizedBookings.length === 0 && (
+                          <tr>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                              Nenhum booking finalizado encontrado.
                             </td>
                           </tr>
                         )}
@@ -1286,57 +1354,109 @@ export default function App() {
 
                   {/* Lista de Cards de Bookings (Apenas no mobile) */}
                   <div className="bookings-cards-mobile">
-                    {filteredBookings.map(b => {
-                      const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
-                      const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
-                      const statusColors = {
-                        'Pendente': 'badge-pending',
-                        'Em andamento': 'badge-progress',
-                        'Finalizado': 'badge-success'
-                      };
+                    {/* Ativos Mobile */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        📋 Bookings em Aberto ({activeBookings.length})
+                      </span>
+                      {activeBookings.map(b => {
+                        const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                        const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
+                        const statusColors = {
+                          'Pendente': 'badge-pending',
+                          'Em andamento': 'badge-progress'
+                        };
 
-                      return (
-                        <div key={b.id} className="booking-card glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontWeight: '700', color: 'var(--color-brand)', fontSize: '15px' }}>{b.certificateNumber}</span>
-                            <span className={`badge ${statusColors[b.status] || 'badge-pending'}`} style={{ fontSize: '10px' }}>
-                              {(b.status || 'Pendente').toUpperCase()}
-                            </span>
-                          </div>
+                        return (
+                          <div key={b.id} className="booking-card glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: '700', color: 'var(--color-brand)', fontSize: '15px' }}>{b.certificateNumber}</span>
+                              <span className={`badge ${statusColors[b.status] || 'badge-pending'}`} style={{ fontSize: '10px' }}>
+                                {(b.status || 'Pendente').toUpperCase()}
+                              </span>
+                            </div>
 
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
-                            <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
-                            <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
-                            <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
-                            <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
-                          </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
+                            </div>
 
-                          <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
-                            <button onClick={() => setSelectedBookingId(b.id)} className="btn btn-secondary" style={{ padding: '8px 12px', fontSize: '12px', flex: 1, border: '1px solid var(--text-muted)' }}>
-                              Gerenciar
-                            </button>
-
-                            {b.status !== 'Finalizado' && user.role !== 'Exportador' && (
-                              <button onClick={(e) => handleFinalizeBooking(b.id, e)} className="btn btn-success" style={{ padding: '8px 12px', fontSize: '12px', flex: 1 }}>
-                                Finalizar
+                            <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
+                              <button onClick={() => setSelectedBookingId(b.id)} className="btn btn-secondary" style={{ padding: '8px 12px', fontSize: '12px', flex: 1, border: '1px solid var(--text-muted)' }}>
+                                Gerenciar
                               </button>
-                            )}
 
-                            {user.role === 'ADM' && (
-                              <button onClick={(e) => handleDeleteBooking(b.id, e)} className="btn btn-danger" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <Trash2 size={14} />
-                              </button>
-                            )}
+                              {user.role !== 'Exportador' && (
+                                <button onClick={(e) => handleFinalizeBooking(b.id, e)} className="btn btn-success" style={{ padding: '8px 12px', fontSize: '12px', flex: 1 }}>
+                                  Finalizar
+                                </button>
+                              )}
+
+                              {user.role === 'ADM' && (
+                                <button onClick={(e) => handleDeleteBooking(b.id, e)} className="btn btn-danger" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
                           </div>
+                        );
+                      })}
+
+                      {activeBookings.length === 0 && (
+                        <div className="glass-panel" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          Nenhum booking em aberto encontrado.
                         </div>
-                      );
-                    })}
+                      )}
+                    </div>
 
-                    {filteredBookings.length === 0 && (
-                      <div className="glass-panel" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                        Nenhum booking encontrado.
-                      </div>
-                    )}
+                    {/* Finalizados Mobile */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        ✅ Bookings Concluídos ({finalizedBookings.length})
+                      </span>
+                      {finalizedBookings.map(b => {
+                        const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                        const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
+
+                        return (
+                          <div key={b.id} className="booking-card glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: '700', color: 'var(--color-brand)', fontSize: '15px' }}>{b.certificateNumber}</span>
+                              <span className="badge badge-success" style={{ fontSize: '10px' }}>
+                                FINALIZADO
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
+                              <button onClick={() => setSelectedBookingId(b.id)} className="btn btn-secondary" style={{ padding: '8px 12px', fontSize: '12px', flex: 1, border: '1px solid var(--text-muted)' }}>
+                                Gerenciar
+                              </button>
+
+                              {user.role === 'ADM' && (
+                                <button onClick={(e) => handleDeleteBooking(b.id, e)} className="btn btn-danger" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {finalizedBookings.length === 0 && (
+                        <div className="glass-panel" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          Nenhum booking finalizado encontrado.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               )}
