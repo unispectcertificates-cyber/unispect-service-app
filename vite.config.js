@@ -13,7 +13,7 @@ export default defineConfig({
     }),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'logo.jpg', 'stamp.jpg'],
+      includeAssets: ['favicon.svg', 'logo.jpg', 'stamp.jpg', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'Unispect Service',
         short_name: 'Unispect',
@@ -31,9 +31,21 @@ export default defineConfig({
             purpose: 'any'
           },
           {
-            src: 'favicon.svg',
+            src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/svg+xml',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
             purpose: 'maskable'
           }
         ]
