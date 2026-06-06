@@ -125,13 +125,14 @@ export default function App() {
 
   // Filtragem dos Bookings
   const filteredBookings = bookings.filter(b => {
-    const term = searchQuery.toLowerCase();
+    const term = searchQuery.toLowerCase().trim();
     const matchesSearch = term === '' ||
       b.certificateNumber.toLowerCase().includes(term) ||
       b.bookingNumber.toLowerCase().includes(term) ||
       (b.vesselVoyage || '').toLowerCase().includes(term) ||
       (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
-      (locais.find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term);
+      (locais.find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term) ||
+      (b.containers || []).some(c => c.containerNumber.toLowerCase().includes(term));
 
     const matchesStatus = statusFilter === 'Todos' || b.status === statusFilter;
 
