@@ -39,7 +39,7 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
 
   const isInspector = user.role === 'Inspector';
   const isAdm = user.role === 'ADM';
-  const canEditBookingFields = isAdm;
+  const canEditBookingFields = isAdm || isInspector;
   const canAddContainer = isAdm || isInspector;
 
   // Salvar alterações de campos do booking

@@ -228,9 +228,14 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         
         {/* Topo do Modal */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
-          <h2 style={{ fontSize: '18px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)' }}>
-            Gerenciar Booking / Certificado: {booking.certificateNumber}
-          </h2>
+          <div>
+            <h2 style={{ fontSize: '18px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)' }}>
+              Gerenciar Booking / Certificado: {booking.certificateNumber}
+            </h2>
+            <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>
+              Perfil atual: {user.role === 'ADM' ? '✅ Administrador (Edição Liberada)' : '✅ Inspetor (Edição Liberada)'}
+            </div>
+          </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
             <X size={22} />
           </button>
@@ -239,60 +244,384 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         {/* Grade de Informações Gerais em Boxes (Igual ao Screenshot 2) */}
         <div className="info-grid">
           {/* Box Exportador */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Exportador</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{expName}</div>
+            {canEdit ? (
+              <select
+                value={booking.exporterId || ''}
+                onChange={e => setBooking({ ...booking, exporterId: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  cursor: 'pointer',
+                  height: '32px'
+                }}
+              >
+                <option value="">Selecione...</option>
+                {exportadores.map(exp => (
+                  <option key={exp.id} value={exp.id}>{exp.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{expName}</div>
+            )}
           </div>
 
           {/* Box Local de Operação */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Local da Operação</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{locName}</div>
+            {canEdit ? (
+              <select
+                value={booking.locationId || ''}
+                onChange={e => setBooking({ ...booking, locationId: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  cursor: 'pointer',
+                  height: '32px'
+                }}
+              >
+                <option value="">Selecione...</option>
+                {locais.map(loc => (
+                  <option key={loc.id} value={loc.id}>{loc.name}</option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{locName}</div>
+            )}
           </div>
 
           {/* Box Navio / Viagem */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Navio / Viagem</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.vesselVoyage || '-'}</div>
+            {canEdit ? (
+              <input
+                type="text"
+                value={booking.vesselVoyage || ''}
+                onChange={e => setBooking({ ...booking, vesselVoyage: e.target.value })}
+                placeholder="Ex: MSC INGRID - 26A"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.vesselVoyage || '-'}</div>
+            )}
           </div>
 
           {/* Box Armador */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Armador / Linha</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.armador || '-'}</div>
+            {canEdit ? (
+              <input
+                type="text"
+                value={booking.armador || ''}
+                onChange={e => setBooking({ ...booking, armador: e.target.value })}
+                placeholder="Ex: MSC"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.armador || '-'}</div>
+            )}
           </div>
 
           {/* Box Mercadoria */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Mercadoria</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.mercadoria || '-'}</div>
+            {canEdit ? (
+              <select
+                value={booking.mercadoria || ''}
+                onChange={e => setBooking({ ...booking, mercadoria: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  cursor: 'pointer',
+                  height: '32px'
+                }}
+              >
+                <option value="">Selecione...</option>
+                <option value="café">Café</option>
+                <option value="Cravo">Cravo</option>
+                <option value="Pimenta Preta">Pimenta Preta</option>
+                <option value="Pimenta Vermelha">Pimenta Vermelha</option>
+                <option value="Pimenta Branca">Pimenta Branca</option>
+              </select>
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.mercadoria || '-'}</div>
+            )}
           </div>
 
           {/* Box Bags */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Embalagem / Bags</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
-              {booking.bagsQuantity ? `${booking.bagsQuantity} Bags (${booking.embalagem || 'Sacaria'})` : '-'}
-            </div>
+            {canEdit ? (
+              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                <input
+                  type="number"
+                  value={booking.bagsQuantity || 0}
+                  onChange={e => setBooking({ ...booking, bagsQuantity: parseInt(e.target.value, 10) || 0 })}
+                  placeholder="Qtd"
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: 'var(--text-primary)',
+                    padding: '4px 8px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    width: '70px',
+                    height: '32px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <input
+                  type="text"
+                  value={booking.embalagem || 'Sacaria'}
+                  onChange={e => setBooking({ ...booking, embalagem: e.target.value })}
+                  placeholder="Embalagem"
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: 'var(--text-primary)',
+                    padding: '4px 8px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    flex: 1,
+                    height: '32px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
+                {booking.bagsQuantity ? `${booking.bagsQuantity} Bags (${booking.embalagem || 'Sacaria'})` : '-'}
+              </div>
+            )}
           </div>
 
           {/* Box Tipo de Operação */}
-          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Tipo de Operação</div>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
-              {booking.type || 'Redex Operation Report'}
-            </div>
+            {canEdit ? (
+              <select
+                value={booking.type || 'Redex Operation Report'}
+                onChange={e => {
+                  const val = e.target.value;
+                  const updatedBooking = { ...booking, type: val };
+                  if (val === 'Redex Operation Report') {
+                    updatedBooking.stuffingReportNumber = '';
+                  }
+                  setBooking(updatedBooking);
+                }}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  cursor: 'pointer',
+                  height: '32px'
+                }}
+              >
+                <option value="Redex Operation Report">Redex Operation Report</option>
+                <option value="Container Stuffing Report">Container Stuffing Report</option>
+              </select>
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
+                {booking.type || 'Redex Operation Report'}
+              </div>
+            )}
           </div>
 
           {/* Box Stuffing Report Number */}
-          {booking.type === 'Container Stuffing Report' && booking.stuffingReportNumber && (
-            <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          {booking.type === 'Container Stuffing Report' && (
+            <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Stuffing Report Number</div>
-              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
-                {booking.stuffingReportNumber}
-              </div>
+              {canEdit ? (
+                <input
+                  type="text"
+                  value={booking.stuffingReportNumber || ''}
+                  onChange={e => setBooking({ ...booking, stuffingReportNumber: e.target.value })}
+                  placeholder="Preenchimento Manual"
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: 'var(--text-primary)',
+                    marginTop: '4px',
+                    padding: '4px 8px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    width: '100%',
+                    height: '32px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              ) : (
+                <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>
+                  {booking.stuffingReportNumber || '-'}
+                </div>
+              )}
             </div>
           )}
+
+          {/* Box Nº do Booking */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Nº do Booking</div>
+            {canEdit ? (
+              <input
+                type="text"
+                value={booking.bookingNumber || ''}
+                onChange={e => setBooking({ ...booking, bookingNumber: e.target.value })}
+                placeholder="BK-XXXXXX"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.bookingNumber || '-'}</div>
+            )}
+          </div>
+
+          {/* Box Porto de Destino */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Porto de Destino</div>
+            {canEdit ? (
+              <input
+                type="text"
+                value={booking.portoDestino || ''}
+                onChange={e => setBooking({ ...booking, portoDestino: e.target.value })}
+                placeholder="Ex: Santos"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.portoDestino || '-'}</div>
+            )}
+          </div>
+
+          {/* Box Data de Início */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data de Início</div>
+            {canEdit ? (
+              <input
+                type="date"
+                value={booking.startDate || ''}
+                onChange={e => setBooking({ ...booking, startDate: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.startDate || '-'}</div>
+            )}
+          </div>
+
+          {/* Box Data de Lançamento */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data de Lançamento</div>
+            {canEdit ? (
+              <input
+                type="date"
+                value={booking.launchDate || ''}
+                onChange={e => setBooking({ ...booking, launchDate: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.launchDate || '-'}</div>
+            )}
+          </div>
 
           {/* Box Status do Booking */}
           <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
