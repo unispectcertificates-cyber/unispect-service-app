@@ -40,6 +40,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const [showAddContainer, setShowAddContainer] = useState(false);
   const [showPhotoManager, setShowPhotoManager] = useState(null); // Container object
   const [selectedContainerToManage, setSelectedContainerToManage] = useState(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
   
   // Form de Novo Container
   const [newContainer, setNewContainer] = useState({
@@ -1013,15 +1014,20 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                   flexShrink: 0
                 }}>
                   {/* Moldura 3:4 */}
-                  <div style={{
-                    width: '120px',
-                    height: '160px',
-                    backgroundColor: '#000',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden'
-                  }}>
+                  <div 
+                    onClick={() => setPreviewPhotoUrl(photo.url)}
+                    style={{
+                      width: '120px',
+                      height: '160px',
+                      backgroundColor: '#000',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      cursor: 'pointer'
+                    }}
+                    title="Clique para ampliar"
+                  >
                     <img src={photo.url} alt={photo.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   </div>
 
@@ -1118,6 +1124,54 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                 Fechar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visualizador de Foto em Tamanho Maior */}
+      {previewPhotoUrl && (
+        <div 
+          onClick={() => setPreviewPhotoUrl(null)} 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            cursor: 'zoom-out',
+            padding: '16px'
+          }}
+          className="no-print"
+        >
+          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh', display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+            <img src={previewPhotoUrl} alt="Visualização" style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} />
+            <button 
+              onClick={() => setPreviewPhotoUrl(null)}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: '0px',
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 'bold'
+              }}
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

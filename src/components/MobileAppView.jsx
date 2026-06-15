@@ -12,6 +12,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   const [newSealInput, setNewSealInput] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(''); // 'success' | 'error' | ''
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -561,16 +562,21 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
                     padding: '4px',
                     backgroundColor: 'rgba(255,255,255,0.02)'
                   }}>
-                    <div style={{
-                      width: '90px',
-                      height: '120px',
-                      borderRadius: '4px',
-                      overflow: 'hidden',
-                      backgroundColor: '#000',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
+                    <div 
+                      onClick={() => setPreviewPhotoUrl(photo.url)}
+                      style={{
+                        width: '90px',
+                        height: '120px',
+                        borderRadius: '4px',
+                        overflow: 'hidden',
+                        backgroundColor: '#000',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer'
+                      }}
+                      title="Clique para ampliar"
+                    >
                       <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
 
@@ -932,6 +938,55 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
           </div>
         )}
       </main>
+
+      {/* Visualizador de Foto em Tamanho Maior */}
+      {previewPhotoUrl && (
+        <div 
+          onClick={() => setPreviewPhotoUrl(null)} 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            cursor: 'zoom-out',
+            padding: '16px'
+          }}
+          className="no-print"
+        >
+          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh', display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+            <img src={previewPhotoUrl} alt="Visualização" style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} />
+            <button 
+              onClick={() => setPreviewPhotoUrl(null)}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: '0px',
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 'bold'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
