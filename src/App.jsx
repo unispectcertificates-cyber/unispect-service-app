@@ -1598,6 +1598,33 @@ export default function App() {
                         />
                       </div>
                     </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '600' }}>Versão do Aplicativo</span>
+                      <button
+                        onClick={async () => {
+                          if (window.confirm("Deseja limpar o cache e atualizar o aplicativo para a versão mais recente?")) {
+                            if ('serviceWorker' in navigator) {
+                              const registrations = await navigator.serviceWorker.getRegistrations();
+                              for (let registration of registrations) {
+                                await registration.unregister();
+                              }
+                            }
+                            if ('caches' in window) {
+                              const keys = await caches.keys();
+                              for (let key of keys) {
+                                await caches.delete(key);
+                              }
+                            }
+                            window.location.reload(true);
+                          }
+                        }}
+                        className="btn btn-secondary"
+                        style={{ width: '100%', justifyContent: 'center', backgroundColor: 'var(--color-brand-light)', borderColor: 'var(--color-brand)', color: 'var(--color-brand)', fontWeight: '700' }}
+                      >
+                        🔄 Limpar Cache & Atualizar App
+                      </button>
+                    </div>
                   </div>
 
                   {user.role === 'ADM' && (

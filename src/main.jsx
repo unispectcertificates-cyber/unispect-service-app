@@ -8,6 +8,13 @@ import { registerSW } from 'virtual:pwa-register'
 // Registrar Service Worker do PWA para carregamento offline/instantâneo
 registerSW({ immediate: true });
 
+// Recarregar a página automaticamente se o Service Worker for atualizado
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+}
+
 // Inicializar banco de dados se necessário (cria coleções padrão se vazias)
 db.init().catch(err => console.error("Database initialization failed:", err));
 
