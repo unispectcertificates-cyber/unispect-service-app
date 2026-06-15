@@ -161,7 +161,7 @@ export default function UsersList({ onDataChange }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000,
+            zIndex: 2000,
             padding: '20px',
           }}
         >

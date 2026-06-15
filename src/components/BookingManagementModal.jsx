@@ -219,15 +219,15 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 1000,
+      zIndex: 2000,
       padding: '24px'
     }} className="modal-overlay no-print">
       
       {/* Container Principal do Modal (Design Escuro Unispect) */}
-      <div className="glass-panel booking-modal-container">
+      <div className="glass-panel booking-modal-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '100%', overflow: 'hidden' }}>
         
         {/* Topo do Modal */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px', flexShrink: 0 }}>
           <div>
             <h2 style={{ fontSize: '18px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)' }}>
               Gerenciar Booking / Certificado: {booking.certificateNumber}
@@ -240,6 +240,9 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
             <X size={22} />
           </button>
         </div>
+
+        {/* Corpo do Modal - Rolável */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', paddingRight: '4px', paddingBottom: '8px' }} className="modal-scrollable-body">
 
         {/* Grade de Informações Gerais em Boxes (Igual ao Screenshot 2) */}
         <div className="info-grid">
@@ -805,8 +808,11 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           </div>
         </div>
 
+        {/* Fim do Corpo do Modal - Rolável */}
+        </div>
+
         {/* Rodapé do Modal */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '14px', flexShrink: 0 }}>
           <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '8px 18px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
             Fechar Janela
           </button>
@@ -830,7 +836,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1100,
+          zIndex: 2100,
           padding: '20px'
         }}>
           <form onSubmit={handleSaveContainer} className="glass-panel addContainer-modal-form">
@@ -940,7 +946,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1100,
+          zIndex: 2100,
           padding: '24px'
         }}>
           <div className="glass-panel photoManager-modal">
@@ -1078,11 +1084,11 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1100,
+          zIndex: 2100,
           padding: '24px'
         }}>
-          <div className="glass-panel containerManage-modal">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+          <div className="glass-panel containerManage-modal" style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '100%', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', flexShrink: 0 }}>
               <h3 style={{ fontSize: '16px', color: 'var(--color-brand)' }}>
                 Gerenciar Container: {selectedContainerToManage.containerNumber}
               </h3>
@@ -1091,21 +1097,23 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               </button>
             </div>
 
-            <ContainerDetail 
-              container={selectedContainerToManage}
-              bookingId={booking.id}
-              user={user}
-              onUpdateContainer={(updatedCont) => {
-                setSelectedContainerToManage(updatedCont);
-                handleUpdateContainerPhotos(updatedCont);
-              }}
-              onDeleteContainer={(contId) => {
-                handleDeleteContainer(contId);
-                setSelectedContainerToManage(null);
-              }}
-            />
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', paddingRight: '4px', paddingBottom: '8px' }} className="modal-scrollable-body">
+              <ContainerDetail 
+                container={selectedContainerToManage}
+                bookingId={booking.id}
+                user={user}
+                onUpdateContainer={(updatedCont) => {
+                  setSelectedContainerToManage(updatedCont);
+                  handleUpdateContainerPhotos(updatedCont);
+                }}
+                onDeleteContainer={(contId) => {
+                  handleDeleteContainer(contId);
+                  setSelectedContainerToManage(null);
+                }}
+              />
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '12px', flexShrink: 0 }}>
               <button onClick={() => setSelectedContainerToManage(null)} className="btn btn-primary" style={{ padding: '8px 18px' }}>
                 Fechar
               </button>

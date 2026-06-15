@@ -1678,7 +1678,7 @@ export default function App() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1000,
+          zIndex: 2000,
           padding: '20px'
         }}>
           <form onSubmit={handleCreateBooking} className="glass-panel create-modal-form" style={{ maxHeight: '90vh', overflowY: 'auto' }}>

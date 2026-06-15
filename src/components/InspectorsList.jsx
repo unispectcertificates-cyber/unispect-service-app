@@ -114,7 +114,7 @@ export default function InspectorsList({ onDataChange }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1000,
+          zIndex: 2000,
           padding: '20px'
         }}>
           <form onSubmit={handleSubmit} className="glass-panel" style={{ maxWidth: '420px', width: '100%', padding: '24px', border: '1px solid var(--border-color)' }}>
