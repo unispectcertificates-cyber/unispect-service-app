@@ -48,7 +48,7 @@ export default function Login({ onLogin }) {
         justifyContent: 'center',
         minHeight: '100vh',
         width: '100vw',
-        background: 'radial-gradient(circle at center, #1e3a6a 0%, #0d1a30 100%)',
+        background: 'radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%)',
         position: 'fixed',
         top: 0,
         left: 0,
@@ -64,14 +64,14 @@ export default function Login({ onLogin }) {
           width: '100%',
           padding: '40px 32px',
           borderRadius: '12px',
-          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), var(--shadow-glow)',
-          border: '1px solid rgba(230, 185, 65, 0.2)',
+          boxShadow: 'var(--shadow-lg)',
+          border: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           gap: '24px',
           backdropFilter: 'blur(16px)',
-          backgroundColor: 'rgba(39, 68, 114, 0.35)',
+          backgroundColor: 'var(--bg-secondary)',
         }}
       >
         {/* Logo Unispect */}
@@ -87,10 +87,10 @@ export default function Login({ onLogin }) {
               lineHeight: '1',
               fontWeight: 'bold',
               borderRadius: '4px',
-              backgroundColor: 'rgba(230, 185, 65, 0.05)',
+              backgroundColor: 'var(--color-brand-light)',
             }}
           >
-            <span style={{ fontSize: '24px', fontWeight: '800', letterSpacing: '2px', color: '#fff' }}>UN</span>
+            <span style={{ fontSize: '24px', fontWeight: '800', letterSpacing: '2px', color: 'var(--text-primary)' }}>UN</span>
             <span style={{ fontSize: '9px', fontWeight: '800', marginTop: '3px', letterSpacing: '1px', color: 'var(--color-brand)' }}>UNISPECT</span>
           </div>
           <div style={{ textAlign: 'center', marginTop: '4px' }}>
@@ -99,7 +99,7 @@ export default function Login({ onLogin }) {
                 fontSize: '20px',
                 fontFamily: 'var(--font-display)',
                 fontWeight: '700',
-                color: '#fff',
+                color: 'var(--text-primary)',
                 letterSpacing: '0.5px',
               }}
             >
@@ -131,7 +131,7 @@ export default function Login({ onLogin }) {
                 border: '1px solid var(--color-danger)',
                 padding: '10px 12px',
                 borderRadius: '6px',
-                color: '#ff8080',
+                color: 'var(--color-danger)',
                 fontSize: '13px',
                 fontWeight: '600',
               }}
@@ -149,7 +149,7 @@ export default function Login({ onLogin }) {
                 style={{
                   position: 'absolute',
                   left: '12px',
-                  color: 'rgba(255, 255, 255, 0.4)',
+                  color: 'var(--text-muted)',
                 }}
               />
               <input
@@ -161,8 +161,9 @@ export default function Login({ onLogin }) {
                 required
                 style={{
                   paddingLeft: '38px',
-                  backgroundColor: 'rgba(6, 9, 19, 0.4)',
-                  borderColor: 'rgba(255, 255, 255, 0.1)',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-primary)',
                   height: '44px',
                 }}
               />
@@ -177,7 +178,7 @@ export default function Login({ onLogin }) {
                 style={{
                   position: 'absolute',
                   left: '12px',
-                  color: 'rgba(255, 255, 255, 0.4)',
+                  color: 'var(--text-muted)',
                 }}
               />
               <input
@@ -189,8 +190,9 @@ export default function Login({ onLogin }) {
                 required
                 style={{
                   paddingLeft: '38px',
-                  backgroundColor: 'rgba(6, 9, 19, 0.4)',
-                  borderColor: 'rgba(255, 255, 255, 0.1)',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-primary)',
                   height: '44px',
                 }}
               />
@@ -209,7 +211,7 @@ export default function Login({ onLogin }) {
               boxShadow: 'var(--shadow-glow)',
               width: '100%',
               backgroundColor: 'var(--color-brand)',
-              color: '#0d1a30',
+              color: '#ffffff',
               border: 'none',
               cursor: 'pointer',
               display: 'flex',
