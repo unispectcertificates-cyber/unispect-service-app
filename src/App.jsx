@@ -1081,7 +1081,7 @@ export default function App() {
                       padding: '6px 10px',
                       backgroundColor: 'var(--bg-tertiary)',
                       border: '1px solid var(--border-color)',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       borderRadius: '4px',
                       outline: 'none',
                       width: '100%'
@@ -1432,10 +1432,10 @@ export default function App() {
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: 'var(--text-primary)' }}>{exp}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: 'var(--text-primary)' }}>{loc}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: 'var(--text-primary)' }}>{b.vesselVoyage}</span></div>
                             </div>
 
                             <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
@@ -1501,10 +1501,10 @@ export default function App() {
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: '#fff', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: '#fff' }}>{exp}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: '#fff' }}>{loc}</span></div>
-                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: '#fff' }}>{b.vesselVoyage}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Booking:</span> <span style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{b.bookingNumber}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Exportador:</span> <span style={{ color: 'var(--text-primary)' }}>{exp}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Local:</span> <span style={{ color: 'var(--text-primary)' }}>{loc}</span></div>
+                              <div><span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>Navio/Viagem:</span> <span style={{ color: 'var(--text-primary)' }}>{b.vesselVoyage}</span></div>
                             </div>
 
                             <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
@@ -1576,7 +1576,7 @@ export default function App() {
                         placeholder="IP do Servidor (ex: 192.168.1.15)"
                         value={serverIp}
                         onChange={e => handleServerIpChange(e.target.value)}
-                        style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: '#fff' }}
+                        style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                       />
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '4px', display: 'block' }}>
                         Deixe em branco para usar o IP atual ({window.location.hostname}).
