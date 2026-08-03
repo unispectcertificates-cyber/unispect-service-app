@@ -40,10 +40,20 @@ export default function App() {
     };
   }, []);
 
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [currentTab, setCurrentTab] = useState(() => {
-    const isMobile = window.innerWidth <= 1024;
+    const isMob = window.innerWidth <= 768;
     const usr = db.getUser();
-    if (isMobile && usr && (usr.role === 'Inspector' || usr.role === 'ADM')) {
+    if (isMob && usr && usr.role !== 'Exportador') {
       return 'field-portal';
     }
     return 'bookings';
@@ -1180,7 +1190,7 @@ export default function App() {
 
             {/* Renderizador das guias baseadas na escolha do Dropdown */}
             <AnimatePresence mode="wait">
-              {currentTab === 'bookings' && (
+              {currentTab === 'bookings' && (!isMobile || user.role === 'Exportador') && (
                 <motion.div key="tab-bookings" {...pageTransition}>
                   <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
                     <div className="filters-grid">
@@ -1562,7 +1572,7 @@ export default function App() {
                 </motion.div>
               )}
 
-              {currentTab === 'field-portal' && (
+              {(currentTab === 'field-portal' || (isMobile && user.role !== 'Exportador')) && (
                 <motion.div key="tab-field-portal" {...pageTransition}>
                   <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} />
                 </motion.div>
