@@ -38,23 +38,28 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     }
   };
 
-  // Filtragem unificada por Booking, Container e Exportador
+  // Filtragem unificada por Booking, Container e Exportador (Finalizados ocultos por padrão)
   const filteredBookings = bookings.filter(b => {
     const term = searchQuery.toLowerCase().trim();
-    if (!term) return true;
 
-    // 1. Pesquisa por Booking/Certificado
-    const matchBooking = b.bookingNumber.toLowerCase().includes(term) ||
-                         b.certificateNumber.toLowerCase().includes(term);
+    // Se NÃO houver termo de busca, exibe apenas os bookings em aberto (Pendente / Em andamento)
+    if (!term) {
+      return b.status !== 'Finalizado';
+    }
+
+    // 1. Pesquisa por Booking/Certificado/Report
+    const matchBooking = (b.bookingNumber && b.bookingNumber.toLowerCase().includes(term)) ||
+                         (b.certificateNumber && b.certificateNumber.toLowerCase().includes(term)) ||
+                         (b.stuffingReportNumber && b.stuffingReportNumber.toLowerCase().includes(term));
 
     // 2. Pesquisa por Container
     const matchContainer = b.containers?.some(c =>
-      c.containerNumber.toLowerCase().includes(term)
+      c.containerNumber && c.containerNumber.toLowerCase().includes(term)
     );
 
     // 3. Pesquisa por Exportador
     const exp = exportadores.find(e => e.id === b.exporterId);
-    const matchExporter = exp && exp.name.toLowerCase().includes(term);
+    const matchExporter = exp && exp.name && exp.name.toLowerCase().includes(term);
 
     return matchBooking || matchContainer || matchExporter;
   });
@@ -266,7 +271,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
             {/* Resultados da Pesquisa */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Resultados ({filteredBookings.length})
+                {searchQuery.trim() ? `Resultados da Pesquisa (${filteredBookings.length})` : `📋 Bookings em Aberto (${filteredBookings.length})`}
               </span>
 
               {filteredBookings.map(b => {
