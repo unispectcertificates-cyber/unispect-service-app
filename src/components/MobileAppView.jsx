@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Camera, Image, Trash2, ArrowLeft, ArrowRight, RefreshCw, X } from 'lucide-react';
+import { Search, Camera, Image, Trash2, ArrowLeft, ArrowRight, RefreshCw, X, SlidersHorizontal, CheckCircle2, Lock, FileText } from 'lucide-react';
 import { db, useBookings, useExportadores, useLocais } from '../db';
 
 export default function MobileAppView({ onLogout, hideHeader = false }) {
@@ -9,6 +9,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
   const locais = useLocais();
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [selectedContainer, setSelectedContainer] = useState(null);
+  const [activeContainerTab, setActiveContainerTab] = useState('photos'); // 'photos' | 'seals' | 'notes'
   const [newSealInput, setNewSealInput] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(''); // 'success' | 'error' | ''
@@ -271,71 +272,68 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
               {filteredBookings.map(b => {
                 const expName = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
                 const statusColor = b.status === 'Finalizado' ? '#10b981' : b.status === 'Em andamento' ? '#f59e0b' : '#ef4444';
+                const reportNum = b.stuffingReportNumber ? `SR: ${b.stuffingReportNumber}` : b.certificateNumber;
 
                 return (
                   <div 
                     key={b.id}
                     onClick={() => setSelectedBooking(b)}
                     style={{
-                      padding: '18px',
+                      padding: '14px 16px',
                       backgroundColor: 'var(--bg-secondary)',
                       border: '1px solid var(--border-color)',
-                      borderRadius: '12px',
+                      borderRadius: '10px',
                       cursor: 'pointer',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px',
-                      transition: 'transform 0.2s ease',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
                       boxShadow: 'var(--shadow-sm)'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--color-brand)', fontWeight: '800', fontSize: '15px' }}>{b.certificateNumber}</span>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        {b.pendingItem && (
-                          <span style={{
-                            fontSize: '9px',
-                            padding: '3px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                            color: '#ef4444',
-                            fontWeight: '800',
-                            border: '1px solid #ef4444',
-                            textTransform: 'uppercase',
-                            whiteSpace: 'nowrap'
-                          }}>{b.pendingItem}</span>
-                        )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ color: 'var(--color-brand)', fontWeight: '800', fontSize: '14px' }}>
+                          {reportNum}
+                        </span>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-primary)' }}>
+                          • BK: {b.bookingNumber}
+                        </span>
                         <span style={{
                           fontSize: '9px',
-                          padding: '3px 8px',
+                          padding: '2px 7px',
                           borderRadius: '4px',
                           backgroundColor: `${statusColor}18`,
                           color: statusColor,
                           fontWeight: '800',
-                          textTransform: 'uppercase'
-                        }}>{b.status}</span>
+                          textTransform: 'uppercase',
+                          marginLeft: 'auto'
+                        }}>
+                          {b.status}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Exportador: <strong style={{ color: 'var(--text-primary)' }}>{expName}</strong>
                       </div>
                     </div>
 
-                    <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
-                      Booking: <strong>{b.bookingNumber}</strong>
-                    </div>
-
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      Exportador: <span>{expName}</span>
-                    </div>
-
+                    {/* Botão Ícone de Ajuste */}
                     <div style={{
                       display: 'flex',
-                      gap: '12px',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 10px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--color-brand)',
                       fontSize: '11px',
-                      color: 'var(--text-muted)',
-                      borderTop: '1px solid var(--border-color)',
-                      paddingTop: '8px',
-                      marginTop: '4px'
+                      fontWeight: '800',
+                      flexShrink: 0
                     }}>
-                      <span>Navio: {b.vesselVoyage}</span>
-                      <span>Containers: {b.containers?.length || 0}</span>
+                      <SlidersHorizontal size={14} />
+                      <span>Ajuste</span>
                     </div>
                   </div>
                 );
@@ -476,378 +474,459 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
               </div>
             </div>
 
-            {/* SEÇÃO 4: INSERIR FOTOS */}
-            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
-                  4. Inserir Fotos dos Containers
-                </h3>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Total: {selectedContainer.photos?.length || 0}
-                </span>
-              </div>
+            {/* Abas Rápidas no Topo do Container */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', backgroundColor: 'var(--bg-tertiary)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={() => setActiveContainerTab('photos')}
+                style={{
+                  padding: '10px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: activeContainerTab === 'photos' ? 'var(--color-brand)' : 'transparent',
+                  color: activeContainerTab === 'photos' ? '#ffffff' : 'var(--text-secondary)',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Camera size={14} />
+                <span>Fotos ({selectedContainer.photos?.length || 0})</span>
+              </button>
 
-              {/* Botões de Câmera e Galeria */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <button 
-                  onClick={() => cameraInputRef.current.click()}
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Camera size={16} style={{ color: 'var(--color-brand)' }} />
-                  <span>Tirar Foto</span>
-                </button>
-                <input 
-                  type="file" 
-                  ref={cameraInputRef}
-                  onChange={handlePhotoUpload}
-                  accept="image/*"
-                  capture="environment"
-                  style={{ display: 'none' }}
-                />
+              <button
+                type="button"
+                onClick={() => setActiveContainerTab('seals')}
+                style={{
+                  padding: '10px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: activeContainerTab === 'seals' ? 'var(--color-brand)' : 'transparent',
+                  color: activeContainerTab === 'seals' ? '#ffffff' : 'var(--text-secondary)',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Lock size={14} />
+                <span>Lacres & Pesos</span>
+              </button>
 
-                <button 
-                  onClick={() => galleryInputRef.current.click()}
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Image size={16} style={{ color: 'var(--color-brand)' }} />
-                  <span>Galeria</span>
-                </button>
-                <input 
-                  type="file" 
-                  ref={galleryInputRef}
-                  onChange={handlePhotoUpload}
-                  multiple
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                />
-              </div>
-
-              {/* Grid Scrollable de Fotos */}
-              <div style={{
-                display: 'flex',
-                gap: '12px',
-                overflowX: 'auto',
-                paddingBottom: '6px'
-              }}>
-                {selectedContainer.photos?.map((photo, index) => (
-                  <div key={photo.id} style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    flexShrink: 0,
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '6px',
-                    padding: '4px',
-                    backgroundColor: 'var(--bg-tertiary)'
-                  }}>
-                    <div 
-                      onClick={() => setPreviewPhotoUrl(photo.url)}
-                      style={{
-                        width: '90px',
-                        height: '120px',
-                        borderRadius: '4px',
-                        overflow: 'hidden',
-                        backgroundColor: '#000',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer'
-                      }}
-                      title="Clique para ampliar"
-                    >
-                      <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px' }}>
-                      <button 
-                        disabled={index === 0}
-                        onClick={() => movePhoto(index, -1)}
-                        style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
-                      >
-                        <ArrowLeft size={10} />
-                      </button>
-                      <button 
-                        onClick={() => handleDeletePhoto(photo.id)}
-                        style={{ padding: '3px', flex: 1, backgroundColor: 'var(--color-danger-light)', border: 'none', color: 'var(--color-danger)', borderRadius: '2px' }}
-                      >
-                        <Trash2 size={10} />
-                      </button>
-                      <button 
-                        disabled={index === (selectedContainer.photos.length - 1)}
-                        onClick={() => movePhoto(index, 1)}
-                        style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
-                      >
-                        <ArrowRight size={10} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {(!selectedContainer.photos || selectedContainer.photos.length === 0) && (
-                  <div style={{
-                    flex: 1,
-                    border: '1px dashed var(--border-color)',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--text-muted)',
-                    fontSize: '12px',
-                    minHeight: '120px'
-                  }}>
-                    Nenhuma foto anexada.
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => setActiveContainerTab('notes')}
+                style={{
+                  padding: '10px 4px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: activeContainerTab === 'notes' ? 'var(--color-brand)' : 'transparent',
+                  color: activeContainerTab === 'notes' ? '#ffffff' : 'var(--text-secondary)',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px'
+                }}
+              >
+                <FileText size={14} />
+                <span>Obs & Status</span>
+              </button>
             </div>
 
-            {/* SEÇÃO 6: FAZER INVENTÁRIO */}
-            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
-                6. Fazer Inventário dos Containers
-              </h3>
+            {/* ABA 1: FOTOS DA CARGA */}
+            {activeContainerTab === 'photos' && (
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
+                    📸 Fotos do Container
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Total: {selectedContainer.photos?.length || 0}
+                  </span>
+                </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} className="mobile-form-inputs">
-                {/* Quantidade de Bags */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Quantidade de Sacas (Bags)
-                  </label>
-                  <input 
-                    type="number"
-                    value={selectedContainer.bagsQuantity || ''}
-                    onChange={e => handleUpdateContainerField('bagsQuantity', parseInt(e.target.value, 10) || 0)}
-                    placeholder="Ex: 320"
+                {/* Botões de Câmera e Galeria */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button 
+                    onClick={() => cameraInputRef.current.click()}
                     style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
+                      padding: '12px 14px',
                       borderRadius: '8px',
-                      color: 'var(--text-primary)',
-                      fontSize: '14px',
-                      outline: 'none'
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--color-brand)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      boxShadow: 'var(--shadow-sm)'
                     }}
+                  >
+                    <Camera size={18} />
+                    <span>Tirar Foto (Câmera)</span>
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={cameraInputRef}
+                    onChange={handlePhotoUpload}
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: 'none' }}
+                  />
+
+                  <button 
+                    onClick={() => galleryInputRef.current.click()}
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Image size={18} style={{ color: 'var(--color-brand)' }} />
+                    <span>Galeria</span>
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={galleryInputRef}
+                    onChange={handlePhotoUpload}
+                    multiple
+                    accept="image/*"
+                    style={{ display: 'none' }}
                   />
                 </div>
 
-                {/* Grid Pesos */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Net Weight (Peso Carga)
-                    </label>
-                    <input 
-                      type="text"
-                      value={selectedContainer.netWeight || ''}
-                      onChange={e => handleUpdateContainerField('netWeight', e.target.value)}
-                      placeholder="Ex: 19.200"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Tara
-                    </label>
-                    <input 
-                      type="text"
-                      value={selectedContainer.tara || ''}
-                      onChange={e => handleUpdateContainerField('tara', e.target.value)}
-                      placeholder="Ex: 3.800"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Gross Weight (Bruto)
-                    </label>
-                    <input 
-                      type="text"
-                      value={selectedContainer.grossWeight || ''}
-                      onChange={e => handleUpdateContainerField('grossWeight', e.target.value)}
-                      placeholder="Ex: 23.000"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Marca / Cod. Lote
-                    </label>
-                    <input 
-                      type="text"
-                      value={selectedContainer.brand || ''}
-                      onChange={e => handleUpdateContainerField('brand', e.target.value)}
-                      placeholder="Ex: 002/1500"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Lacres Provisórios Múltiplos */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Lacres Provisórios (Múltiplos)
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                    <input 
-                      type="text"
-                      placeholder="Adicionar lacre..."
-                      value={newSealInput}
-                      onChange={e => setNewSealInput(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleAddProvisionalSeal()}
-                      style={{
-                        flex: 1,
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                    <button 
-                      onClick={handleAddProvisionalSeal}
-                      style={{
-                        padding: '10px 16px',
-                        backgroundColor: 'var(--color-brand)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '8px',
-                        fontWeight: '800',
-                        cursor: 'pointer',
-                        fontSize: '12px'
-                      }}
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {selectedContainer.provisionalSeals?.map((seal, idx) => (
+                {/* Grid Scrollable de Fotos */}
+                <div style={{
+                  display: 'flex',
+                  gap: '12px',
+                  overflowX: 'auto',
+                  paddingBottom: '6px'
+                }}>
+                  {selectedContainer.photos?.map((photo, index) => (
+                    <div key={photo.id} style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      flexShrink: 0,
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      padding: '4px',
+                      backgroundColor: 'var(--bg-tertiary)'
+                    }}>
                       <div 
-                        key={idx}
+                        onClick={() => setPreviewPhotoUrl(photo.url)}
                         style={{
+                          width: '90px',
+                          height: '120px',
+                          borderRadius: '4px',
+                          overflow: 'hidden',
+                          backgroundColor: '#000',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '6px',
-                          padding: '4px 10px',
+                          justifyContent: 'center',
+                          cursor: 'pointer'
+                        }}
+                        title="Clique para ampliar"
+                      >
+                        <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px' }}>
+                        <button 
+                          disabled={index === 0}
+                          onClick={() => movePhoto(index, -1)}
+                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
+                        >
+                          <ArrowLeft size={10} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeletePhoto(photo.id)}
+                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--color-danger-light)', border: 'none', color: 'var(--color-danger)', borderRadius: '2px' }}
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                        <button 
+                          disabled={index === (selectedContainer.photos.length - 1)}
+                          onClick={() => movePhoto(index, 1)}
+                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
+                        >
+                          <ArrowRight size={10} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(!selectedContainer.photos || selectedContainer.photos.length === 0) && (
+                    <div style={{
+                      flex: 1,
+                      border: '1px dashed var(--border-color)',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--text-muted)',
+                      fontSize: '12px',
+                      minHeight: '120px'
+                    }}>
+                      Nenhuma foto anexada. Toque no botão acima para tirar foto.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ABA 2: LACRES & PESOS */}
+            {activeContainerTab === 'seals' && (
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
+                  🔒 Lacres & Pesos da Carga
+                </h3>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} className="mobile-form-inputs">
+                  {/* Quantidade de Bags */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                      Quantidade de Sacas (Bags)
+                    </label>
+                    <input 
+                      type="number"
+                      value={selectedContainer.bagsQuantity || ''}
+                      onChange={e => handleUpdateContainerField('bagsQuantity', parseInt(e.target.value, 10) || 0)}
+                      placeholder="Ex: 320"
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        backgroundColor: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+
+                  {/* Grid Pesos */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                        Net Weight (Peso Carga)
+                      </label>
+                      <input 
+                        type="text"
+                        value={selectedContainer.netWeight || ''}
+                        onChange={e => handleUpdateContainerField('netWeight', e.target.value)}
+                        placeholder="Ex: 19.200"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
                           backgroundColor: 'var(--bg-tertiary)',
                           border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                        Tara
+                      </label>
+                      <input 
+                        type="text"
+                        value={selectedContainer.tara || ''}
+                        onChange={e => handleUpdateContainerField('tara', e.target.value)}
+                        placeholder="Ex: 3.800"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          backgroundColor: 'var(--bg-tertiary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                        Gross Weight (Bruto)
+                      </label>
+                      <input 
+                        type="text"
+                        value={selectedContainer.grossWeight || ''}
+                        onChange={e => handleUpdateContainerField('grossWeight', e.target.value)}
+                        placeholder="Ex: 23.000"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          backgroundColor: 'var(--bg-tertiary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                        Marca / Cod. Lote
+                      </label>
+                      <input 
+                        type="text"
+                        value={selectedContainer.brand || ''}
+                        onChange={e => handleUpdateContainerField('brand', e.target.value)}
+                        placeholder="Ex: 002/1500"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          backgroundColor: 'var(--bg-tertiary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Lacres Provisórios Múltiplos */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                      Lacres Provisórios (Múltiplos)
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input 
+                        type="text"
+                        placeholder="Adicionar lacre..."
+                        value={newSealInput}
+                        onChange={e => setNewSealInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddProvisionalSeal()}
+                        style={{
+                          flex: 1,
+                          padding: '10px 14px',
+                          backgroundColor: 'var(--bg-tertiary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none'
+                        }}
+                      />
+                      <button 
+                        onClick={handleAddProvisionalSeal}
+                        style={{
+                          padding: '10px 16px',
+                          backgroundColor: 'var(--color-brand)',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
                           fontSize: '12px'
                         }}
                       >
-                        <span>{seal}</span>
-                        <button 
-                          onClick={() => handleRemoveProvisionalSeal(idx)}
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
+                        Add
+                      </button>
+                    </div>
 
-                    {(!selectedContainer.provisionalSeals || selectedContainer.provisionalSeals.length === 0) && (
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                        Nenhum lacre provisório inserido.
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {selectedContainer.provisionalSeals?.map((seal, idx) => (
+                        <div 
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            backgroundColor: 'var(--bg-tertiary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            fontSize: '12px'
+                          }}
+                        >
+                          <span>{seal}</span>
+                          <button 
+                            onClick={() => handleRemoveProvisionalSeal(idx)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+
+                      {(!selectedContainer.provisionalSeals || selectedContainer.provisionalSeals.length === 0) && (
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Nenhum lacre provisório inserido.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Lacre Definitivo */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
+                      Lacre Definitivo
+                    </label>
+                    <input 
+                      type="text"
+                      value={selectedContainer.definiteSeal || ''}
+                      onChange={e => handleUpdateContainerField('definiteSeal', e.target.value)}
+                      placeholder="Nº Lacre Definitivo"
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        backgroundColor: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        outline: 'none'
+                      }}
+                    />
                   </div>
                 </div>
+              </div>
+            )}
 
-                {/* Lacre Definitivo */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Lacre Definitivo
-                  </label>
-                  <input 
-                    type="text"
-                    value={selectedContainer.definiteSeal || ''}
-                    onChange={e => handleUpdateContainerField('definiteSeal', e.target.value)}
-                    placeholder="Nº Lacre Definitivo"
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--text-primary)',
-                      fontSize: '14px',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
+            {/* ABA 3: OBSERVAÇÕES & STATUS */}
+            {activeContainerTab === 'notes' && (
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
+                  📝 Observações & Conclusão
+                </h3>
 
-
-                {/* Obs */}
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
                     Observações Técnicas
@@ -855,8 +934,8 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                   <textarea 
                     value={selectedContainer.notes || ''}
                     onChange={e => handleUpdateContainerField('notes', e.target.value)}
-                    placeholder="Observações adicionais..."
-                    rows={2}
+                    placeholder="Observações adicionais da vistoria..."
+                    rows={4}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -871,7 +950,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                   />
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Ações Finais */}
             <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
