@@ -13,6 +13,11 @@ export default defineConfig({
     }),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true
+      },
       includeAssets: ['favicon.svg', 'logo.jpg', 'stamp.jpg', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'Unispect Service',
