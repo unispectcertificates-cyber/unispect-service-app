@@ -70,6 +70,9 @@ export default function App() {
     exporterId: '',
     startDate: new Date().toISOString().split('T')[0],
     launchDate: new Date().toISOString().split('T')[0],
+    fumigationDate: new Date().toISOString().split('T')[0],
+    fitoDate: new Date().toISOString().split('T')[0],
+    definiteSealDate: new Date().toISOString().split('T')[0],
     vesselVoyage: '',
     vesselName: '',
     vesselVoyageNum: '',
@@ -171,6 +174,9 @@ export default function App() {
       exporterId: '',
       startDate: new Date().toISOString().split('T')[0],
       launchDate: new Date().toISOString().split('T')[0],
+      fumigationDate: new Date().toISOString().split('T')[0],
+      fitoDate: new Date().toISOString().split('T')[0],
+      definiteSealDate: new Date().toISOString().split('T')[0],
       vesselVoyage: '',
       vesselName: '',
       vesselVoyageNum: '',
@@ -1784,6 +1790,33 @@ export default function App() {
                   value={newBookingData.launchDate}
                   onChange={e => setNewBookingData({ ...newBookingData, launchDate: e.target.value })}
                   required
+                />
+              </div>
+
+              <div>
+                <label>Data de Fumigação</label>
+                <input
+                  type="date"
+                  value={newBookingData.fumigationDate}
+                  onChange={e => setNewBookingData({ ...newBookingData, fumigationDate: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label>Data Fito</label>
+                <input
+                  type="date"
+                  value={newBookingData.fitoDate}
+                  onChange={e => setNewBookingData({ ...newBookingData, fitoDate: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label>Data Lacre Definitivo</label>
+                <input
+                  type="date"
+                  value={newBookingData.definiteSealDate}
+                  onChange={e => setNewBookingData({ ...newBookingData, definiteSealDate: e.target.value })}
                 />
               </div>
 

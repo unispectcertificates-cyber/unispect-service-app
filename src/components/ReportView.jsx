@@ -80,19 +80,19 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a; width: 25%;">CONTAINER NUMBER</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; width: 25%; font-weight: bold; color: #000;">${cont.containerNumber}</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a; width: 25%;">FUMIGATION DATE</td>
-              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; width: 25%; font-weight: bold; color: #000;">${cont.fumigationDate || 'N/A'}</td>
+              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; width: 25%; font-weight: bold; color: #000;">${cont.fumigationDate || booking.fumigationDate || 'N/A'}</td>
             </tr>
             <tr>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">CONTAINER TYPE</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.containerType || '-'}</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">PHYTOSANITARY CERT.</td>
-              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.fitoDate || 'N/A'}</td>
+              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.fitoDate || booking.fitoDate || 'N/A'}</td>
             </tr>
             <tr>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">PROVISIONAL SEAL</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${seals}</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">DEFINITE SEAL DATE</td>
-              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.definiteSealDate || 'N/A'}</td>
+              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.definiteSealDate || booking.definiteSealDate || 'N/A'}</td>
             </tr>
             <tr>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">DEFINITE SEAL</td>
@@ -637,13 +637,13 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', width: '25%', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>CONTAINER NUMBER</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', width: '25%', fontWeight: 'bold' }}>{page.container.containerNumber}</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', width: '25%', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>FUMIGATION DATE</td>
-                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', width: '25%', fontWeight: 'bold' }}>{page.container.fumigationDate || 'N/A'}</td>
+                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', width: '25%', fontWeight: 'bold' }}>{page.container.fumigationDate || booking.fumigationDate || 'N/A'}</td>
                           </tr>
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>CONTAINER TYPE</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.containerType || '-'}</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>PHYTOSANITARY CERT.</td>
-                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.fitoDate || 'N/A'}</td>
+                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.fitoDate || booking.fitoDate || 'N/A'}</td>
                           </tr>
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>PROVISIONAL SEAL</td>
@@ -651,7 +651,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               {(page.container.provisionalSeals || []).join(', ') || 'N/A'}
                             </td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL DATE</td>
-                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSealDate || 'N/A'}</td>
+                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSealDate || booking.definiteSealDate || 'N/A'}</td>
                           </tr>
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL</td>

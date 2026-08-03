@@ -846,50 +846,6 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                   />
                 </div>
 
-                {/* Datas Operacionais */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Data de Fumigação
-                    </label>
-                    <input 
-                      type="date"
-                      value={selectedContainer.fumigationDate || ''}
-                      onChange={e => handleUpdateContainerField('fumigationDate', e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Data Fito
-                    </label>
-                    <input 
-                      type="date"
-                      value={selectedContainer.fitoDate || ''}
-                      onChange={e => handleUpdateContainerField('fitoDate', e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                </div>
 
                 {/* Obs */}
                 <div>

@@ -252,36 +252,6 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
           />
         </div>
 
-        {/* Datas Operacionais */}
-        <div>
-          <label>Data de Fumigação</label>
-          <input 
-            type="date" 
-            disabled={!canEdit}
-            value={localContainer.fumigationDate || ''} 
-            onChange={e => handleChange('fumigationDate', e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label>Data Fito</label>
-          <input 
-            type="date" 
-            disabled={!canEdit}
-            value={localContainer.fitoDate || ''} 
-            onChange={e => handleChange('fitoDate', e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label>Data Lacre Definitivo</label>
-          <input 
-            type="date" 
-            disabled={!canEdit}
-            value={localContainer.definiteSealDate || ''} 
-            onChange={e => handleChange('definiteSealDate', e.target.value)}
-          />
-        </div>
       </div>
 
       {/* Seção de Lacres Provisórios Múltiplos */}

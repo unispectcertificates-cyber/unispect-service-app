@@ -426,6 +426,36 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
           </div>
 
           <div>
+            <label>Data de Fumigação</label>
+            <input 
+              type="date" 
+              disabled={!canEditBookingFields}
+              value={booking.fumigationDate || ''} 
+              onChange={e => updateBookingField('fumigationDate', e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label>Data Fito</label>
+            <input 
+              type="date" 
+              disabled={!canEditBookingFields}
+              value={booking.fitoDate || ''} 
+              onChange={e => updateBookingField('fitoDate', e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label>Data Lacre Definitivo</label>
+            <input 
+              type="date" 
+              disabled={!canEditBookingFields}
+              value={booking.definiteSealDate || ''} 
+              onChange={e => updateBookingField('definiteSealDate', e.target.value)}
+            />
+          </div>
+
+          <div>
             <label>Navio + Viagem</label>
             <input 
               type="text" 

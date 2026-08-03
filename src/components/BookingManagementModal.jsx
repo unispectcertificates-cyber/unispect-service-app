@@ -627,6 +627,87 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
             )}
           </div>
 
+          {/* Box Data de Fumigação */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data de Fumigação</div>
+            {canEdit ? (
+              <input
+                type="date"
+                value={booking.fumigationDate || ''}
+                onChange={e => setBooking({ ...booking, fumigationDate: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.fumigationDate || '-'}</div>
+            )}
+          </div>
+
+          {/* Box Data Fito */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data Fito</div>
+            {canEdit ? (
+              <input
+                type="date"
+                value={booking.fitoDate || ''}
+                onChange={e => setBooking({ ...booking, fitoDate: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.fitoDate || '-'}</div>
+            )}
+          </div>
+
+          {/* Box Data Lacre Definitivo */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data Lacre Definitivo</div>
+            {canEdit ? (
+              <input
+                type="date"
+                value={booking.definiteSealDate || ''}
+                onChange={e => setBooking({ ...booking, definiteSealDate: e.target.value })}
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.definiteSealDate || '-'}</div>
+            )}
+          </div>
+
           {/* Box Status do Booking */}
           <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Status do Booking</div>
