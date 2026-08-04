@@ -38,13 +38,17 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     }
   };
 
+  // Status que representam "finalizado/concluído" — contempla valores históricos do banco
+  const FINISHED_STATUSES = ['finalizado', 'estufado', 'finished', 'concluido', 'concluído'];
+  const isFinished = (b) => FINISHED_STATUSES.includes((b.status || '').toLowerCase().trim());
+
   // Filtragem unificada por Booking, Container e Exportador (Finalizados ocultos por padrão)
   const filteredBookings = bookings.filter(b => {
     const term = searchQuery.toLowerCase().trim();
 
     // Se NÃO houver termo de busca, exibe apenas os bookings em aberto (Pendente / Em andamento)
     if (!term) {
-      return b.status !== 'Finalizado';
+      return !isFinished(b);
     }
 
     // 1. Pesquisa por Booking/Certificado/Report
