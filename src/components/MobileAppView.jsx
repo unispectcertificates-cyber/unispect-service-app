@@ -86,6 +86,14 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     
   };
 
+  // Atualização de campos do Booking (Status, Pendência, Datas)
+  const handleUpdateBookingField = async (field, value) => {
+    if (!selectedBooking) return;
+    const updatedBooking = { ...selectedBooking, [field]: value };
+    setSelectedBooking(updatedBooking);
+    await db.saveBooking(updatedBooking);
+  };
+
   // Lacres Provisórios
   const handleAddProvisionalSeal = () => {
     if (!newSealInput.trim() || !selectedContainer) return;
@@ -936,6 +944,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                   📝 Observações & Conclusão
                 </h3>
 
+                {/* Observações Técnicas do Container */}
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
                     Observações Técnicas
@@ -954,7 +963,138 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                       color: 'var(--text-primary)',
                       fontSize: '14px',
                       outline: 'none',
-                      resize: 'vertical'
+                      resize: 'vertical',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* Divisor */}
+                <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+                <div style={{ fontSize: '11px', color: 'var(--color-brand)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  📋 Informações do Booking
+                </div>
+
+                {/* Status do Booking */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Status do Booking
+                  </label>
+                  <select
+                    value={selectedBooking.status || 'Pendente'}
+                    onChange={e => handleUpdateBookingField('status', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      fontWeight: '700',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="Pendente">🔴 Pendente</option>
+                    <option value="Em andamento">🟡 Em Andamento</option>
+                    <option value="Finalizado">🟢 Finalizado</option>
+                  </select>
+                </div>
+
+                {/* O que está faltando (Pendência) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    O que está faltando
+                  </label>
+                  <select
+                    value={selectedBooking.pendingItem || ''}
+                    onChange={e => handleUpdateBookingField('pendingItem', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      fontWeight: '700',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="">🟢 Nenhum (Completo)</option>
+                    <option value="Fumigação">Fumigação</option>
+                    <option value="Fito">Fito</option>
+                    <option value="Lacre Definitivo">Lacre Definitivo</option>
+                  </select>
+                </div>
+
+                {/* Data de Fumigação */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Data de Fumigação
+                  </label>
+                  <input
+                    type="date"
+                    value={selectedBooking.fumigationDate || ''}
+                    onChange={e => handleUpdateBookingField('fumigationDate', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* Data Fito */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Data Fito
+                  </label>
+                  <input
+                    type="date"
+                    value={selectedBooking.fitoDate || ''}
+                    onChange={e => handleUpdateBookingField('fitoDate', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* Data Lacre Definitivo */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Data Lacre Definitivo
+                  </label>
+                  <input
+                    type="date"
+                    value={selectedBooking.definiteSealDate || ''}
+                    onChange={e => handleUpdateBookingField('definiteSealDate', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      outline: 'none',
+                      boxSizing: 'border-box'
                     }}
                   />
                 </div>
