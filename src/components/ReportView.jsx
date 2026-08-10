@@ -430,13 +430,15 @@ export default function ReportView({ bookingId, reportType, onBack }) {
   };
 
   const handlePrint = () => {
-    // Se a biblioteca html2pdf estiver disponível, gera o PDF automaticamente
     if (window.html2pdf) {
       const element = document.getElementById('printable-content');
       if (!element) return;
 
-      // Exibe os blocos de assinatura ANTES de o html2canvas capturar
-      // (html2canvas não aplica @media print, então fazemos manualmente)
+      // 1. Pré-carrega a imagem da assinatura para garantir que esteja no cache
+      const preload = new Image();
+      preload.src = '/assinatura.jpg';
+
+      // 2. Exibe os blocos de assinatura
       const sigBlocks = document.querySelectorAll('.signature-block');
       sigBlocks.forEach(el => { el.style.display = 'block'; });
 
@@ -444,20 +446,60 @@ export default function ReportView({ bookingId, reportType, onBack }) {
         margin:       0,
         filename:     `Certificado_Estufagem_${booking?.certificateNumber.replace('/', '_')}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false, allowTaint: true },
+        html2canvas:  { 
+          scale: 2, 
+          useCORS: true, 
+          allowTaint: true,
+          logging: false,
+          imageTimeout: 15000,
+          onclone: (clonedDoc) => {
+            // Garante que a assinatura está visível no documento clonado
+            const clonedSigs = clonedDoc.querySelectorAll('.signature-block');
+            clonedSigs.forEach(el => { el.style.display = 'block'; });
+          }
+        },
         jsPDF:        { unit: 'cm', format: 'a4', orientation: 'portrait' },
         pagebreak:    { mode: ['css', 'legacy'] }
       };
 
-      window.html2pdf().from(element).set(opt).save().then(() => {
-        // Oculta novamente após gerar o PDF
-        sigBlocks.forEach(el => { el.style.display = ''; });
-      }).catch(() => {
-        // Garante que oculta mesmo em caso de erro
-        sigBlocks.forEach(el => { el.style.display = ''; });
-      });
+      // 3. Aguarda o browser repintar (2 frames) antes de capturar
+      preload.onload = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.html2pdf().from(element).set(opt).save().then(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            }).catch(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            });
+          });
+        });
+      };
+
+      // Fallback caso a imagem já esteja no cache (onload não dispara)
+      preload.onerror = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.html2pdf().from(element).set(opt).save().then(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            }).catch(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            });
+          });
+        });
+      };
+
+      if (preload.complete) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.html2pdf().from(element).set(opt).save().then(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            }).catch(() => {
+              sigBlocks.forEach(el => { el.style.display = ''; });
+            });
+          });
+        });
+      }
     } else {
-      // Fallback para diálogo de impressão nativo
       window.print();
     }
   };
@@ -813,8 +855,9 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       {/* Bloco de Assinatura - visível apenas no PDF */}
                       <div className="signature-block">
                         <img
-                          src="/ASSINATURA UNISPECT.jpg"
+                          src="/assinatura.jpg"
                           alt="Assinatura Bruno O. G. Lobo"
+                          crossOrigin="anonymous"
                           style={{ width: '150px', height: 'auto', display: 'block', objectFit: 'contain' }}
                         />
                       </div>
