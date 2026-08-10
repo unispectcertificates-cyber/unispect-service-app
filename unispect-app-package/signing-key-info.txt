@@ -1,0 +1,10 @@
+Keep this file and signing.keystore in a safe place. You'll need these files if you want to upload future versions of your PWA to the Google Play Store.
+
+Key store file: signing.keystore
+Key store password: eSiTt6EWcjXf
+Key alias: unispect
+Key password: eSiTt6EWcjXf
+Signer's full name: Unispect
+Signer's organization: Unispect
+Signer's organizational unit: IT
+Signer's country code: BR

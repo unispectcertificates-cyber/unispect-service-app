@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "br.com.unispectservice.app.twa",
+        "sha256_cert_fingerprints": ["AE:0F:A8:1D:A4:5F:35:6F:5D:EE:D2:32:E4:16:71:BC:98:FE:E8:D2:79:4E:71:DA:49:18:C6:58:8A:DB:03:67"]
+      }
+    }]

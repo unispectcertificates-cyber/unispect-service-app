@@ -435,16 +435,27 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       const element = document.getElementById('printable-content');
       if (!element) return;
 
+      // Exibe os blocos de assinatura ANTES de o html2canvas capturar
+      // (html2canvas não aplica @media print, então fazemos manualmente)
+      const sigBlocks = document.querySelectorAll('.signature-block');
+      sigBlocks.forEach(el => { el.style.display = 'block'; });
+
       const opt = {
         margin:       0,
         filename:     `Certificado_Estufagem_${booking?.certificateNumber.replace('/', '_')}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, allowTaint: true },
         jsPDF:        { unit: 'cm', format: 'a4', orientation: 'portrait' },
         pagebreak:    { mode: ['css', 'legacy'] }
       };
 
-      window.html2pdf().from(element).set(opt).save();
+      window.html2pdf().from(element).set(opt).save().then(() => {
+        // Oculta novamente após gerar o PDF
+        sigBlocks.forEach(el => { el.style.display = ''; });
+      }).catch(() => {
+        // Garante que oculta mesmo em caso de erro
+        sigBlocks.forEach(el => { el.style.display = ''; });
+      });
     } else {
       // Fallback para diálogo de impressão nativo
       window.print();
@@ -794,10 +805,20 @@ export default function ReportView({ bookingId, reportType, onBack }) {
 
                   {/* Absolute Footer */}
                   <div className="a4-footer">
-                    <span>Authenticity: UNISPECT-CERT-{booking.certificateNumber.replace('/', '-')} - Consolidated Document</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span>Authenticity: UNISPECT-CERT-{booking.certificateNumber.replace('/', '-')} - Consolidated Document</span>
                       <span>Page {pageNum} of {totalPages}</span>
-                      <img src="/stamp.jpg" alt="Unispect Stamp" style={{ width: '75px', height: '75px', objectFit: 'contain' }} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
+                      {/* Bloco de Assinatura - visível apenas no PDF */}
+                      <div className="signature-block">
+                        <img
+                          src="/ASSINATURA UNISPECT.jpg"
+                          alt="Assinatura Bruno O. G. Lobo"
+                          style={{ width: '150px', height: 'auto', display: 'block', objectFit: 'contain' }}
+                        />
+                      </div>
+                      <img src="/stamp.jpg" alt="Unispect Stamp" style={{ width: '75px', height: '75px', objectFit: 'contain', flexShrink: 0 }} />
                     </div>
                   </div>
 
@@ -900,9 +921,13 @@ export default function ReportView({ bookingId, reportType, onBack }) {
           padding-top: 8px;
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-end;
           font-size: 9px;
           color: #666;
+        }
+        /* Assinatura oculta na tela, visível apenas no PDF */
+        .signature-block {
+          display: none;
         }
         @media print {
           @page {
@@ -941,6 +966,10 @@ export default function ReportView({ bookingId, reportType, onBack }) {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             position: relative !important;
+          }
+          /* Exibe a assinatura somente no PDF */
+          .signature-block {
+            display: block !important;
           }
         }
       `}} />
