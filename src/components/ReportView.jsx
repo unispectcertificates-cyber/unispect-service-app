@@ -1,9 +1,6 @@
 import { ChevronLeft, Download, Printer } from 'lucide-react';
 import { db, useLocais, useExportadores, useBookings } from '../db';
 
-// Assinatura hardcoded em base64 - garante renderizacao pelo html2canvas sem falha
-const ASSINATURA_BASE64 = "data:image/jpeg;base64,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";
-
 export default function ReportView({ bookingId, reportType, onBack }) {
   const exporters = useExportadores();
   const locations = useLocais();
@@ -437,10 +434,6 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       const element = document.getElementById('printable-content');
       if (!element) return;
 
-      // Exibe os blocos de assinatura (imagem hardcoded em base64, sem fetch)
-      const sigBlocks = document.querySelectorAll('.signature-block');
-      sigBlocks.forEach(el => { el.style.display = 'flex'; });
-
       const opt = {
         margin:       0,
         filename:     `Certificado_Estufagem_${booking?.certificateNumber.replace('/', '_')}.pdf`,
@@ -450,11 +443,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
         pagebreak:    { mode: ['css', 'legacy'] }
       };
 
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        window.html2pdf().from(element).set(opt).save()
-          .then(() => sigBlocks.forEach(el => { el.style.display = ''; }))
-          .catch(() => sigBlocks.forEach(el => { el.style.display = ''; }));
-      }));
+      window.html2pdf().from(element).set(opt).save();
     } else {
       window.print();
     }
@@ -808,12 +797,12 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       <span>Page {pageNum} of {totalPages}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
-                      {/* Bloco de Assinatura - visível apenas no PDF, hardcoded em base64 */}
-                      <div className="signature-block" style={{ flexDirection: 'column', alignItems: 'center' }}>
+                      {/* Bloco de Assinatura Bruno O. G. Lobo */}
+                      <div className="signature-block">
                         <img
-                          src={ASSINATURA_BASE64}
+                          src="/assinatura.jpg"
                           alt="Assinatura Bruno O. G. Lobo"
-                          style={{ width: '120px', height: 'auto', display: 'block', objectFit: 'contain' }}
+                          style={{ width: '140px', height: 'auto', display: 'block', objectFit: 'contain' }}
                         />
                       </div>
                       <img src="/stamp.jpg" alt="Unispect Stamp" style={{ width: '75px', height: '75px', objectFit: 'contain', flexShrink: 0 }} />
@@ -923,9 +912,10 @@ export default function ReportView({ bookingId, reportType, onBack }) {
           font-size: 9px;
           color: #666;
         }
-        /* Assinatura oculta na tela, visível apenas no PDF */
         .signature-block {
-          display: none;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
         }
         @media print {
           @page {
@@ -964,10 +954,6 @@ export default function ReportView({ bookingId, reportType, onBack }) {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             position: relative !important;
-          }
-          /* Exibe a assinatura somente no PDF */
-          .signature-block {
-            display: block !important;
           }
         }
       `}} />
