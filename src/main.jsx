@@ -6,10 +6,21 @@ import { db } from './db'
 import { registerSW } from 'virtual:pwa-register'
 
 // Registrar Service Worker do PWA para carregamento offline/instantâneo
-registerSW({ immediate: true });
+registerSW({ 
+  immediate: true,
+  onNeedRefresh() {
+    console.log("Novo conteúdo disponível, atualizando cache...");
+    window.location.reload();
+  }
+});
 
-// Recarregar a página automaticamente se o Service Worker for atualizado
+// Forçar atualização de Service Workers antigos se existirem
 if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (let registration of registrations) {
+      registration.update();
+    }
+  });
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     window.location.reload();
   });
