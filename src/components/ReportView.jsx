@@ -1,10 +1,24 @@
 import { ChevronLeft, Download, Printer } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { db, useLocais, useExportadores, useBookings } from '../db';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
   const exporters = useExportadores();
   const locations = useLocais();
   const bookings = useBookings();
+
+  // Carrega a assinatura como base64 para garantir que o html2canvas renderize corretamente
+  const [signatureDataUrl, setSignatureDataUrl] = useState('');
+  useEffect(() => {
+    fetch('/assinatura.jpg')
+      .then(res => res.blob())
+      .then(blob => {
+        const reader = new FileReader();
+        reader.onload = () => setSignatureDataUrl(reader.result);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => console.warn('Assinatura não encontrada em /assinatura.jpg'));
+  }, []);
   
   const booking = reportType === 'operational' && bookingId 
     ? bookings.find(b => b.id === bookingId) 
@@ -434,71 +448,25 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       const element = document.getElementById('printable-content');
       if (!element) return;
 
-      // 1. Pré-carrega a imagem da assinatura para garantir que esteja no cache
-      const preload = new Image();
-      preload.src = '/assinatura.jpg';
-
-      // 2. Exibe os blocos de assinatura
+      // Exibe os blocos de assinatura (a imagem já está em base64 no src)
       const sigBlocks = document.querySelectorAll('.signature-block');
-      sigBlocks.forEach(el => { el.style.display = 'block'; });
+      sigBlocks.forEach(el => { el.style.display = 'flex'; });
 
       const opt = {
         margin:       0,
         filename:     `Certificado_Estufagem_${booking?.certificateNumber.replace('/', '_')}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { 
-          scale: 2, 
-          useCORS: true, 
-          allowTaint: true,
-          logging: false,
-          imageTimeout: 15000,
-          onclone: (clonedDoc) => {
-            // Garante que a assinatura está visível no documento clonado
-            const clonedSigs = clonedDoc.querySelectorAll('.signature-block');
-            clonedSigs.forEach(el => { el.style.display = 'block'; });
-          }
-        },
+        html2canvas:  { scale: 2, useCORS: true, allowTaint: true, logging: false },
         jsPDF:        { unit: 'cm', format: 'a4', orientation: 'portrait' },
         pagebreak:    { mode: ['css', 'legacy'] }
       };
 
-      // 3. Aguarda o browser repintar (2 frames) antes de capturar
-      preload.onload = () => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            window.html2pdf().from(element).set(opt).save().then(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            }).catch(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            });
-          });
-        });
-      };
-
-      // Fallback caso a imagem já esteja no cache (onload não dispara)
-      preload.onerror = () => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            window.html2pdf().from(element).set(opt).save().then(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            }).catch(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            });
-          });
-        });
-      };
-
-      if (preload.complete) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            window.html2pdf().from(element).set(opt).save().then(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            }).catch(() => {
-              sigBlocks.forEach(el => { el.style.display = ''; });
-            });
-          });
-        });
-      }
+      // 2 frames para garantir que o browser repinta antes de capturar
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        window.html2pdf().from(element).set(opt).save()
+          .then(() => sigBlocks.forEach(el => { el.style.display = ''; }))
+          .catch(() => sigBlocks.forEach(el => { el.style.display = ''; }));
+      }));
     } else {
       window.print();
     }
@@ -852,14 +820,15 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       <span>Page {pageNum} of {totalPages}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
-                      {/* Bloco de Assinatura - visível apenas no PDF */}
-                      <div className="signature-block">
-                        <img
-                          src="/assinatura.jpg"
-                          alt="Assinatura Bruno O. G. Lobo"
-                          crossOrigin="anonymous"
-                          style={{ width: '150px', height: 'auto', display: 'block', objectFit: 'contain' }}
-                        />
+                      {/* Bloco de Assinatura - visível apenas no PDF (src em base64) */}
+                      <div className="signature-block" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        {signatureDataUrl && (
+                          <img
+                            src={signatureDataUrl}
+                            alt="Assinatura Bruno O. G. Lobo"
+                            style={{ width: '120px', height: 'auto', display: 'block', objectFit: 'contain' }}
+                          />
+                        )}
                       </div>
                       <img src="/stamp.jpg" alt="Unispect Stamp" style={{ width: '75px', height: '75px', objectFit: 'contain', flexShrink: 0 }} />
                     </div>
