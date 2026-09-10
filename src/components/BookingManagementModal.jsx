@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight } from 'lucide-react';
-import { db, useBookings, useInspectors, useLocais, useExportadores } from '../db';
+import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate } from '../db';
 import { useEffect } from 'react';
 import ContainerDetail from './ContainerDetail';
 
@@ -69,6 +69,11 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
 
   const handleSaveBooking = async () => {
     try {
+      if (isBookingNumberDuplicate(bookings, booking.bookingNumber, booking.id)) {
+        alert(`Este romaneio / booking já foi inserido no sistema. (Booking: ${booking.bookingNumber.trim()})`);
+        return;
+      }
+
       const updated = {
         ...booking,
         inspectorId: selectedInspectorId,
@@ -81,7 +86,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       onClose();
     } catch (error) {
       console.error("Error saving booking:", error);
-      alert("Erro ao salvar as alterações.");
+      alert(error.message || "Erro ao salvar as alterações.");
     }
   };
 
@@ -521,25 +526,32 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Nº do Booking</div>
             {canEdit ? (
-              <input
-                type="text"
-                value={booking.bookingNumber || ''}
-                onChange={e => setBooking({ ...booking, bookingNumber: e.target.value })}
-                placeholder="BK-XXXXXX"
-                style={{
-                  fontSize: '13px',
-                  fontWeight: '700',
-                  color: 'var(--text-primary)',
-                  marginTop: '4px',
-                  padding: '4px 8px',
-                  backgroundColor: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '4px',
-                  width: '100%',
-                  height: '32px',
-                  boxSizing: 'border-box'
-                }}
-              />
+              <>
+                <input
+                  type="text"
+                  value={booking.bookingNumber || ''}
+                  onChange={e => setBooking({ ...booking, bookingNumber: e.target.value })}
+                  placeholder="BK-XXXXXX"
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: 'var(--text-primary)',
+                    marginTop: '4px',
+                    padding: '4px 8px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: isBookingNumberDuplicate(bookings, booking.bookingNumber, booking.id) ? '1px solid #ef4444' : '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    width: '100%',
+                    height: '32px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                {isBookingNumberDuplicate(bookings, booking.bookingNumber, booking.id) && (
+                  <span style={{ color: '#ef4444', fontSize: '10px', marginTop: '2px', fontWeight: '600' }}>
+                    ⚠️ Este romaneio já foi inserido!
+                  </span>
+                )}
+              </>
             ) : (
               <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.bookingNumber || '-'}</div>
             )}

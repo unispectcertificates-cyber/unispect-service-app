@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores } from './db';
+import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate } from './db';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -163,19 +163,28 @@ export default function App() {
       return;
     }
 
+    if (isBookingNumberDuplicate(bookings, newBookingData.bookingNumber)) {
+      alert(`Este romaneio já foi inserido no sistema. (Booking: ${newBookingData.bookingNumber.trim()})`);
+      return;
+    }
+
     const navioVoy = `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`;
 
-    const created = await db.saveBooking({
-      ...newBookingData,
-      vesselVoyage: navioVoy,
-      bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
-      containers: newBookingData.containers || []
-    });
+    try {
+      const created = await db.saveBooking({
+        ...newBookingData,
+        vesselVoyage: navioVoy,
+        bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
+        containers: newBookingData.containers || []
+      });
 
-    handleClearForm();
-    setShowCreateModal(false);
-    handleRefreshData();
-    setSelectedBookingId(created.id);
+      handleClearForm();
+      setShowCreateModal(false);
+      handleRefreshData();
+      setSelectedBookingId(created.id);
+    } catch (err) {
+      alert(err.message || 'Erro ao criar booking.');
+    }
   };
 
   const handleClearForm = () => {
@@ -291,6 +300,17 @@ export default function App() {
           bookingNumber = match[1].trim();
           break;
         }
+      }
+
+      if (bookingNumber && isBookingNumberDuplicate(bookings, bookingNumber)) {
+        setPdfParseStatus('error');
+        setPdfParseMessage(`Este romaneio já foi inserido no sistema. (Booking: ${bookingNumber})`);
+        setNewBookingData(prev => ({
+          ...prev,
+          bookingNumber: bookingNumber
+        }));
+        setIsParsingPdf(false);
+        return;
       }
 
       // 2. Vessel Name & Voyage
@@ -1790,7 +1810,13 @@ export default function App() {
                   onChange={e => setNewBookingData({ ...newBookingData, bookingNumber: e.target.value })}
                   placeholder="BK-XXXXXX"
                   required
+                  style={isBookingNumberDuplicate(bookings, newBookingData.bookingNumber) ? { borderColor: '#ef4444' } : {}}
                 />
+                {isBookingNumberDuplicate(bookings, newBookingData.bookingNumber) && (
+                  <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: '600' }}>
+                    ⚠️ Este romaneio já foi inserido no sistema.
+                  </p>
+                )}
               </div>
 
               <div>

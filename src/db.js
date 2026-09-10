@@ -107,6 +107,15 @@ export const db = {
     const id = booking.id || 'bk_' + Date.now();
     booking.id = id;
     
+    if (booking.bookingNumber && booking.bookingNumber.trim()) {
+      const allBookings = await this.getBookings();
+      const cleanNum = booking.bookingNumber.trim().toLowerCase();
+      const duplicate = allBookings.find(b => b.id !== id && (b.bookingNumber || '').trim().toLowerCase() === cleanNum);
+      if (duplicate) {
+        throw new Error(`Este romaneio já foi inserido no sistema. (Booking: ${booking.bookingNumber.trim()})`);
+      }
+    }
+
     if (!booking.certificateNumber) {
       booking.certificateNumber = await this.generateNextCertificateNumber();
     }
@@ -247,3 +256,15 @@ export function useExportadores() { return useCollectionRealtime(EXPORTERS_COL);
 export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
 export function useUsers() { return useCollectionRealtime(USERS_COL); }
+
+export function isBookingNumberDuplicate(bookings, bookingNumber, currentBookingId = null) {
+  if (!bookingNumber || typeof bookingNumber !== 'string') return false;
+  const cleanNumber = bookingNumber.trim().toLowerCase();
+  if (!cleanNumber) return false;
+
+  return (bookings || []).some(b => {
+    if (!b || !b.bookingNumber) return false;
+    if (currentBookingId && b.id === currentBookingId) return false;
+    return (b.bookingNumber || '').trim().toLowerCase() === cleanNumber;
+  });
+}

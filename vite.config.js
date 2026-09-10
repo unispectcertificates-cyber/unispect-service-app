@@ -63,5 +63,13 @@ export default defineConfig({
       '/api': 'http://localhost:3000',
       '/uploads': 'http://localhost:3000',
     }
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main:   'index.html',
+        mobile: 'mobile.html'
+      }
+    }
   }
 })

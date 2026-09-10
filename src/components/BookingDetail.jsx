@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, Plus, FileText, X } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores } from '../db';
+import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate } from '../db';
 import ContainerDetail from './ContainerDetail';
 import BottomDrawer from './BottomDrawer';
 
@@ -44,13 +44,21 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
 
   // Salvar alterações de campos do booking
   const updateBookingField = async (field, value) => {
+    if (field === 'bookingNumber' && isBookingNumberDuplicate(bookings, value, booking.id)) {
+      alert(`Este romaneio / booking já foi inserido no sistema. (Booking: ${value.trim()})`);
+      return;
+    }
     const updated = { ...booking, [field]: value };
     if (field === 'type' && value === 'Redex Operation Report') {
       updated.stuffingReportNumber = '';
     }
     setBooking(updated);
-    await db.saveBooking(updated);
-    if (onDataChange) onDataChange();
+    try {
+      await db.saveBooking(updated);
+      if (onDataChange) onDataChange();
+    } catch (err) {
+      alert(err.message || "Erro ao salvar as alterações.");
+    }
   };
 
   // Cadastrar Novo Container via Modal
@@ -206,7 +214,13 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
               value={booking.bookingNumber} 
               onChange={e => updateBookingField('bookingNumber', e.target.value)}
               placeholder="BK-XXXXXX"
+              style={isBookingNumberDuplicate(bookings, booking.bookingNumber, booking.id) ? { borderColor: '#ef4444' } : {}}
             />
+            {isBookingNumberDuplicate(bookings, booking.bookingNumber, booking.id) && (
+              <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: '600' }}>
+                ⚠️ Este romaneio já foi inserido no sistema.
+              </p>
+            )}
           </div>
 
           {/* Mercadoria (café, Cravo, Pimenta Preta, Pimenta Vermelha, Pimenta Branca) */}

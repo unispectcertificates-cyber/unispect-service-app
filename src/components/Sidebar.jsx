@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, ClipboardList, Users, MapPin, Trash2, ShieldAlert, Moon, Sun, UserCheck } from 'lucide-react';
+import { LayoutDashboard, ClipboardList, Users, MapPin, Trash2, ShieldAlert, Moon, Sun, UserCheck, Camera } from 'lucide-react';
 
 export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange, isDark, toggleDarkMode }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -7,6 +7,7 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange,
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADM', 'Inspector'] },
     { id: 'bookings', label: 'Gerenciar Bookings', icon: ClipboardList, roles: ['ADM', 'Inspector'] },
+    { id: 'field-portal', label: 'Modo Campo (Mobile App)', icon: Camera, roles: ['ADM', 'Inspector'] },
     { id: 'exportadores', label: 'Exportadores', icon: Users, roles: ['ADM'] },
     { id: 'locais', label: 'Locais da Operação', icon: MapPin, roles: ['ADM'] },
     { id: 'relatorios', label: 'Relatórios', icon: ClipboardList, roles: ['Exportador'] },

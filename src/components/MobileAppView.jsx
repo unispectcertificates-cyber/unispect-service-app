@@ -1,1113 +1,775 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Camera, Image, Trash2, ArrowLeft, ArrowRight, RefreshCw, X, SlidersHorizontal, CheckCircle2, Lock, FileText } from 'lucide-react';
-import { db, useBookings, useExportadores, useLocais } from '../db';
+import { useState, useRef, useCallback } from 'react';
+import { Search, Camera, Image, Trash2, ArrowLeft, X, CheckCircle2, Lock, ChevronRight, ChevronDown } from 'lucide-react';
+import { db, useBookings, useExportadores, useLocais, isBookingNumberDuplicate } from '../db';
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Estilos utilitários inline
+// ────────────────────────────────────────────────────────────────────────────────
+const S = {
+  label: {
+    display: 'block',
+    fontSize: '11px',
+    color: 'var(--text-muted)',
+    fontWeight: '800',
+    marginBottom: '5px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em'
+  },
+  input: {
+    width: '100%',
+    padding: '12px 14px',
+    backgroundColor: 'var(--bg-tertiary)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '10px',
+    color: 'var(--text-primary)',
+    fontSize: '15px',
+    outline: 'none',
+    boxSizing: 'border-box'
+  },
+  card: {
+    backgroundColor: 'var(--bg-secondary)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '14px',
+    padding: '16px',
+    boxShadow: 'var(--shadow-sm)'
+  },
+  sectionTitle: {
+    fontSize: '11px',
+    fontWeight: '800',
+    color: 'var(--color-brand)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: '10px'
+  },
+  backBtn: {
+    background: 'none',
+    border: 'none',
+    color: 'var(--color-brand)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    fontWeight: '800',
+    padding: '6px 0',
+    marginBottom: '12px'
+  }
+};
 
 export default function MobileAppView({ onLogout, hideHeader = false }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const bookings = useBookings();
+  const bookings     = useBookings();
   const exportadores = useExportadores();
-  const locais = useLocais();
+  const locais       = useLocais();
+
+  // ── Navegação: null | 'booking' | 'container'
+  const [screen, setScreen]                   = useState('list');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [selectedContainer, setSelectedContainer] = useState(null);
-  const [activeContainerTab, setActiveContainerTab] = useState('photos'); // 'photos' | 'seals' | 'notes'
-  const [newSealInput, setNewSealInput] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState(''); // 'success' | 'error' | ''
+
+  // ── Estado de busca
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Estado de upload / preview
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
-  const cameraInputRef = useRef(null);
+  const [isSaving, setIsSaving]               = useState(false);
+  const [saveOk, setSaveOk]                   = useState(false);
+
+  // ── Lacre temp
+  const [newSealInput, setNewSealInput]       = useState('');
+
+  const cameraInputRef  = useRef(null);
   const galleryInputRef = useRef(null);
 
-  const handleRefreshData = useCallback(() => {}, []);
+  // Status considerados "finalizados"
+  const FINISHED = ['finalizado', 'estufado', 'finished', 'concluido', 'concluído'];
+  const isFinished = b => FINISHED.includes((b.status || '').toLowerCase().trim());
 
-  useEffect(() => {}, []);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    setSyncStatus('');
-    try {
-      await db.syncPull();
-      await db.syncPush();
-      handleRefreshData();
-      setSyncStatus('success');
-      setTimeout(() => setSyncStatus(''), 2000);
-    } catch {
-      setSyncStatus('error');
-      setTimeout(() => setSyncStatus(''), 2000);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // Status que representam "finalizado/concluído" — contempla valores históricos do banco
-  const FINISHED_STATUSES = ['finalizado', 'estufado', 'finished', 'concluido', 'concluído'];
-  const isFinished = (b) => FINISHED_STATUSES.includes((b.status || '').toLowerCase().trim());
-
-  // Filtragem unificada por Booking, Container e Exportador (Finalizados ocultos por padrão)
+  // ── Filtragem de bookings
   const filteredBookings = bookings.filter(b => {
     const term = searchQuery.toLowerCase().trim();
-
-    // Se NÃO houver termo de busca, exibe apenas os bookings em aberto (Pendente / Em andamento)
-    if (!term) {
-      return !isFinished(b);
-    }
-
-    // 1. Pesquisa por Booking/Certificado/Report
-    const matchBooking = (b.bookingNumber && b.bookingNumber.toLowerCase().includes(term)) ||
-                         (b.certificateNumber && b.certificateNumber.toLowerCase().includes(term)) ||
-                         (b.stuffingReportNumber && b.stuffingReportNumber.toLowerCase().includes(term));
-
-    // 2. Pesquisa por Container
-    const matchContainer = b.containers?.some(c =>
-      c.containerNumber && c.containerNumber.toLowerCase().includes(term)
+    if (!term) return !isFinished(b);
+    const expName = (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase();
+    return (
+      (b.bookingNumber || '').toLowerCase().includes(term) ||
+      (b.certificateNumber || '').toLowerCase().includes(term) ||
+      (b.stuffingReportNumber || '').toLowerCase().includes(term) ||
+      expName.includes(term) ||
+      (b.containers || []).some(c => (c.containerNumber || '').toLowerCase().includes(term))
     );
-
-    // 3. Pesquisa por Exportador
-    const exp = exportadores.find(e => e.id === b.exporterId);
-    const matchExporter = exp && exp.name && exp.name.toLowerCase().includes(term);
-
-    return matchBooking || matchContainer || matchExporter;
   });
 
-  // Operações de Contêiner
-  const handleUpdateContainerField = async (field, value) => {
+  // ── Navegar para Booking
+  const openBooking = useCallback(b => {
+    setSelectedBooking(b);
+    setScreen('booking');
+    setSelectedContainer(null);
+  }, []);
+
+  // ── Navegar para Container
+  const openContainer = useCallback(c => {
+    setSelectedContainer({ ...c });
+    setScreen('container');
+    setSaveOk(false);
+  }, []);
+
+  // ── Voltar para lista
+  const goToList = useCallback(() => {
+    setScreen('list');
+    setSelectedBooking(null);
+    setSelectedContainer(null);
+  }, []);
+
+  // ── Voltar para booking (da tela de container)
+  const goToBooking = useCallback(() => {
+    setSelectedContainer(null);
+    setScreen('booking');
+    setSaveOk(false);
+  }, []);
+
+  // ── Salvar container e voltar
+  const handleSaveContainer = useCallback(async () => {
     if (!selectedBooking || !selectedContainer) return;
+    setIsSaving(true);
+    try {
+      const updatedContainers = selectedBooking.containers.map(c =>
+        c.id === selectedContainer.id ? selectedContainer : c
+      );
+      const updatedBooking = { ...selectedBooking, containers: updatedContainers };
+      await db.saveBooking(updatedBooking);
+      setSelectedBooking(updatedBooking);
+      setSaveOk(true);
+      setTimeout(() => {
+        goToBooking();
+      }, 700);
+    } catch (err) {
+      alert(err.message || 'Erro ao salvar. Tente novamente.');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selectedBooking, selectedContainer, goToBooking]);
 
-    const updatedCont = { ...selectedContainer, [field]: value };
-    setSelectedContainer(updatedCont);
+  // ── Atualizar campo do container localmente (sem salvar ainda)
+  const updateContField = useCallback((field, value) => {
+    setSelectedContainer(prev => ({ ...prev, [field]: value }));
+  }, []);
 
-    const updatedContainers = selectedBooking.containers.map(c =>
-      c.id === selectedContainer.id ? updatedCont : c
-    );
-
-    const updatedBooking = { ...selectedBooking, containers: updatedContainers };
-    setSelectedBooking(updatedBooking);
-
-    await db.saveBooking(updatedBooking);
-    
+  // ── Upload de fotos
+  const handlePhotoUpload = async e => {
+    const files = Array.from(e.target.files);
+    if (!files.length || !selectedContainer) return;
+    try {
+      const urls = await Promise.all(files.map(f => db.uploadPhoto(f)));
+      const newPhotos = urls.map(url => ({
+        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        url,
+        name: ''
+      }));
+      updateContField('photos', [...(selectedContainer.photos || []), ...newPhotos]);
+    } catch (err) {
+      alert(err.message || 'Erro ao enviar foto.');
+    }
   };
 
-  // Atualização de campos do Booking (Status, Pendência, Datas)
-  const handleUpdateBookingField = async (field, value) => {
-    if (!selectedBooking) return;
-    const updatedBooking = { ...selectedBooking, [field]: value };
-    setSelectedBooking(updatedBooking);
-    await db.saveBooking(updatedBooking);
+  const handleDeletePhoto = id => {
+    updateContField('photos', (selectedContainer.photos || []).filter(p => p.id !== id));
   };
 
-  // Lacres Provisórios
-  const handleAddProvisionalSeal = () => {
-    if (!newSealInput.trim() || !selectedContainer) return;
-    const current = selectedContainer.provisionalSeals || [];
-    const updated = [...current, newSealInput.trim().toUpperCase()];
-    handleUpdateContainerField('provisionalSeals', updated);
+  const handleAddSeal = () => {
+    if (!newSealInput.trim()) return;
+    const updated = [...(selectedContainer.provisionalSeals || []), newSealInput.trim().toUpperCase()];
+    updateContField('provisionalSeals', updated);
     setNewSealInput('');
   };
 
-  const handleRemoveProvisionalSeal = (index) => {
-    if (!selectedContainer) return;
-    const current = selectedContainer.provisionalSeals || [];
-    const updated = current.filter((_, idx) => idx !== index);
-    handleUpdateContainerField('provisionalSeals', updated);
+  const handleRemoveSeal = idx => {
+    const updated = (selectedContainer.provisionalSeals || []).filter((_, i) => i !== idx);
+    updateContField('provisionalSeals', updated);
   };
 
-  // Upload de Fotos do Container
-  const handlePhotoUpload = async (e) => {
-    const files = Array.from(e.target.files);
-    if (!files.length || !selectedContainer) return;
-
-    try {
-      const uploadPromises = files.map(file => db.uploadPhoto(file));
-      const urls = await Promise.all(uploadPromises);
-
-      const newPhotos = urls.map(url => ({
-        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        url: url,
-        name: ''
-      }));
-
-      const updatedPhotos = [...(selectedContainer.photos || []), ...newPhotos];
-      await handleUpdateContainerField('photos', updatedPhotos);
-    } catch (err) {
-      console.error("Error uploading photos:", err);
-      alert(err.message || "Ocorreu um erro ao enviar/salvar as fotos no sistema.");
-    }
+  // Status badge color
+  const statusColor = s => {
+    if (!s) return '#6b7280';
+    const l = s.toLowerCase();
+    if (l === 'finalizado' || l === 'estufado') return '#10b981';
+    if (l === 'em andamento') return '#f59e0b';
+    return '#ef4444';
   };
 
-  const movePhoto = (index, direction) => {
-    if (!selectedContainer) return;
-    const photos = [...(selectedContainer.photos || [])];
-    const target = index + direction;
-    if (target < 0 || target >= photos.length) return;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TELA 1 — Lista de Bookings
+  // ─────────────────────────────────────────────────────────────────────────────
+  const renderList = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Busca */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '10px',
+        padding: '12px 16px',
+        backgroundColor: 'var(--bg-secondary)',
+        border: '1px solid var(--border-color)',
+        borderRadius: '14px',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <Search size={18} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
+        <input
+          type="text"
+          placeholder="Buscar booking, container, exportador..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', width: '100%', outline: 'none', fontSize: '14px' }}
+        />
+        {searchQuery && (
+          <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}>
+            <X size={14} />
+          </button>
+        )}
+      </div>
 
-    const temp = photos[index];
-    photos[index] = photos[target];
-    photos[target] = temp;
+      {/* Label */}
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {searchQuery ? `Resultados (${filteredBookings.length})` : `📋 Em Aberto (${filteredBookings.length})`}
+      </div>
 
-    handleUpdateContainerField('photos', photos);
+      {/* Cards */}
+      {filteredBookings.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: '13px' }}>
+          Nenhum booking encontrado.
+        </div>
+      ) : filteredBookings.map(b => {
+        const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+        const loc = locais.find(l => l.id === b.locationId)?.name || '';
+        const sc  = statusColor(b.status);
+        const contCount = (b.containers || []).length;
+        return (
+          <div
+            key={b.id}
+            onClick={() => openBooking(b)}
+            style={{
+              ...S.card,
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+              transition: 'transform 0.15s',
+              borderLeft: `4px solid ${sc}`
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <span style={{ fontWeight: '900', fontSize: '15px', color: 'var(--color-brand)' }}>
+                  {b.certificateNumber}
+                </span>
+                <span style={{
+                  fontSize: '9px', fontWeight: '800', padding: '2px 7px',
+                  borderRadius: '4px', backgroundColor: `${sc}1A`, color: sc
+                }}>
+                  {b.status || 'Pendente'}
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
+                BK: <strong style={{ color: 'var(--text-primary)' }}>{b.bookingNumber}</strong>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {exp} {loc ? `· ${loc}` : ''}
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                🗃 {contCount} container{contCount !== 1 ? 's' : ''}
+              </div>
+            </div>
+            <ChevronRight size={20} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TELA 1B — Booking expandido + lista de containers
+  // ─────────────────────────────────────────────────────────────────────────────
+  const renderBooking = () => {
+    const b   = selectedBooking;
+    const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+    const loc = locais.find(l => l.id === b.locationId)?.name || 'N/A';
+    const sc  = statusColor(b.status);
+    const containers = b.containers || [];
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Voltar */}
+        <button onClick={goToList} style={S.backBtn}>
+          <ArrowLeft size={16} /> Voltar para Lista
+        </button>
+
+        {/* Card Booking */}
+        <div style={{ ...S.card, borderLeft: `4px solid ${sc}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+            <div>
+              <div style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Certificado</div>
+              <div style={{ fontSize: '22px', fontWeight: '900', color: 'var(--color-brand)', lineHeight: 1.1 }}>{b.certificateNumber}</div>
+            </div>
+            <span style={{
+              fontSize: '10px', fontWeight: '800', padding: '4px 10px',
+              borderRadius: '6px', backgroundColor: `${sc}1A`, color: sc
+            }}>
+              {b.status || 'Pendente'}
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+            <div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase' }}>Nº Booking</div>
+              <div style={{ fontWeight: '800', color: 'var(--text-primary)' }}>{b.bookingNumber}</div>
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase' }}>Navio/Viagem</div>
+              <div style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{b.vesselVoyage || '—'}</div>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase' }}>Exportador</div>
+              <div style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{exp}</div>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase' }}>Local</div>
+              <div style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{loc}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Lista de containers */}
+        <div>
+          <div style={S.sectionTitle}>📦 Containers ({containers.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {containers.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px', border: '1px dashed var(--border-color)', borderRadius: '12px' }}>
+                Nenhum container nesta reserva.
+              </div>
+            ) : containers.map(c => {
+              const hasPhotos  = (c.photos || []).length > 0;
+              const hasDefSeal = !!c.definiteSeal;
+              const cs = statusColor(c.status);
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => openContainer(c)}
+                  style={{
+                    ...S.card,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    borderLeft: `3px solid ${hasDefSeal ? '#10b981' : 'var(--border-color)'}`
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: '900', fontSize: '16px', letterSpacing: '0.5px' }}>{c.containerNumber}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{c.containerType}</div>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      {hasPhotos && (
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#3b82f6' }}>📸 {c.photos.length} foto{c.photos.length !== 1 ? 's' : ''}</span>
+                      )}
+                      {hasDefSeal && (
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#10b981' }}>🔒 {c.definiteSeal}</span>
+                      )}
+                      {!hasDefSeal && (
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#f59e0b' }}>⚠️ Sem lacre definitivo</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={20} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const handleDeletePhoto = (photoId) => {
-    if (!selectedContainer) return;
-    const photos = (selectedContainer.photos || []).filter(p => p.id !== photoId);
-    handleUpdateContainerField('photos', photos);
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TELA 2 — Edição de Container
+  // ─────────────────────────────────────────────────────────────────────────────
+  const renderContainer = () => {
+    const c = selectedContainer;
+    if (!c) return null;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        {/* Voltar */}
+        <button onClick={goToBooking} style={S.backBtn}>
+          <ArrowLeft size={16} /> Containers do Booking
+        </button>
+
+        {/* Header Container */}
+        <div style={{
+          ...S.card,
+          background: 'linear-gradient(135deg, var(--color-brand) 0%, #0ea5e9 100%)',
+          border: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px'
+        }}>
+          <div>
+            <div style={{ fontSize: '10px', fontWeight: '800', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase' }}>Container</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#fff', letterSpacing: '1px' }}>{c.containerNumber}</div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', marginTop: '2px' }}>{c.containerType}</div>
+          </div>
+        </div>
+
+        {/* ── Seção: Fotos ── */}
+        <div style={S.card}>
+          <div style={S.sectionTitle}>📸 Fotos do Container</div>
+
+          {/* Botões câmera / galeria */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              style={{
+                padding: '12px',
+                borderRadius: '10px',
+                border: 'none',
+                backgroundColor: 'var(--color-brand)',
+                color: '#fff',
+                fontWeight: '800',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              <Camera size={16} /> Câmera
+            </button>
+            <button
+              onClick={() => galleryInputRef.current?.click()}
+              style={{
+                padding: '12px',
+                borderRadius: '10px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                fontWeight: '700',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              <Image size={16} style={{ color: 'var(--color-brand)' }} /> Galeria
+            </button>
+            <input type="file" ref={cameraInputRef} onChange={handlePhotoUpload} accept="image/*" capture="environment" style={{ display: 'none' }} />
+            <input type="file" ref={galleryInputRef} onChange={handlePhotoUpload} accept="image/*" multiple style={{ display: 'none' }} />
+          </div>
+
+          {/* Grid de fotos */}
+          {(c.photos || []).length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {(c.photos || []).map((photo, idx) => (
+                <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1' }}>
+                  <img
+                    src={photo.url}
+                    alt=""
+                    onClick={() => setPreviewPhotoUrl(photo.url)}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
+                  />
+                  <button
+                    onClick={() => handleDeletePhoto(photo.id)}
+                    style={{
+                      position: 'absolute', top: '4px', right: '4px',
+                      background: 'rgba(239,68,68,0.85)', border: 'none',
+                      borderRadius: '50%', width: '22px', height: '22px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', color: '#fff'
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '24px', border: '1px dashed var(--border-color)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
+              Nenhuma foto. Use os botões acima.
+            </div>
+          )}
+        </div>
+
+        {/* ── Seção: Lacres ── */}
+        <div style={S.card}>
+          <div style={S.sectionTitle}>🔒 Lacres</div>
+
+          {/* Lacre Definitivo */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={S.label}>Lacre Definitivo</label>
+            <input
+              type="text"
+              value={c.definiteSeal || ''}
+              onChange={e => updateContField('definiteSeal', e.target.value)}
+              placeholder="Nº do Lacre Definitivo"
+              style={S.input}
+            />
+          </div>
+
+          {/* Lacres Provisórios */}
+          <div>
+            <label style={S.label}>Lacres Provisórios</label>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <input
+                type="text"
+                value={newSealInput}
+                onChange={e => setNewSealInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddSeal()}
+                placeholder="Adicionar lacre..."
+                style={{ ...S.input, marginBottom: 0 }}
+              />
+              <button
+                onClick={handleAddSeal}
+                style={{
+                  padding: '12px 18px',
+                  backgroundColor: 'var(--color-brand)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  fontSize: '13px'
+                }}
+              >
+                Add
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {(c.provisionalSeals || []).map((seal, idx) => (
+                <div key={idx} style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '5px 10px',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '20px',
+                  fontSize: '12px', fontWeight: '700'
+                }}>
+                  <span>{idx + 1}. {seal}</span>
+                  <button onClick={() => handleRemoveSeal(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1 }}>
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {!(c.provisionalSeals?.length) && (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhum lacre provisório.</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Seção: Pesos ── */}
+        <div style={S.card}>
+          <div style={S.sectionTitle}>⚖️ Pesos & Carga</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={S.label}>Qtd. Sacas (Bags)</label>
+              <input type="number" value={c.bagsQuantity || ''} onChange={e => updateContField('bagsQuantity', parseInt(e.target.value, 10) || 0)} placeholder="Ex: 320" style={S.input} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={S.label}>Net Weight</label>
+                <input type="text" value={c.netWeight || ''} onChange={e => updateContField('netWeight', e.target.value)} placeholder="Ex: 19.200" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Tara</label>
+                <input type="text" value={c.tara || ''} onChange={e => updateContField('tara', e.target.value)} placeholder="Ex: 3.800" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Gross Weight</label>
+                <input type="text" value={c.grossWeight || ''} onChange={e => updateContField('grossWeight', e.target.value)} placeholder="Ex: 23.000" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Marca / Lote</label>
+                <input type="text" value={c.brand || ''} onChange={e => updateContField('brand', e.target.value)} placeholder="Ex: 002/1500" style={S.input} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Seção: Observações & Status ── */}
+        <div style={S.card}>
+          <div style={S.sectionTitle}>📝 Observações & Status</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={S.label}>Observações Técnicas</label>
+              <textarea
+                value={c.notes || ''}
+                onChange={e => updateContField('notes', e.target.value)}
+                placeholder="Observações da vistoria..."
+                rows={3}
+                style={{ ...S.input, resize: 'vertical' }}
+              />
+            </div>
+            <div>
+              <label style={S.label}>Status do Booking</label>
+              <select
+                value={selectedBooking?.status || 'Pendente'}
+                onChange={e => setSelectedBooking(prev => ({ ...prev, status: e.target.value }))}
+                style={{ ...S.input, cursor: 'pointer', fontWeight: '700' }}
+              >
+                <option value="Pendente">🔴 Pendente</option>
+                <option value="Em andamento">🟡 Em Andamento</option>
+                <option value="Finalizado">🟢 Finalizado</option>
+              </select>
+            </div>
+            <div>
+              <label style={S.label}>Pendência</label>
+              <select
+                value={selectedBooking?.pendingItem || ''}
+                onChange={e => setSelectedBooking(prev => ({ ...prev, pendingItem: e.target.value }))}
+                style={{ ...S.input, cursor: 'pointer', fontWeight: '700' }}
+              >
+                <option value="">🟢 Nenhum (Completo)</option>
+                <option value="Fumigação">Fumigação</option>
+                <option value="Fito">Fito</option>
+                <option value="Lacre Definitivo">Lacre Definitivo</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Botão Salvar ── */}
+        <button
+          onClick={handleSaveContainer}
+          disabled={isSaving || saveOk}
+          style={{
+            padding: '16px',
+            borderRadius: '14px',
+            border: 'none',
+            backgroundColor: saveOk ? '#10b981' : 'var(--color-brand)',
+            color: '#fff',
+            fontWeight: '900',
+            fontSize: '16px',
+            cursor: isSaving || saveOk ? 'default' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            boxShadow: '0 4px 18px rgba(16,185,129,0.25)',
+            transition: 'background 0.3s',
+            letterSpacing: '0.3px'
+          }}
+        >
+          {saveOk ? (
+            <><CheckCircle2 size={20} /> Salvo! Voltando...</>
+          ) : isSaving ? (
+            'Salvando...'
+          ) : (
+            <><CheckCircle2 size={20} /> Salvar e Voltar</>
+          )}
+        </button>
+      </div>
+    );
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER PRINCIPAL
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
       minHeight: hideHeader ? 'auto' : '100vh',
-      backgroundColor: hideHeader ? 'transparent' : 'var(--bg-primary)',
+      backgroundColor: 'var(--bg-primary)',
       color: 'var(--text-primary)',
-      fontFamily: "'Outfit', sans-serif",
-      paddingBottom: hideHeader ? '0' : '30px'
+      fontFamily: "'Outfit', sans-serif"
     }}>
-      {/* Header Premium */}
+      {/* Header — só na versão standalone */}
       {!hideHeader && (
         <header style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '16px 20px',
-        backgroundColor: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border-color)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            background: 'var(--color-brand-gradient)',
-            color: '#fff',
-            fontWeight: '800',
-            fontSize: '16px',
-            width: '32px',
-            height: '32px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            US
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '14px 20px',
+          backgroundColor: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border-color)',
+          position: 'sticky', top: 0, zIndex: 100
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              background: 'var(--color-brand-gradient)', color: '#fff',
+              fontWeight: '800', fontSize: '14px',
+              width: '32px', height: '32px', borderRadius: '8px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>US</div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
+              <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: '15px', fontWeight: '800', margin: 0, letterSpacing: '0.5px' }}>Unispect Service</h1>
-            <span style={{ fontSize: '10px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Mobile Portal</span>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Botão Sincronizar */}
-          <button 
-            onClick={handleSync}
-            disabled={isSyncing}
-            style={{
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              padding: '6px 10px',
-              color: syncStatus === 'success' ? '#10b981' : syncStatus === 'error' ? '#ef4444' : 'var(--text-primary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '11px',
-              fontWeight: '700'
-            }}
-          >
-            <RefreshCw size={12} className={isSyncing ? 'rotating' : ''} />
-            <span>{isSyncing ? 'Sincronizando...' : syncStatus === 'success' ? 'Sincronizado!' : 'Sincronizar'}</span>
-          </button>
-
-          {/* Sair */}
           {onLogout && (
-            <button 
-              onClick={onLogout}
-              style={{
-                padding: '6px 12px',
-                fontSize: '11px',
-                backgroundColor: 'var(--color-danger-light)',
-                border: '1px solid var(--color-danger)',
-                borderRadius: '6px',
-                color: 'var(--color-danger)',
-                fontWeight: '700',
-                cursor: 'pointer'
-              }}
-            >
-              Sair
-            </button>
+            <button onClick={onLogout} style={{
+              padding: '6px 12px', fontSize: '11px',
+              backgroundColor: 'var(--color-danger-light)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: '6px', color: 'var(--color-danger)',
+              fontWeight: '700', cursor: 'pointer'
+            }}>Sair</button>
           )}
-        </div>
-      </header>
+        </header>
       )}
 
-      {/* Área Principal */}
-      <main style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', flex: 1 }}>
-        
-        {/* Dashboard de Pesquisa */}
-        {!selectedBooking && (
-          <>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '800', marginBottom: '6px' }}>Dashboard de Pesquisa</h2>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Consulte informações operacionais de forma rápida.</p>
-            </div>
-
-            {/* Input de Busca */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '14px 18px',
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '12px',
-              boxShadow: 'var(--shadow-md)'
-            }}>
-              <Search size={18} style={{ color: 'var(--color-brand)' }} />
-              <input 
-                type="text"
-                placeholder="Pesquisar por Booking, Container ou Exportador..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  width: '100%',
-                  outline: 'none',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
-
-            {/* Resultados da Pesquisa */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {searchQuery.trim() ? `Resultados da Pesquisa (${filteredBookings.length})` : `📋 Bookings em Aberto (${filteredBookings.length})`}
-              </span>
-
-              {filteredBookings.map(b => {
-                const expName = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
-                const statusColor = b.status === 'Finalizado' ? '#10b981' : b.status === 'Em andamento' ? '#f59e0b' : '#ef4444';
-                const reportNum = b.stuffingReportNumber ? `SR: ${b.stuffingReportNumber}` : b.certificateNumber;
-
-                return (
-                  <div 
-                    key={b.id}
-                    onClick={() => setSelectedBooking(b)}
-                    style={{
-                      padding: '14px 16px',
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '10px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ color: 'var(--color-brand)', fontWeight: '800', fontSize: '14px' }}>
-                          {reportNum}
-                        </span>
-                        <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-primary)' }}>
-                          • BK: {b.bookingNumber}
-                        </span>
-                        <span style={{
-                          fontSize: '9px',
-                          padding: '2px 7px',
-                          borderRadius: '4px',
-                          backgroundColor: `${statusColor}18`,
-                          color: statusColor,
-                          fontWeight: '800',
-                          textTransform: 'uppercase',
-                          marginLeft: 'auto'
-                        }}>
-                          {b.status}
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        Exportador: <strong style={{ color: 'var(--text-primary)' }}>{expName}</strong>
-                      </div>
-                    </div>
-
-                    {/* Botão Ícone de Ajuste */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 10px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--color-brand)',
-                      fontSize: '11px',
-                      fontWeight: '800',
-                      flexShrink: 0
-                    }}>
-                      <SlidersHorizontal size={14} />
-                      <span>Ajuste</span>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {filteredBookings.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  Nenhum registro encontrado para a pesquisa.
-                </div>
-              )}
-            </div>
-          </>
+      {/* Conteúdo principal */}
+      <main style={{ padding: '18px 16px', flex: 1 }}>
+        {/* Breadcrumb / título da tela */}
+        {screen === 'list' && (
+          <h2 style={{ fontSize: '18px', fontWeight: '900', marginBottom: '16px', color: 'var(--text-primary)' }}>
+            📋 Bookings em Aberto
+          </h2>
+        )}
+        {screen === 'booking' && (
+          <h2 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '0', color: 'var(--text-primary)' }}>
+            Detalhes do Booking
+          </h2>
+        )}
+        {screen === 'container' && (
+          <h2 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '0', color: 'var(--text-primary)' }}>
+            Operar Container
+          </h2>
         )}
 
-        {/* Detalhes do Booking & Seletor de Contêiner */}
-        {selectedBooking && !selectedContainer && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <button 
-              onClick={() => setSelectedBooking(null)}
-              style={{
-                alignSelf: 'flex-start',
-                background: 'none',
-                border: 'none',
-                color: 'var(--color-brand)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '14px',
-                fontWeight: '700',
-                padding: 0
-              }}
-            >
-              <ArrowLeft size={16} /> Voltar para Pesquisa
-            </button>
-
-            <div style={{
-              padding: '20px',
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '12px',
-              boxShadow: 'var(--shadow-sm)'
-            }}>
-              <span style={{ fontSize: '11px', color: 'var(--color-brand)', fontWeight: '800' }}>DETALHES DO BOOKING</span>
-              <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '4px 0 10px 0' }}>{selectedBooking.certificateNumber}</h2>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text-primary)' }}>
-                <div>Nº Reserva: <strong>{selectedBooking.bookingNumber}</strong></div>
-                <div>Exportador: <span>{exportadores.find(e => e.id === selectedBooking.exporterId)?.name}</span></div>
-                <div>Local: <span>{locais.find(l => l.id === selectedBooking.locationId)?.name}</span></div>
-                <div>Navio/Viagem: <span>{selectedBooking.vesselVoyage}</span></div>
-              </div>
-            </div>
-
-            <div>
-              <h3 style={{ fontSize: '15px', fontWeight: '800', marginBottom: '10px', color: 'var(--color-brand)' }}>
-                Selecione o Container para Operar
-              </h3>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {selectedBooking.containers?.map(c => (
-                  <div 
-                    key={c.id}
-                    onClick={() => setSelectedContainer(c)}
-                    style={{
-                      padding: '16px',
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '10px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: '800', fontSize: '15px' }}>{c.containerNumber}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{c.containerType}</div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <ArrowRight size={16} style={{ color: 'var(--color-brand)' }} />
-                    </div>
-                  </div>
-                ))}
-
-                {(!selectedBooking.containers || selectedBooking.containers.length === 0) && (
-                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    Nenhum container inserido nesta reserva.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Gerenciamento do Contêiner (Status, Fotos, Inventário) */}
-        {selectedBooking && selectedContainer && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <button 
-              onClick={() => {
-                setSelectedContainer(null);
-                handleRefreshData();
-              }}
-              style={{
-                alignSelf: 'flex-start',
-                background: 'none',
-                border: 'none',
-                color: 'var(--color-brand)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '14px',
-                fontWeight: '700',
-                padding: 0
-              }}
-            >
-              <ArrowLeft size={16} /> Voltar para Booking
-            </button>
-
-            {/* Ficha Resumo do Container */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-secondary)',
-              padding: '12px 16px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              boxShadow: 'var(--shadow-sm)'
-            }}>
-              <div>
-                <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: '800' }}>CONTAINER</span>
-                <h3 style={{ fontSize: '18px', fontWeight: '800', margin: 0 }}>{selectedContainer.containerNumber}</h3>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{selectedContainer.containerType}</span>
-              </div>
-            </div>
-
-            {/* Abas Rápidas no Topo do Container */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', backgroundColor: 'var(--bg-tertiary)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-              <button
-                type="button"
-                onClick={() => setActiveContainerTab('photos')}
-                style={{
-                  padding: '10px 4px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: activeContainerTab === 'photos' ? 'var(--color-brand)' : 'transparent',
-                  color: activeContainerTab === 'photos' ? '#ffffff' : 'var(--text-secondary)',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px'
-                }}
-              >
-                <Camera size={14} />
-                <span>Fotos ({selectedContainer.photos?.length || 0})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveContainerTab('seals')}
-                style={{
-                  padding: '10px 4px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: activeContainerTab === 'seals' ? 'var(--color-brand)' : 'transparent',
-                  color: activeContainerTab === 'seals' ? '#ffffff' : 'var(--text-secondary)',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px'
-                }}
-              >
-                <Lock size={14} />
-                <span>Lacres & Pesos</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveContainerTab('notes')}
-                style={{
-                  padding: '10px 4px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: activeContainerTab === 'notes' ? 'var(--color-brand)' : 'transparent',
-                  color: activeContainerTab === 'notes' ? '#ffffff' : 'var(--text-secondary)',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px'
-                }}
-              >
-                <FileText size={14} />
-                <span>Obs & Status</span>
-              </button>
-            </div>
-
-            {/* ABA 1: FOTOS DA CARGA */}
-            {activeContainerTab === 'photos' && (
-              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
-                    📸 Fotos do Container
-                  </h3>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Total: {selectedContainer.photos?.length || 0}
-                  </span>
-                </div>
-
-                {/* Botões de Câmera e Galeria */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <button 
-                    onClick={() => cameraInputRef.current.click()}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--color-brand)',
-                      color: '#ffffff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      fontSize: '13px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}
-                  >
-                    <Camera size={18} />
-                    <span>Tirar Foto (Câmera)</span>
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={cameraInputRef}
-                    onChange={handlePhotoUpload}
-                    accept="image/*"
-                    capture="environment"
-                    style={{ display: 'none' }}
-                  />
-
-                  <button 
-                    onClick={() => galleryInputRef.current.click()}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      color: 'var(--text-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      fontSize: '13px',
-                      fontWeight: '700',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Image size={18} style={{ color: 'var(--color-brand)' }} />
-                    <span>Galeria</span>
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={galleryInputRef}
-                    onChange={handlePhotoUpload}
-                    multiple
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                  />
-                </div>
-
-                {/* Grid Scrollable de Fotos */}
-                <div style={{
-                  display: 'flex',
-                  gap: '12px',
-                  overflowX: 'auto',
-                  paddingBottom: '6px'
-                }}>
-                  {selectedContainer.photos?.map((photo, index) => (
-                    <div key={photo.id} style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                      flexShrink: 0,
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '6px',
-                      padding: '4px',
-                      backgroundColor: 'var(--bg-tertiary)'
-                    }}>
-                      <div 
-                        onClick={() => setPreviewPhotoUrl(photo.url)}
-                        style={{
-                          width: '90px',
-                          height: '120px',
-                          borderRadius: '4px',
-                          overflow: 'hidden',
-                          backgroundColor: '#000',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer'
-                        }}
-                        title="Clique para ampliar"
-                      >
-                        <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px' }}>
-                        <button 
-                          disabled={index === 0}
-                          onClick={() => movePhoto(index, -1)}
-                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
-                        >
-                          <ArrowLeft size={10} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeletePhoto(photo.id)}
-                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--color-danger-light)', border: 'none', color: 'var(--color-danger)', borderRadius: '2px' }}
-                        >
-                          <Trash2 size={10} />
-                        </button>
-                        <button 
-                          disabled={index === (selectedContainer.photos.length - 1)}
-                          onClick={() => movePhoto(index, 1)}
-                          style={{ padding: '3px', flex: 1, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '2px' }}
-                        >
-                          <ArrowRight size={10} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {(!selectedContainer.photos || selectedContainer.photos.length === 0) && (
-                    <div style={{
-                      flex: 1,
-                      border: '1px dashed var(--border-color)',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-muted)',
-                      fontSize: '12px',
-                      minHeight: '120px'
-                    }}>
-                      Nenhuma foto anexada. Toque no botão acima para tirar foto.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ABA 2: LACRES & PESOS */}
-            {activeContainerTab === 'seals' && (
-              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
-                  🔒 Lacres & Pesos da Carga
-                </h3>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} className="mobile-form-inputs">
-                  {/* Quantidade de Bags */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Quantidade de Sacas (Bags)
-                    </label>
-                    <input 
-                      type="number"
-                      value={selectedContainer.bagsQuantity || ''}
-                      onChange={e => handleUpdateContainerField('bagsQuantity', parseInt(e.target.value, 10) || 0)}
-                      placeholder="Ex: 320"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  {/* Grid Pesos */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                        Net Weight (Peso Carga)
-                      </label>
-                      <input 
-                        type="text"
-                        value={selectedContainer.netWeight || ''}
-                        onChange={e => handleUpdateContainerField('netWeight', e.target.value)}
-                        placeholder="Ex: 19.200"
-                        style={{
-                          width: '100%',
-                          padding: '10px 14px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                        Tara
-                      </label>
-                      <input 
-                        type="text"
-                        value={selectedContainer.tara || ''}
-                        onChange={e => handleUpdateContainerField('tara', e.target.value)}
-                        placeholder="Ex: 3.800"
-                        style={{
-                          width: '100%',
-                          padding: '10px 14px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                        Gross Weight (Bruto)
-                      </label>
-                      <input 
-                        type="text"
-                        value={selectedContainer.grossWeight || ''}
-                        onChange={e => handleUpdateContainerField('grossWeight', e.target.value)}
-                        placeholder="Ex: 23.000"
-                        style={{
-                          width: '100%',
-                          padding: '10px 14px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                        Marca / Cod. Lote
-                      </label>
-                      <input 
-                        type="text"
-                        value={selectedContainer.brand || ''}
-                        onChange={e => handleUpdateContainerField('brand', e.target.value)}
-                        placeholder="Ex: 002/1500"
-                        style={{
-                          width: '100%',
-                          padding: '10px 14px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Lacres Provisórios Múltiplos */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Lacres Provisórios (Múltiplos)
-                    </label>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                      <input 
-                        type="text"
-                        placeholder="Adicionar lacre..."
-                        value={newSealInput}
-                        onChange={e => setNewSealInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleAddProvisionalSeal()}
-                        style={{
-                          flex: 1,
-                          padding: '10px 14px',
-                          backgroundColor: 'var(--bg-tertiary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          color: 'var(--text-primary)',
-                          fontSize: '14px',
-                          outline: 'none'
-                        }}
-                      />
-                      <button 
-                        onClick={handleAddProvisionalSeal}
-                        style={{
-                          padding: '10px 16px',
-                          backgroundColor: 'var(--color-brand)',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: '8px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          fontSize: '12px'
-                        }}
-                      >
-                        Add
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {selectedContainer.provisionalSeals?.map((seal, idx) => (
-                        <div 
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '4px 10px',
-                            backgroundColor: 'var(--bg-tertiary)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '6px',
-                            fontSize: '12px'
-                          }}
-                        >
-                          <span>{seal}</span>
-                          <button 
-                            onClick={() => handleRemoveProvisionalSeal(idx)}
-                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-
-                      {(!selectedContainer.provisionalSeals || selectedContainer.provisionalSeals.length === 0) && (
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                          Nenhum lacre provisório inserido.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Lacre Definitivo */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                      Lacre Definitivo
-                    </label>
-                    <input 
-                      type="text"
-                      value={selectedContainer.definiteSeal || ''}
-                      onChange={e => handleUpdateContainerField('definiteSeal', e.target.value)}
-                      placeholder="Nº Lacre Definitivo"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        color: 'var(--text-primary)',
-                        fontSize: '14px',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ABA 3: OBSERVAÇÕES & STATUS */}
-            {activeContainerTab === 'notes' && (
-              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--color-brand)', margin: 0 }}>
-                  📝 Observações & Conclusão
-                </h3>
-
-                {/* Observações Técnicas do Container */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Observações Técnicas
-                  </label>
-                  <textarea 
-                    value={selectedContainer.notes || ''}
-                    onChange={e => handleUpdateContainerField('notes', e.target.value)}
-                    placeholder="Observações adicionais da vistoria..."
-                    rows={4}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--text-primary)',
-                      fontSize: '14px',
-                      outline: 'none',
-                      resize: 'vertical',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                {/* Divisor */}
-                <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-                <div style={{ fontSize: '11px', color: 'var(--color-brand)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  📋 Informações do Booking
-                </div>
-
-                {/* Status do Booking */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
-                    Status do Booking
-                  </label>
-                  <select
-                    value={selectedBooking.status || 'Pendente'}
-                    onChange={e => handleUpdateBookingField('status', e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--text-primary)',
-                      fontSize: '14px',
-                      fontWeight: '700',
-                      outline: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="Pendente">🔴 Pendente</option>
-                    <option value="Em andamento">🟡 Em Andamento</option>
-                    <option value="Finalizado">🟢 Finalizado</option>
-                  </select>
-                </div>
-
-                {/* O que está faltando (Pendência) */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase' }}>
-                    O que está faltando
-                  </label>
-                  <select
-                    value={selectedBooking.pendingItem || ''}
-                    onChange={e => handleUpdateBookingField('pendingItem', e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--text-primary)',
-                      fontSize: '14px',
-                      fontWeight: '700',
-                      outline: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="">🟢 Nenhum (Completo)</option>
-                    <option value="Fumigação">Fumigação</option>
-                    <option value="Fito">Fito</option>
-                    <option value="Lacre Definitivo">Lacre Definitivo</option>
-                  </select>
-                </div>
-
-              </div>
-            )}
-
-            {/* Ações Finais */}
-            <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
-              <button 
-                onClick={() => {
-                  setSelectedContainer(null);
-                  handleRefreshData();
-                }}
-                style={{
-                  flex: 1,
-                  padding: '14px 20px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-color)',
-                  backgroundColor: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
-                Voltar para Booking
-              </button>
-            </div>
-          </div>
-        )}
+        <div style={{ marginTop: screen === 'list' ? 0 : '6px' }}>
+          {screen === 'list'      && renderList()}
+          {screen === 'booking'   && renderBooking()}
+          {screen === 'container' && renderContainer()}
+        </div>
       </main>
 
-      {/* Visualizador de Foto em Tamanho Maior */}
+      {/* Preview de foto em tela cheia */}
       {previewPhotoUrl && (
-        <div 
-          onClick={() => setPreviewPhotoUrl(null)} 
+        <div
+          onClick={() => setPreviewPhotoUrl(null)}
           style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            cursor: 'zoom-out',
-            padding: '16px'
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.96)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 10000, cursor: 'zoom-out', padding: '16px'
           }}
-          className="no-print"
         >
-          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh', display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-            <img src={previewPhotoUrl} alt="Visualização" style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} />
-            <button 
+          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh' }} onClick={e => e.stopPropagation()}>
+            <img
+              src={previewPhotoUrl}
+              alt="Visualização"
+              style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '10px' }}
+            />
+            <button
               onClick={() => setPreviewPhotoUrl(null)}
               style={{
-                position: 'absolute',
-                top: '-40px',
-                right: '0px',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: 'bold'
+                position: 'absolute', top: '-36px', right: '0',
+                background: 'rgba(255,255,255,0.15)', border: 'none',
+                borderRadius: '50%', width: '32px', height: '32px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', color: '#fff', fontSize: '16px', fontWeight: 'bold'
               }}
-            >
-              ✕
-            </button>
+            >✕</button>
           </div>
         </div>
       )}
-
     </div>
   );
 }
