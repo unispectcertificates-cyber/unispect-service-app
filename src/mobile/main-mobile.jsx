@@ -29,7 +29,6 @@ function MobileRoot() {
     <MobileAppView
       user={user}
       onLogout={handleLogout}
-      hideHeader={false}
     />
   );
 }

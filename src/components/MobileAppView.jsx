@@ -1,10 +1,14 @@
-import { useState, useRef, useCallback } from 'react';
-import { Search, Camera, Image, Trash2, ArrowLeft, X, CheckCircle2, Lock, ChevronRight, ChevronDown } from 'lucide-react';
-import { db, useBookings, useExportadores, useLocais, isBookingNumberDuplicate } from '../db';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  Search, Camera, Image, Trash2, ArrowLeft, X,
+  CheckCircle2, Package, ClipboardList, Settings,
+  ChevronRight, Loader2, User, LogOut
+} from 'lucide-react';
+import { db, useBookings, useExportadores, useLocais } from '../db';
 
-// ────────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
-// ────────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 const S = {
   label: {
     display: 'block',
@@ -56,38 +60,310 @@ const S = {
   }
 };
 
-export default function MobileAppView({ onLogout, hideHeader = false }) {
+// Status badge color helper
+const statusColor = s => {
+  if (!s) return '#6b7280';
+  const l = s.toLowerCase();
+  if (l === 'finalizado' || l === 'estufado' || l === 'finished') return '#10b981';
+  if (l === 'em andamento') return '#f59e0b';
+  return '#ef4444';
+};
+
+const FINISHED = ['finalizado', 'estufado', 'finished', 'concluido', 'concluído'];
+const isFinished = b => FINISHED.includes((b.status || '').toLowerCase().trim());
+
+// ────────────────────────────────────────────────────────────────────────────
+// Componente de indicador de auto-save
+// ────────────────────────────────────────────────────────────────────────────
+function SaveIndicator({ status }) {
+  if (status === 'idle') return null;
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '5px',
+      fontSize: '11px',
+      fontWeight: '700',
+      color: status === 'saved' ? '#10b981' : 'var(--text-muted)',
+      transition: 'color 0.3s'
+    }}>
+      {status === 'saving' ? (
+        <>
+          <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+          Salvando...
+        </>
+      ) : (
+        <>
+          <CheckCircle2 size={12} />
+          Salvo
+        </>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Bottom Navigation — 3 abas: Booking | Container | Ajustes
+// ────────────────────────────────────────────────────────────────────────────
+function BottomNav({ activeTab, onTabChange, hasContainer }) {
+  const tabs = [
+    { id: 'booking',   label: 'Booking',   Icon: ClipboardList },
+    { id: 'container', label: 'Container',  Icon: Package       },
+    { id: 'ajustes',   label: 'Ajustes',   Icon: Settings      },
+  ];
+
+  return (
+    <nav style={{
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: 'calc(64px + env(safe-area-inset-bottom, 0px))',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      backgroundColor: 'var(--bg-secondary)',
+      borderTop: '1px solid var(--border-color)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-around',
+      zIndex: 1000,
+      backdropFilter: 'blur(12px)'
+    }}>
+      {tabs.map(({ id, label, Icon }) => {
+        const isActive = activeTab === id;
+        const isDisabled = id === 'container' && !hasContainer;
+        return (
+          <button
+            key={id}
+            onClick={() => !isDisabled && onTabChange(id)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '3px',
+              background: 'none',
+              border: 'none',
+              color: isActive
+                ? 'var(--color-brand)'
+                : isDisabled
+                  ? 'var(--border-color)'
+                  : 'var(--text-muted)',
+              fontSize: '10px',
+              fontWeight: isActive ? '800' : '500',
+              cursor: isDisabled ? 'default' : 'pointer',
+              padding: '8px 20px',
+              borderRadius: '12px',
+              transition: 'all 0.2s',
+              position: 'relative'
+            }}
+          >
+            {/* Indicador ativo */}
+            {isActive && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: '28px',
+                height: '3px',
+                borderRadius: '0 0 3px 3px',
+                backgroundColor: 'var(--color-brand)'
+              }} />
+            )}
+            <Icon size={22} />
+            <span>{label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Painel de Ajustes
+// ────────────────────────────────────────────────────────────────────────────
+function AjustesPanel({ user, onLogout }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)' }}>
+        ⚙️ Ajustes
+      </h2>
+
+      {/* Card de perfil */}
+      <div style={{
+        ...S.card,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '14px'
+      }}>
+        <div style={{
+          width: '48px', height: '48px', borderRadius: '14px',
+          background: 'var(--color-brand-gradient)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          <User size={24} color="#fff" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: '900', fontSize: '16px', color: 'var(--text-primary)' }}>
+            {user?.name || 'Usuário'}
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>
+            {user?.role || 'Inspector'}
+          </div>
+          {user?.login && (
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Login: {user.login}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Info do app */}
+      <div style={S.card}>
+        <div style={S.sectionTitle}>📱 Sobre o App</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Versão</span>
+            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>2.0.0</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Modo</span>
+            <span style={{ fontWeight: '700', color: 'var(--color-brand)' }}>Campo</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Sincronização</span>
+            <span style={{ fontWeight: '700', color: '#10b981' }}>✓ Firebase Realtime</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Auto-Save</span>
+            <span style={{ fontWeight: '700', color: '#10b981' }}>✓ Ativado</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Botão Sair */}
+      {onLogout && (
+        <button
+          onClick={onLogout}
+          style={{
+            padding: '15px',
+            borderRadius: '14px',
+            border: '1px solid var(--color-danger)',
+            backgroundColor: 'var(--color-danger-light)',
+            color: 'var(--color-danger)',
+            fontWeight: '800',
+            fontSize: '15px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px'
+          }}
+        >
+          <LogOut size={18} />
+          Sair do App
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Componente Principal
+// ────────────────────────────────────────────────────────────────────────────
+export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   const bookings     = useBookings();
   const exportadores = useExportadores();
   const locais       = useLocais();
 
-  // ── Navegação: null | 'booking' | 'container'
-  const [screen, setScreen]                   = useState('list');
-  const [selectedBooking, setSelectedBooking] = useState(null);
+  // ── Navegação
+  const [screen, setScreen]               = useState('list');       // 'list' | 'booking' | 'container' | 'ajustes'
+  const [activeTab, setActiveTab]         = useState('booking');
+  const [selectedBooking, setSelectedBooking]     = useState(null);
   const [selectedContainer, setSelectedContainer] = useState(null);
 
-  // ── Estado de busca
+  // ── Busca
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ── Estado de upload / preview
-  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
-  const [isSaving, setIsSaving]               = useState(false);
-  const [saveOk, setSaveOk]                   = useState(false);
+  // ── Auto-save
+  const [saveStatus, setSaveStatus]   = useState('idle');  // 'idle' | 'saving' | 'saved'
+  const saveTimerRef                  = useRef(null);
+  const debounceTimerRef              = useRef(null);
 
-  // ── Lacre temp
-  const [newSealInput, setNewSealInput]       = useState('');
+  // ── Preview de foto
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
+
+  // ── Input de lacre provisório
+  const [newSealInput, setNewSealInput] = useState('');
 
   const cameraInputRef  = useRef(null);
   const galleryInputRef = useRef(null);
 
-  // Status considerados "finalizados"
-  const FINISHED = ['finalizado', 'estufado', 'finished', 'concluido', 'concluído'];
-  const isFinished = b => FINISHED.includes((b.status || '').toLowerCase().trim());
+  // Ref para evitar stale closure no auto-save
+  const selectedBookingRef = useRef(selectedBooking);
+  useEffect(() => { selectedBookingRef.current = selectedBooking; }, [selectedBooking]);
 
-  // ── Filtragem de bookings
+  // CSS keyframe para spinner (injetado uma vez)
+  useEffect(() => {
+    if (document.getElementById('mobile-spin-style')) return;
+    const style = document.createElement('style');
+    style.id = 'mobile-spin-style';
+    style.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+    document.head.appendChild(style);
+  }, []);
+
+  // ── Função de auto-save
+  const autoSave = useCallback(async (booking, container) => {
+    if (!booking || !container) return;
+    setSaveStatus('saving');
+    try {
+      const updatedContainers = (booking.containers || []).map(c =>
+        c.id === container.id ? container : c
+      );
+      const updatedBooking = { ...booking, containers: updatedContainers };
+      await db.saveBooking(updatedBooking);
+      setSelectedBooking(updatedBooking);
+      setSaveStatus('saved');
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 1800);
+    } catch (err) {
+      setSaveStatus('idle');
+      console.error('Auto-save error:', err);
+    }
+  }, []);
+
+  // ── Auto-save com debounce (para campos de texto)
+  const debouncedSave = useCallback((booking, container) => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      autoSave(booking, container);
+    }, 800);
+  }, [autoSave]);
+
+  // ── Atualizar campo do container + auto-save com debounce
+  const updateContField = useCallback((field, value) => {
+    setSelectedContainer(prev => {
+      const updated = { ...prev, [field]: value };
+      debouncedSave(selectedBookingRef.current, updated);
+      return updated;
+    });
+  }, [debouncedSave]);
+
+  // ── Atualizar status/pendência do booking + auto-save
+  const updateBookingField = useCallback((field, value) => {
+    setSelectedBooking(prev => {
+      const updated = { ...prev, [field]: value };
+      selectedBookingRef.current = updated;
+      // Salva o booking inteiro (com o container atual já sincronizado)
+      debouncedSave(updated, selectedContainer);
+      return updated;
+    });
+  }, [debouncedSave, selectedContainer]);
+
+  // ── Filtro de bookings
   const filteredBookings = bookings.filter(b => {
     const term = searchQuery.toLowerCase().trim();
-    if (!term) return !isFinished(b);
+    if (!term) return true; // mostra todos
     const expName = (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase();
     return (
       (b.bookingNumber || '').toLowerCase().includes(term) ||
@@ -98,65 +374,66 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     );
   });
 
-  // ── Navegar para Booking
+  // ── Navegação: abrir Booking
   const openBooking = useCallback(b => {
     setSelectedBooking(b);
-    setScreen('booking');
     setSelectedContainer(null);
+    setScreen('booking');
+    setActiveTab('booking');
   }, []);
 
-  // ── Navegar para Container
+  // ── Navegação: abrir Container
   const openContainer = useCallback(c => {
     setSelectedContainer({ ...c });
     setScreen('container');
-    setSaveOk(false);
+    setActiveTab('container');
+    setSaveStatus('idle');
+    setNewSealInput('');
   }, []);
 
-  // ── Voltar para lista
+  // ── Navegação: voltar para lista de Bookings
   const goToList = useCallback(() => {
     setScreen('list');
     setSelectedBooking(null);
     setSelectedContainer(null);
+    setActiveTab('booking');
   }, []);
 
-  // ── Voltar para booking (da tela de container)
+  // ── Navegação: voltar para o Booking (da tela de container)
   const goToBooking = useCallback(() => {
     setSelectedContainer(null);
     setScreen('booking');
-    setSaveOk(false);
+    setActiveTab('booking');
+    setSaveStatus('idle');
   }, []);
 
-  // ── Salvar container e voltar
-  const handleSaveContainer = useCallback(async () => {
-    if (!selectedBooking || !selectedContainer) return;
-    setIsSaving(true);
-    try {
-      const updatedContainers = selectedBooking.containers.map(c =>
-        c.id === selectedContainer.id ? selectedContainer : c
-      );
-      const updatedBooking = { ...selectedBooking, containers: updatedContainers };
-      await db.saveBooking(updatedBooking);
-      setSelectedBooking(updatedBooking);
-      setSaveOk(true);
-      setTimeout(() => {
+  // ── Troca de tab na bottom nav
+  const handleTabChange = useCallback(tab => {
+    if (tab === 'booking') {
+      if (screen === 'container') {
         goToBooking();
-      }, 700);
-    } catch (err) {
-      alert(err.message || 'Erro ao salvar. Tente novamente.');
-    } finally {
-      setIsSaving(false);
+      } else if (screen === 'ajustes') {
+        setScreen(selectedBooking ? 'booking' : 'list');
+        setActiveTab('booking');
+      } else {
+        setActiveTab('booking');
+      }
+    } else if (tab === 'container') {
+      if (selectedContainer) {
+        setScreen('container');
+        setActiveTab('container');
+      }
+    } else if (tab === 'ajustes') {
+      setScreen('ajustes');
+      setActiveTab('ajustes');
     }
-  }, [selectedBooking, selectedContainer, goToBooking]);
+  }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // ── Atualizar campo do container localmente (sem salvar ainda)
-  const updateContField = useCallback((field, value) => {
-    setSelectedContainer(prev => ({ ...prev, [field]: value }));
-  }, []);
-
-  // ── Upload de fotos
+  // ── Upload de fotos (salva imediatamente)
   const handlePhotoUpload = async e => {
     const files = Array.from(e.target.files);
     if (!files.length || !selectedContainer) return;
+    setSaveStatus('saving');
     try {
       const urls = await Promise.all(files.map(f => db.uploadPhoto(f)));
       const newPhotos = urls.map(url => ({
@@ -164,14 +441,25 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
         url,
         name: ''
       }));
-      updateContField('photos', [...(selectedContainer.photos || []), ...newPhotos]);
+      setSelectedContainer(prev => {
+        const updated = { ...prev, photos: [...(prev.photos || []), ...newPhotos] };
+        autoSave(selectedBookingRef.current, updated);
+        return updated;
+      });
     } catch (err) {
+      setSaveStatus('idle');
       alert(err.message || 'Erro ao enviar foto.');
     }
+    // Reset input para permitir selecionar o mesmo arquivo novamente
+    e.target.value = '';
   };
 
   const handleDeletePhoto = id => {
-    updateContField('photos', (selectedContainer.photos || []).filter(p => p.id !== id));
+    setSelectedContainer(prev => {
+      const updated = { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) };
+      autoSave(selectedBookingRef.current, updated);
+      return updated;
+    });
   };
 
   const handleAddSeal = () => {
@@ -186,21 +474,16 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     updateContField('provisionalSeals', updated);
   };
 
-  // Status badge color
-  const statusColor = s => {
-    if (!s) return '#6b7280';
-    const l = s.toLowerCase();
-    if (l === 'finalizado' || l === 'estufado') return '#10b981';
-    if (l === 'em andamento') return '#f59e0b';
-    return '#ef4444';
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // TELA 1 — Lista de Bookings
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // TELA: Lista de Bookings
+  // ─────────────────────────────────────────────────────────────────────────
   const renderList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Busca */}
+      <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>
+        📋 Bookings
+      </h2>
+
+      {/* Campo de busca */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: '10px',
         padding: '12px 16px',
@@ -224,12 +507,14 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
         )}
       </div>
 
-      {/* Label */}
+      {/* Contador */}
       <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {searchQuery ? `Resultados (${filteredBookings.length})` : `📋 Em Aberto (${filteredBookings.length})`}
+        {searchQuery
+          ? `Resultados (${filteredBookings.length})`
+          : `📋 Todos os Bookings (${filteredBookings.length})`}
       </div>
 
-      {/* Cards */}
+      {/* Lista de cards */}
       {filteredBookings.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: '13px' }}>
           Nenhum booking encontrado.
@@ -239,6 +524,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
         const loc = locais.find(l => l.id === b.locationId)?.name || '';
         const sc  = statusColor(b.status);
         const contCount = (b.containers || []).length;
+        const finished  = isFinished(b);
         return (
           <div
             key={b.id}
@@ -251,7 +537,8 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
               alignItems: 'center',
               gap: '12px',
               transition: 'transform 0.15s',
-              borderLeft: `4px solid ${sc}`
+              borderLeft: `4px solid ${sc}`,
+              opacity: finished ? 0.65 : 1
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -270,7 +557,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                 BK: <strong style={{ color: 'var(--text-primary)' }}>{b.bookingNumber}</strong>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {exp} {loc ? `· ${loc}` : ''}
+                {exp}{loc ? ` · ${loc}` : ''}
               </div>
               <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
                 🗃 {contCount} container{contCount !== 1 ? 's' : ''}
@@ -283,9 +570,9 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     </div>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // TELA 1B — Booking expandido + lista de containers
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // TELA: Detalhe do Booking + lista de containers
+  // ─────────────────────────────────────────────────────────────────────────
   const renderBooking = () => {
     const b   = selectedBooking;
     const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
@@ -297,7 +584,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Voltar */}
         <button onClick={goToList} style={S.backBtn}>
-          <ArrowLeft size={16} /> Voltar para Lista
+          <ArrowLeft size={16} /> Todos os Bookings
         </button>
 
         {/* Card Booking */}
@@ -335,9 +622,9 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
           </div>
         </div>
 
-        {/* Lista de containers */}
+        {/* Lista de Containers */}
         <div>
-          <div style={S.sectionTitle}>📦 Containers ({containers.length})</div>
+          <div style={S.sectionTitle}>📦 Containers ({containers.length}) — Selecione para inspecionar</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {containers.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px', border: '1px dashed var(--border-color)', borderRadius: '12px' }}>
@@ -346,7 +633,6 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
             ) : containers.map(c => {
               const hasPhotos  = (c.photos || []).length > 0;
               const hasDefSeal = !!c.definiteSeal;
-              const cs = statusColor(c.status);
               return (
                 <div
                   key={c.id}
@@ -357,7 +643,8 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    borderLeft: `3px solid ${hasDefSeal ? '#10b981' : 'var(--border-color)'}`
+                    borderLeft: `3px solid ${hasDefSeal ? '#10b981' : 'var(--border-color)'}`,
+                    transition: 'transform 0.1s'
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -367,10 +654,9 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
                       {hasPhotos && (
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#3b82f6' }}>📸 {c.photos.length} foto{c.photos.length !== 1 ? 's' : ''}</span>
                       )}
-                      {hasDefSeal && (
+                      {hasDefSeal ? (
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#10b981' }}>🔒 {c.definiteSeal}</span>
-                      )}
-                      {!hasDefSeal && (
+                      ) : (
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#f59e0b' }}>⚠️ Sem lacre definitivo</span>
                       )}
                     </div>
@@ -385,21 +671,24 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // TELA 2 — Edição de Container
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // TELA: Edição de Container (com auto-save, sem botão Salvar)
+  // ─────────────────────────────────────────────────────────────────────────
   const renderContainer = () => {
     const c = selectedContainer;
     if (!c) return null;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-        {/* Voltar */}
-        <button onClick={goToBooking} style={S.backBtn}>
-          <ArrowLeft size={16} /> Containers do Booking
-        </button>
+        {/* Header com Voltar + Save Indicator */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button onClick={goToBooking} style={S.backBtn}>
+            <ArrowLeft size={16} /> Containers do Booking
+          </button>
+          <SaveIndicator status={saveStatus} />
+        </div>
 
-        {/* Header Container */}
+        {/* Card do Container */}
         <div style={{
           ...S.card,
           background: 'linear-gradient(135deg, var(--color-brand) 0%, #0ea5e9 100%)',
@@ -459,14 +748,14 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
             >
               <Image size={16} style={{ color: 'var(--color-brand)' }} /> Galeria
             </button>
-            <input type="file" ref={cameraInputRef} onChange={handlePhotoUpload} accept="image/*" capture="environment" style={{ display: 'none' }} />
+            <input type="file" ref={cameraInputRef}  onChange={handlePhotoUpload} accept="image/*" capture="environment" style={{ display: 'none' }} />
             <input type="file" ref={galleryInputRef} onChange={handlePhotoUpload} accept="image/*" multiple style={{ display: 'none' }} />
           </div>
 
           {/* Grid de fotos */}
           {(c.photos || []).length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {(c.photos || []).map((photo, idx) => (
+              {(c.photos || []).map(photo => (
                 <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1' }}>
                   <img
                     src={photo.url}
@@ -491,7 +780,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '24px', border: '1px dashed var(--border-color)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
-              Nenhuma foto. Use os botões acima.
+              Nenhuma foto. Use os botões acima para fotografar ou importar da galeria.
             </div>
           )}
         </div>
@@ -570,7 +859,13 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
               <label style={S.label}>Qtd. Sacas (Bags)</label>
-              <input type="number" value={c.bagsQuantity || ''} onChange={e => updateContField('bagsQuantity', parseInt(e.target.value, 10) || 0)} placeholder="Ex: 320" style={S.input} />
+              <input
+                type="number"
+                value={c.bagsQuantity || ''}
+                onChange={e => updateContField('bagsQuantity', parseInt(e.target.value, 10) || 0)}
+                placeholder="Ex: 320"
+                style={S.input}
+              />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div>
@@ -611,7 +906,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
               <label style={S.label}>Status do Booking</label>
               <select
                 value={selectedBooking?.status || 'Pendente'}
-                onChange={e => setSelectedBooking(prev => ({ ...prev, status: e.target.value }))}
+                onChange={e => updateBookingField('status', e.target.value)}
                 style={{ ...S.input, cursor: 'pointer', fontWeight: '700' }}
               >
                 <option value="Pendente">🔴 Pendente</option>
@@ -623,7 +918,7 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
               <label style={S.label}>Pendência</label>
               <select
                 value={selectedBooking?.pendingItem || ''}
-                onChange={e => setSelectedBooking(prev => ({ ...prev, pendingItem: e.target.value }))}
+                onChange={e => updateBookingField('pendingItem', e.target.value)}
                 style={{ ...S.input, cursor: 'pointer', fontWeight: '700' }}
               >
                 <option value="">🟢 Nenhum (Completo)</option>
@@ -635,110 +930,76 @@ export default function MobileAppView({ onLogout, hideHeader = false }) {
           </div>
         </div>
 
-        {/* ── Botão Salvar ── */}
-        <button
-          onClick={handleSaveContainer}
-          disabled={isSaving || saveOk}
-          style={{
-            padding: '16px',
-            borderRadius: '14px',
-            border: 'none',
-            backgroundColor: saveOk ? '#10b981' : 'var(--color-brand)',
-            color: '#fff',
-            fontWeight: '900',
-            fontSize: '16px',
-            cursor: isSaving || saveOk ? 'default' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            boxShadow: '0 4px 18px rgba(16,185,129,0.25)',
-            transition: 'background 0.3s',
-            letterSpacing: '0.3px'
-          }}
-        >
-          {saveOk ? (
-            <><CheckCircle2 size={20} /> Salvo! Voltando...</>
-          ) : isSaving ? (
-            'Salvando...'
-          ) : (
-            <><CheckCircle2 size={20} /> Salvar e Voltar</>
-          )}
-        </button>
+        {/* Espaço extra para a bottom nav não sobrepor o último card */}
+        <div style={{ height: '16px' }} />
       </div>
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   // RENDER PRINCIPAL
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      minHeight: hideHeader ? 'auto' : '100vh',
+      minHeight: '100vh',
       backgroundColor: 'var(--bg-primary)',
       color: 'var(--text-primary)',
       fontFamily: "'Outfit', sans-serif"
     }}>
-      {/* Header — só na versão standalone */}
-      {!hideHeader && (
-        <header style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '14px 20px',
-          backgroundColor: 'var(--bg-secondary)',
-          borderBottom: '1px solid var(--border-color)',
-          position: 'sticky', top: 0, zIndex: 100
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              background: 'var(--color-brand-gradient)', color: '#fff',
-              fontWeight: '800', fontSize: '14px',
-              width: '32px', height: '32px', borderRadius: '8px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>US</div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
-              <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
-            </div>
+      {/* Header fixo */}
+      <header style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '12px 20px',
+        backgroundColor: 'var(--bg-secondary)',
+        borderBottom: '1px solid var(--border-color)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 100
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{
+            background: 'var(--color-brand-gradient)',
+            color: '#fff',
+            fontWeight: '800',
+            fontSize: '13px',
+            width: '30px',
+            height: '30px',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>US</div>
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
+            <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
           </div>
-          {onLogout && (
-            <button onClick={onLogout} style={{
-              padding: '6px 12px', fontSize: '11px',
-              backgroundColor: 'var(--color-danger-light)',
-              border: '1px solid var(--color-danger)',
-              borderRadius: '6px', color: 'var(--color-danger)',
-              fontWeight: '700', cursor: 'pointer'
-            }}>Sair</button>
-          )}
-        </header>
-      )}
-
-      {/* Conteúdo principal */}
-      <main style={{ padding: '18px 16px', flex: 1 }}>
-        {/* Breadcrumb / título da tela */}
-        {screen === 'list' && (
-          <h2 style={{ fontSize: '18px', fontWeight: '900', marginBottom: '16px', color: 'var(--text-primary)' }}>
-            📋 Bookings em Aberto
-          </h2>
-        )}
-        {screen === 'booking' && (
-          <h2 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '0', color: 'var(--text-primary)' }}>
-            Detalhes do Booking
-          </h2>
-        )}
-        {screen === 'container' && (
-          <h2 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '0', color: 'var(--text-primary)' }}>
-            Operar Container
-          </h2>
-        )}
-
-        <div style={{ marginTop: screen === 'list' ? 0 : '6px' }}>
-          {screen === 'list'      && renderList()}
-          {screen === 'booking'   && renderBooking()}
-          {screen === 'container' && renderContainer()}
         </div>
+        {/* Indicador de save no header quando em container */}
+        {screen === 'container' && <SaveIndicator status={saveStatus} />}
+      </header>
+
+      {/* Conteúdo principal com padding para nav inferior */}
+      <main style={{
+        padding: '16px 16px',
+        flex: 1,
+        paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))'
+      }}>
+        {screen === 'list'      && renderList()}
+        {screen === 'booking'   && renderBooking()}
+        {screen === 'container' && renderContainer()}
+        {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} />}
       </main>
+
+      {/* Bottom Navigation */}
+      <BottomNav
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        hasContainer={!!selectedContainer}
+      />
 
       {/* Preview de foto em tela cheia */}
       {previewPhotoUrl && (
