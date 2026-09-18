@@ -293,6 +293,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   // ── Upload de fotos
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
+  // ── Mapa de fotos carregadas: { [photoId]: dataUrl }
+  // As fotos ficam na coleção Firestore 'containerPhotos' e são exibidas via este mapa
+  const [containerPhotos, setContainerPhotos] = useState({});
+
   // ── Toast de erro (não-bloqueante, substitui alert())
   const [toastError, setToastError] = useState('');
   const toastTimerRef = useRef(null);
@@ -415,14 +419,26 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     setActiveTab('booking');
   }, []);
 
-  // ── Navegação: abrir Container
-  const openContainer = useCallback(c => {
+  // ── Navegação: abrir Container (carrega fotos do Firestore)
+  const openContainer = useCallback(async c => {
     setSelectedContainer({ ...c });
     setScreen('container');
     setActiveTab('container');
     setSaveStatus('idle');
     setNewSealInput('');
-  }, []);
+    setContainerPhotos({});
+
+    // Carrega fotos da coleção containerPhotos no Firestore
+    try {
+      const photos = await db.getPhotosForContainer(c.id);
+      if (!isMountedRef.current) return;
+      const photoMap = {};
+      photos.forEach(p => { photoMap[p.id] = p.url; });
+      setContainerPhotos(photoMap);
+    } catch (err) {
+      console.warn('Não foi possível carregar fotos do container:', err);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Navegação: voltar para lista de Bookings
   const goToList = useCallback(() => {
@@ -462,10 +478,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     }
   }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // ── Upload de fotos (salva imediatamente, sem closure stale)
+  // ── Upload de fotos — salva no Firestore via db.uploadPhoto
   const handlePhotoUpload = async e => {
     const files = Array.from(e.target.files || []);
-    // Reset input antes de processar para permitir re-seleção do mesmo arquivo
+    // Reset input antes de processar (permite re-seleção do mesmo arquivo)
     e.target.value = '';
 
     if (!files.length || !selectedContainer) return;
@@ -474,35 +490,35 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     setSaveStatus('saving');
 
     try {
-      // Faz upload de todos os arquivos em paralelo
-      const urls = await Promise.all(files.map(f => db.uploadPhoto(f)));
+      const containerId = selectedContainer.id;
 
-      if (!isMountedRef.current) return; // Guard pós-await
+      // Faz upload de cada arquivo sequencialmente (evita sobrecarga de memória)
+      const newPhotoRefs = [];
+      for (const f of files) {
+        // db.uploadPhoto comprime a imagem e salva no Firestore containerPhotos
+        // Retorna { id, name, url } — url é o dataURL base64 para exibição imediata
+        const result = await db.uploadPhoto(f, containerId);
+        if (!isMountedRef.current) return;
+        newPhotoRefs.push({ id: result.id, name: result.name });
+        // Atualiza o mapa de fotos em tempo real (foto aparece ao ser carregada)
+        setContainerPhotos(prev => ({ ...prev, [result.id]: result.url }));
+      }
 
-      const newPhotos = urls.map(url => ({
-        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        url,
-        name: ''
-      }));
-
-      // Captura o container e booking ATUAIS (evita closure stale)
+      // Captura referências estáveis (evita closure stale)
       const currentContainer = selectedContainer;
       const currentBooking   = selectedBookingRef.current;
 
+      // Salva apenas as referências (id, name) no booking — não o base64
       const updatedContainer = {
         ...currentContainer,
-        photos: [...(currentContainer.photos || []), ...newPhotos]
+        photos: [...(currentContainer.photos || []), ...newPhotoRefs]
       };
 
-      // Atualiza estado local
       setSelectedContainer(updatedContainer);
-
-      // Persiste no Firestore com referências estáveis
       await autoSave(currentBooking, updatedContainer);
     } catch (err) {
       if (!isMountedRef.current) return;
       setSaveStatus('idle');
-      // Toast não-bloqueante (substitui alert() que travava o app no mobile)
       const msg = err?.message || 'Erro ao enviar foto.';
       showToast(msg);
       console.error('Photo upload error:', err);
@@ -511,8 +527,17 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     }
   };
 
-  const handleDeletePhoto = id => {
+  const handleDeletePhoto = async id => {
     if (!isMountedRef.current) return;
+    // Remove do Firestore (coleção containerPhotos)
+    db.deletePhoto(id).catch(err => console.warn('deletePhoto error:', err));
+    // Remove do mapa local de fotos
+    setContainerPhotos(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    // Remove da lista de referências no container e salva
     setSelectedContainer(prev => {
       const updated = { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) };
       autoSave(selectedBookingRef.current, updated);
@@ -822,34 +847,45 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
           {/* Grid de fotos */}
           {(c.photos || []).length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {(c.photos || []).map(photo => (
-                <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1' }}>
-                  <img
-                    src={photo.url}
-                    alt=""
-                    onClick={() => setPreviewPhotoUrl(photo.url)}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
-                  />
-                  <button
-                    onClick={() => handleDeletePhoto(photo.id)}
-                    style={{
-                      position: 'absolute', top: '4px', right: '4px',
-                      background: 'rgba(239,68,68,0.85)', border: 'none',
-                      borderRadius: '50%', width: '22px', height: '22px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', color: '#fff'
-                    }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
+              {(c.photos || []).map(photo => {
+                // Usa a foto do mapa carregado do Firestore; fallback para URL antiga (Firebase Storage)
+                const photoSrc = containerPhotos[photo.id] || photo.url || null;
+                return (
+                  <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1', backgroundColor: 'var(--bg-tertiary)' }}>
+                    {photoSrc ? (
+                      <img
+                        src={photoSrc}
+                        alt=""
+                        onClick={() => setPreviewPhotoUrl(photoSrc)}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
+                      />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Loader2 size={20} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleDeletePhoto(photo.id)}
+                      style={{
+                        position: 'absolute', top: '4px', right: '4px',
+                        background: 'rgba(239,68,68,0.85)', border: 'none',
+                        borderRadius: '50%', width: '22px', height: '22px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', color: '#fff'
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '24px', border: '1px dashed var(--border-color)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
               Nenhuma foto. Use os botões acima para fotografar ou importar da galeria.
             </div>
           )}
+
         </div>
 
         {/* ── Seção: Lacres ── */}

@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
-import { dbFirestore, storage } from './firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, getDoc } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { dbFirestore } from './firebase';
+import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 
 // Coleções
-const LOCALS_COL = 'locais';
-const EXPORTERS_COL = 'exportadores';
-const BOOKINGS_COL = 'bookings';
-const INSPECTORS_COL = 'inspectors';
-const USERS_COL = 'usuarios';
-const USER_KEY = 'containtrack_user';
+const LOCALS_COL       = 'locais';
+const EXPORTERS_COL    = 'exportadores';
+const BOOKINGS_COL     = 'bookings';
+const INSPECTORS_COL   = 'inspectors';
+const USERS_COL        = 'usuarios';
+const PHOTOS_COL       = 'containerPhotos'; // ← Fotos salvas aqui (sem Firebase Storage)
+const USER_KEY         = 'containtrack_user';
 
 const defaultLocais = [
   { id: '1', name: 'Interport Logistica' },
@@ -43,6 +43,40 @@ async function initializeCollectionIfEmpty(colName, defaultData) {
       await setDoc(doc(dbFirestore, colName, item.id), item);
     }
   }
+}
+
+// ── Compresão de imagem no cliente ──────────────────────────────────────────
+// Retorna Promise<string> com dataURL JPEG comprimido (max 800px, qualidade 0.65).
+// 100% client-side, sem dependência de Firebase Storage ou rede.
+function compressImageToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo de imagem.'));
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Falha ao carregar a imagem.'));
+      img.onload  = () => {
+        const MAX_PX = 800;
+        let w = img.width;
+        let h = img.height;
+        // Redimensiona proporcionalmente ao lado maior
+        if (w > h) {
+          if (w > MAX_PX) { h = Math.round(h * (MAX_PX / w)); w = MAX_PX; }
+        } else {
+          if (h > MAX_PX) { w = Math.round(w * (MAX_PX / h)); h = MAX_PX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width  = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        // JPEG 0.65 = bom equilíbrio qualidade/tamanho (~80-200KB por foto)
+        resolve(canvas.toDataURL('image/jpeg', 0.65));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export const db = {
@@ -190,62 +224,59 @@ export const db = {
     await deleteDoc(doc(dbFirestore, USERS_COL, id));
   },
 
-  async uploadPhoto(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const tempImg = new Image();
-        tempImg.onload = async () => {
-          // Determina as novas dimensões preservando o aspect ratio
-          let width = tempImg.width;
-          let height = tempImg.height;
-          
-          // Limites de resolução mantendo a orientação
-          const maxWidth = width > height ? 1024 : 768;
-          const maxHeight = width > height ? 768 : 1024;
-          
-          if (width > maxWidth) {
-            height = Math.round(height * (maxWidth / width));
-            width = maxWidth;
-          }
-          if (height > maxHeight) {
-            width = Math.round(width * (maxHeight / height));
-            height = maxHeight;
-          }
-          
-          // Redimensiona usando Canvas
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(tempImg, 0, 0, width, height);
-          
-          // Compacta em JPEG com qualidade 0.8
-          const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8);
-          const filename = `photos/photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.jpg`;
-          
-          try {
-            const storageRef = ref(storage, filename);
-            await uploadString(storageRef, resizedBase64, 'data_url');
-            const downloadURL = await getDownloadURL(storageRef);
-            resolve(downloadURL);
-          } catch (error) {
-            console.error("Firebase Storage Upload failed:", error);
-            reject(new Error("Não foi possível enviar a imagem para o Firebase Storage. " +
-                              "Verifique se o serviço Storage está ativo no Console do Firebase e se as Regras de Segurança (Rules) " +
-                              "permitem gravação pública (sem autenticação). Detalhes: " + (error.message || error)));
-          }
-        };
-        tempImg.onerror = () => {
-          reject(new Error('Image loading failed'));
-        };
-        tempImg.src = reader.result;
-      };
-      reader.onerror = () => {
-        reject(new Error('File reading failed'));
-      };
-      reader.readAsDataURL(file);
+  // ── Fotos (sem Firebase Storage — tudo no Firestore) ─────────────────────────
+
+  /**
+   * uploadPhoto — comprime a imagem no cliente e salva no Firestore.
+   * NÃO usa Firebase Storage. NÃO depende de regras de autenticação.
+   * Retorna { id, name, url } onde url é o dataURL base64 para uso imediato na UI.
+   *
+   * @param {File}   file        - Arquivo de imagem selecionado pelo usuário
+   * @param {string} containerId - ID do container ao qual a foto pertence
+   */
+  async uploadPhoto(file, containerId = '') {
+    // 1. Comprime a imagem localmente (sem upload para Storage)
+    const dataUrl = await compressImageToDataUrl(file);
+
+    // 2. ID único para a foto
+    const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+    // 3. Salva como documento individual na coleção containerPhotos
+    //    (separado do booking para não estourar o limite de 1MB por documento)
+    await setDoc(doc(dbFirestore, PHOTOS_COL, photoId), {
+      id:          photoId,
+      containerId: containerId,
+      dataUrl:     dataUrl,
+      name:        '',
+      createdAt:   Date.now()
     });
+
+    // 4. Retorna metadados + url para exibição imediata sem nova busca
+    return { id: photoId, name: '', url: dataUrl };
+  },
+
+  /**
+   * getPhotosForContainer — busca todas as fotos de um container.
+   */
+  async getPhotosForContainer(containerId) {
+    const q    = query(collection(dbFirestore, PHOTOS_COL), where('containerId', '==', containerId));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => {
+      const data = d.data();
+      return { ...data, id: d.id, url: data.dataUrl };
+    });
+  },
+
+  /**
+   * deletePhoto — apaga a foto do Firestore.
+   * Fotos antigas com URL de Firebase Storage continuam visíveis até serem removidas pela UI.
+   */
+  async deletePhoto(photoId) {
+    try {
+      await deleteDoc(doc(dbFirestore, PHOTOS_COL, photoId));
+    } catch (err) {
+      console.warn('deletePhoto: não encontrada em containerPhotos', photoId, err);
+    }
   },
 
   // Métodos de Sync Obsoletos (mantidos vazios para não quebrar componentes não migrados)
