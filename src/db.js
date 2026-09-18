@@ -103,26 +103,46 @@ export const db = {
     const snap = await getDocs(collection(dbFirestore, BOOKINGS_COL));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
+
+  /**
+   * saveBooking — upsert puro, seguro para auto-save.
+   * NÃO valida duplicatas (use saveBookingWithValidation para criação).
+   */
   async saveBooking(booking) {
     const id = booking.id || 'bk_' + Date.now();
     booking.id = id;
-    
-    if (booking.bookingNumber && booking.bookingNumber.trim()) {
-      const allBookings = await this.getBookings();
-      const cleanNum = booking.bookingNumber.trim().toLowerCase();
-      const duplicate = allBookings.find(b => b.id !== id && (b.bookingNumber || '').trim().toLowerCase() === cleanNum);
-      if (duplicate) {
-        throw new Error(`Este romaneio já foi inserido no sistema. (Booking: ${booking.bookingNumber.trim()})`);
-      }
-    }
 
     if (!booking.certificateNumber) {
       booking.certificateNumber = await this.generateNextCertificateNumber();
     }
     if (!booking.containers) booking.containers = [];
-    
+
     await setDoc(doc(dbFirestore, BOOKINGS_COL, id), booking);
     return booking;
+  },
+
+  /**
+   * saveBookingWithValidation — usar APENAS na criação de novos bookings.
+   * Valida duplicatas de bookingNumber antes de salvar.
+   */
+  async saveBookingWithValidation(booking, allBookings = null) {
+    const id = booking.id || 'bk_' + Date.now();
+    booking.id = id;
+
+    if (booking.bookingNumber && booking.bookingNumber.trim()) {
+      const list = allBookings || await this.getBookings();
+      const cleanNum = booking.bookingNumber.trim().toLowerCase();
+      const duplicate = list.find(
+        b => b.id !== id && (b.bookingNumber || '').trim().toLowerCase() === cleanNum
+      );
+      if (duplicate) {
+        throw new Error(
+          `Este romaneio já foi inserido no sistema. (Booking: ${booking.bookingNumber.trim()})`
+        );
+      }
+    }
+
+    return this.saveBooking(booking);
   },
   async deleteBooking(id) {
     await deleteDoc(doc(dbFirestore, BOOKINGS_COL, id));

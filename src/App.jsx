@@ -171,12 +171,13 @@ export default function App() {
     const navioVoy = `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`;
 
     try {
-      const created = await db.saveBooking({
+      // saveBookingWithValidation: valida duplicatas apenas na criação
+      const created = await db.saveBookingWithValidation({
         ...newBookingData,
         vesselVoyage: navioVoy,
         bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
         containers: newBookingData.containers || []
-      });
+      }, bookings);
 
       handleClearForm();
       setShowCreateModal(false);

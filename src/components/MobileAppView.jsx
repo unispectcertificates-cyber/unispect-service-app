@@ -290,6 +290,18 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   const saveTimerRef                  = useRef(null);
   const debounceTimerRef              = useRef(null);
 
+  // ── Upload de fotos
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+
+  // ── Toast de erro (não-bloqueante, substitui alert())
+  const [toastError, setToastError] = useState('');
+  const toastTimerRef = useRef(null);
+  const showToast = useCallback((msg) => {
+    setToastError(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastError(''), 5000);
+  }, []);
+
   // ── Preview de foto
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
 
@@ -298,6 +310,19 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
 
   const cameraInputRef  = useRef(null);
   const galleryInputRef = useRef(null);
+
+  // Guard contra setState em componente desmontado (evita crash/fechamento)
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Limpar todos os timers ao desmontar
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Ref para evitar stale closure no auto-save
   const selectedBookingRef = useRef(selectedBooking);
@@ -315,6 +340,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   // ── Função de auto-save
   const autoSave = useCallback(async (booking, container) => {
     if (!booking || !container) return;
+    if (!isMountedRef.current) return; // Guard: não atualiza se desmontado
     setSaveStatus('saving');
     try {
       const updatedContainers = (booking.containers || []).map(c =>
@@ -322,15 +348,22 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
       );
       const updatedBooking = { ...booking, containers: updatedContainers };
       await db.saveBooking(updatedBooking);
+
+      // Guard pós-await: verifica novamente pois o usuário pode ter navegado
+      if (!isMountedRef.current) return;
+
       setSelectedBooking(updatedBooking);
       setSaveStatus('saved');
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 1800);
+      saveTimerRef.current = setTimeout(() => {
+        if (isMountedRef.current) setSaveStatus('idle');
+      }, 1800);
     } catch (err) {
+      if (!isMountedRef.current) return;
       setSaveStatus('idle');
       console.error('Auto-save error:', err);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-save com debounce (para campos de texto)
   const debouncedSave = useCallback((booking, container) => {
@@ -429,32 +462,57 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     }
   }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // ── Upload de fotos (salva imediatamente)
+  // ── Upload de fotos (salva imediatamente, sem closure stale)
   const handlePhotoUpload = async e => {
-    const files = Array.from(e.target.files);
+    const files = Array.from(e.target.files || []);
+    // Reset input antes de processar para permitir re-seleção do mesmo arquivo
+    e.target.value = '';
+
     if (!files.length || !selectedContainer) return;
+
+    setUploadingPhotos(true);
     setSaveStatus('saving');
+
     try {
+      // Faz upload de todos os arquivos em paralelo
       const urls = await Promise.all(files.map(f => db.uploadPhoto(f)));
+
+      if (!isMountedRef.current) return; // Guard pós-await
+
       const newPhotos = urls.map(url => ({
         id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
         url,
         name: ''
       }));
-      setSelectedContainer(prev => {
-        const updated = { ...prev, photos: [...(prev.photos || []), ...newPhotos] };
-        autoSave(selectedBookingRef.current, updated);
-        return updated;
-      });
+
+      // Captura o container e booking ATUAIS (evita closure stale)
+      const currentContainer = selectedContainer;
+      const currentBooking   = selectedBookingRef.current;
+
+      const updatedContainer = {
+        ...currentContainer,
+        photos: [...(currentContainer.photos || []), ...newPhotos]
+      };
+
+      // Atualiza estado local
+      setSelectedContainer(updatedContainer);
+
+      // Persiste no Firestore com referências estáveis
+      await autoSave(currentBooking, updatedContainer);
     } catch (err) {
+      if (!isMountedRef.current) return;
       setSaveStatus('idle');
-      alert(err.message || 'Erro ao enviar foto.');
+      // Toast não-bloqueante (substitui alert() que travava o app no mobile)
+      const msg = err?.message || 'Erro ao enviar foto.';
+      showToast(msg);
+      console.error('Photo upload error:', err);
+    } finally {
+      if (isMountedRef.current) setUploadingPhotos(false);
     }
-    // Reset input para permitir selecionar o mesmo arquivo novamente
-    e.target.value = '';
   };
 
   const handleDeletePhoto = id => {
+    if (!isMountedRef.current) return;
     setSelectedContainer(prev => {
       const updated = { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) };
       autoSave(selectedBookingRef.current, updated);
@@ -711,12 +769,13 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
           {/* Botões câmera / galeria */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
             <button
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => !uploadingPhotos && cameraInputRef.current?.click()}
+              disabled={uploadingPhotos}
               style={{
                 padding: '12px',
                 borderRadius: '10px',
                 border: 'none',
-                backgroundColor: 'var(--color-brand)',
+                backgroundColor: uploadingPhotos ? 'var(--border-color)' : 'var(--color-brand)',
                 color: '#fff',
                 fontWeight: '800',
                 fontSize: '13px',
@@ -724,29 +783,37 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                cursor: 'pointer'
+                cursor: uploadingPhotos ? 'not-allowed' : 'pointer',
+                opacity: uploadingPhotos ? 0.7 : 1,
+                transition: 'all 0.2s'
               }}
             >
-              <Camera size={16} /> Câmera
+              {uploadingPhotos
+                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Enviando...</>
+                : <><Camera size={16} /> Câmera</>
+              }
             </button>
             <button
-              onClick={() => galleryInputRef.current?.click()}
+              onClick={() => !uploadingPhotos && galleryInputRef.current?.click()}
+              disabled={uploadingPhotos}
               style={{
                 padding: '12px',
                 borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 backgroundColor: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
+                color: uploadingPhotos ? 'var(--text-muted)' : 'var(--text-primary)',
                 fontWeight: '700',
                 fontSize: '13px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                cursor: 'pointer'
+                cursor: uploadingPhotos ? 'not-allowed' : 'pointer',
+                opacity: uploadingPhotos ? 0.6 : 1,
+                transition: 'all 0.2s'
               }}
             >
-              <Image size={16} style={{ color: 'var(--color-brand)' }} /> Galeria
+              <Image size={16} style={{ color: uploadingPhotos ? 'var(--text-muted)' : 'var(--color-brand)' }} /> Galeria
             </button>
             <input type="file" ref={cameraInputRef}  onChange={handlePhotoUpload} accept="image/*" capture="environment" style={{ display: 'none' }} />
             <input type="file" ref={galleryInputRef} onChange={handlePhotoUpload} accept="image/*" multiple style={{ display: 'none' }} />
@@ -1000,6 +1067,39 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
         onTabChange={handleTabChange}
         hasContainer={!!selectedContainer}
       />
+
+      {/* Toast de erro — não-bloqueante, substitui alert() */}
+      {toastError && (
+        <div
+          onClick={() => setToastError('')}
+          style={{
+            position: 'fixed',
+            top: '70px',
+            left: '16px',
+            right: '16px',
+            zIndex: 20000,
+            backgroundColor: '#ef4444',
+            color: '#fff',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            fontSize: '13px',
+            fontWeight: '700',
+            boxShadow: '0 4px 20px rgba(239,68,68,0.4)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            cursor: 'pointer',
+            animation: 'slideDown 0.3s ease'
+          }}
+        >
+          <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '2px', opacity: 0.85 }}>Erro</div>
+            <div>{toastError}</div>
+          </div>
+          <span style={{ flexShrink: 0, opacity: 0.7, fontSize: '16px' }}>✕</span>
+        </div>
+      )}
 
       {/* Preview de foto em tela cheia */}
       {previewPhotoUrl && (
