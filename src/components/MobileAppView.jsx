@@ -905,6 +905,17 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
             />
           </div>
 
+          {/* Data Lacre Definitivo */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={S.label}>Data Lacre Definitivo</label>
+            <input
+              type="date"
+              value={c.definiteSealDate || ''}
+              onChange={e => updateContField('definiteSealDate', e.target.value)}
+              style={S.input}
+            />
+          </div>
+
           {/* Lacres Provisórios */}
           <div>
             <label style={S.label}>Lacres Provisórios</label>

@@ -227,6 +227,18 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
           />
         </div>
 
+        {/* Data Lacre Definitivo */}
+        <div>
+          <label>Data Lacre Definitivo</label>
+          <input 
+            type="date" 
+            disabled={!canEdit}
+            value={localContainer.definiteSealDate || ''} 
+            onChange={e => handleChange('definiteSealDate', e.target.value)}
+            style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+          />
+        </div>
+
         {/* Quantidade de Bags */}
         <div>
           <label>Quant. (Bags)</label>

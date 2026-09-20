@@ -55,7 +55,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     notes: '',
     fumigationDate: new Date().toISOString().split('T')[0],
     fitoDate: new Date().toISOString().split('T')[0],
-    definiteSealDate: new Date().toISOString().split('T')[0]
+    definiteSealDate: ''
   });
 
   if (!booking) return null;
@@ -139,7 +139,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       notes: '',
       fumigationDate: new Date().toISOString().split('T')[0],
       fitoDate: new Date().toISOString().split('T')[0],
-      definiteSealDate: new Date().toISOString().split('T')[0]
+      definiteSealDate: ''
     });
     setShowAddContainer(false);
   };
