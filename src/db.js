@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { dbFirestore } from './firebase';
+import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // Coleções
 const LOCALS_COL       = 'locais';
@@ -8,7 +9,7 @@ const EXPORTERS_COL    = 'exportadores';
 const BOOKINGS_COL     = 'bookings';
 const INSPECTORS_COL   = 'inspectors';
 const USERS_COL        = 'usuarios';
-const PHOTOS_COL       = 'containerPhotos'; // ← Fotos salvas aqui (sem Firebase Storage)
+const PHOTOS_COL       = 'containerPhotos'; // ← Metadados das fotos (URL do Storage)
 const USER_KEY         = 'containtrack_user';
 
 const defaultLocais = [
@@ -224,58 +225,95 @@ export const db = {
     await deleteDoc(doc(dbFirestore, USERS_COL, id));
   },
 
-  // ── Fotos (sem Firebase Storage — tudo no Firestore) ─────────────────────────
+  // ── Fotos (Firebase Storage — apenas metadados no Firestore) ─────────────────
 
   /**
-   * uploadPhoto — comprime a imagem no cliente e salva no Firestore.
-   * NÃO usa Firebase Storage. NÃO depende de regras de autenticação.
-   * Retorna { id, name, url } onde url é o dataURL base64 para uso imediato na UI.
+   * uploadPhoto — comprime a imagem no cliente, faz upload para o Firebase Storage
+   * e salva apenas os metadados (URL pública) no Firestore.
+   * Resolve o erro de limite de 1MB do Firestore.
    *
    * @param {File}   file        - Arquivo de imagem selecionado pelo usuário
    * @param {string} containerId - ID do container ao qual a foto pertence
+   * @returns {Promise<{id: string, name: string, url: string}>}
    */
   async uploadPhoto(file, containerId = '') {
-    // 1. Comprime a imagem localmente (sem upload para Storage)
+    // 1. Comprime a imagem localmente
     const dataUrl = await compressImageToDataUrl(file);
 
     // 2. ID único para a foto
     const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
-    // 3. Salva como documento individual na coleção containerPhotos
-    //    (separado do booking para não estourar o limite de 1MB por documento)
+    // 3. Converte dataURL base64 para Blob para upload eficiente
+    const response  = await fetch(dataUrl);
+    const blob      = await response.blob();
+
+    // 4. Faz upload do Blob para Firebase Storage
+    //    Path: containers/{containerId}/{photoId}.jpg
+    const storagePath = `containers/${containerId || 'uncategorized'}/${photoId}.jpg`;
+    const storageRef  = ref(storage, storagePath);
+    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+
+    // 5. Obtém a URL pública permanente do Storage
+    const downloadUrl = await getDownloadURL(storageRef);
+
+    // 6. Salva apenas os metadados no Firestore (sem base64 — evita erro de 1MB)
     await setDoc(doc(dbFirestore, PHOTOS_COL, photoId), {
       id:          photoId,
       containerId: containerId,
-      dataUrl:     dataUrl,
+      storagePath: storagePath,
+      url:         downloadUrl,
       name:        '',
       createdAt:   Date.now()
     });
 
-    // 4. Retorna metadados + url para exibição imediata sem nova busca
-    return { id: photoId, name: '', url: dataUrl };
+    // 7. Retorna metadados + URL do Storage para exibição imediata
+    return { id: photoId, name: '', url: downloadUrl };
   },
 
   /**
-   * getPhotosForContainer — busca todas as fotos de um container.
+   * getPhotosForContainer — busca todos os metadados de fotos de um container.
+   * Retorna { id, url, name, storagePath } — url aponta para o Firebase Storage.
    */
   async getPhotosForContainer(containerId) {
     const q    = query(collection(dbFirestore, PHOTOS_COL), where('containerId', '==', containerId));
     const snap = await getDocs(q);
     return snap.docs.map(d => {
       const data = d.data();
-      return { ...data, id: d.id, url: data.dataUrl };
+      // Compatibilidade retroativa: fotos antigas podem ter dataUrl em vez de url
+      return { ...data, id: d.id, url: data.url || data.dataUrl || null };
     });
   },
 
   /**
-   * deletePhoto — apaga a foto do Firestore.
-   * Fotos antigas com URL de Firebase Storage continuam visíveis até serem removidas pela UI.
+   * deletePhoto — apaga a foto do Firestore E do Firebase Storage.
    */
-  async deletePhoto(photoId) {
+  async deletePhoto(photoId, storagePath = null) {
+    // 1. Apaga do Firestore
     try {
+      // Busca o storagePath se não foi fornecido
+      if (!storagePath) {
+        const docSnap = await getDocs(
+          query(collection(dbFirestore, PHOTOS_COL), where('id', '==', photoId))
+        );
+        if (!docSnap.empty) {
+          storagePath = docSnap.docs[0].data().storagePath || null;
+        }
+      }
       await deleteDoc(doc(dbFirestore, PHOTOS_COL, photoId));
     } catch (err) {
       console.warn('deletePhoto: não encontrada em containerPhotos', photoId, err);
+    }
+
+    // 2. Apaga o arquivo do Firebase Storage (se tiver o path)
+    if (storagePath) {
+      try {
+        await deleteObject(ref(storage, storagePath));
+      } catch (err) {
+        // Ignora erro se o arquivo já não existe no Storage
+        if (err.code !== 'storage/object-not-found') {
+          console.warn('deletePhoto: erro ao apagar do Storage', storagePath, err);
+        }
+      }
     }
   },
 

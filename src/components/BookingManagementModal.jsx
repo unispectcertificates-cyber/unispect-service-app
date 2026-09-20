@@ -167,18 +167,20 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const handlePhotoUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length || !showPhotoManager) return;
+    e.target.value = '';
 
     try {
-      const uploadPromises = files.map(file => db.uploadPhoto(file));
-      const urls = await Promise.all(uploadPromises);
-      
-      const newPhotos = urls.map(url => ({
-        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        url: url,
-        name: ''
-      }));
+      const containerId = showPhotoManager.id;
+      const newPhotoRefs = [];
 
-      const updatedPhotos = [...(showPhotoManager.photos || []), ...newPhotos];
+      for (const file of files) {
+        // db.uploadPhoto comprime + envia para Firebase Storage
+        // Retorna { id, name, url } onde url é a URL pública do Storage
+        const result = await db.uploadPhoto(file, containerId);
+        newPhotoRefs.push({ id: result.id, name: result.name, url: result.url });
+      }
+
+      const updatedPhotos = [...(showPhotoManager.photos || []), ...newPhotoRefs];
       const updatedCont = { ...showPhotoManager, photos: updatedPhotos };
       
       setShowPhotoManager(updatedCont);
@@ -204,10 +206,13 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   };
 
   const handleDeletePhoto = (photoId) => {
+    const photo = (showPhotoManager.photos || []).find(p => p.id === photoId);
     const photos = (showPhotoManager.photos || []).filter(p => p.id !== photoId);
     const updatedCont = { ...showPhotoManager, photos };
     setShowPhotoManager(updatedCont);
     handleUpdateContainerPhotos(updatedCont);
+    // Apaga do Firestore e do Storage em background
+    db.deletePhoto(photoId, photo?.storagePath || null).catch(err => console.warn('deletePhoto error:', err));
   };
 
   const expName = exportadores.find(e => e.id === booking.exporterId)?.name || '-';

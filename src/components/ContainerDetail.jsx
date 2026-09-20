@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Trash2, ArrowLeft, ArrowRight, CheckCircle2, RefreshCw, Plus, Camera, Image } from 'lucide-react';
 import { db } from '../db';
 
@@ -14,6 +14,35 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
   const isInspector = user.role === 'Inspector';
   const isAdm = user.role === 'ADM';
   const canEdit = isAdm || isInspector;
+
+  // Carrega URLs das fotos do Firestore (containerPhotos) e faz merge com localContainer.photos
+  // Necessário para fotos enviadas pelo app mobile (que só guardam {id, name} no booking)
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPhotoUrls() {
+      try {
+        const photos = await db.getPhotosForContainer(container.id);
+        if (cancelled) return;
+        if (!photos.length) return;
+
+        const photoMap = {};
+        photos.forEach(p => { photoMap[p.id] = p; });
+
+        setLocalContainer(prev => {
+          const mergedPhotos = (prev.photos || []).map(ref => ({
+            ...ref,
+            url: photoMap[ref.id]?.url || ref.url || null,
+            storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null
+          }));
+          return { ...prev, photos: mergedPhotos };
+        });
+      } catch (err) {
+        console.warn('ContainerDetail: erro ao carregar fotos:', err);
+      }
+    }
+    loadPhotoUrls();
+    return () => { cancelled = true; };
+  }, [container.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Atualização otimista de status
   const handleStatusChange = (newStatus) => {
@@ -64,18 +93,21 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
   const handlePhotoFileChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
+    // Reset input para permitir re-seleção do mesmo arquivo
+    e.target.value = '';
 
     try {
-      const uploadPromises = files.map(file => db.uploadPhoto(file));
-      const urls = await Promise.all(uploadPromises);
+      const containerId = localContainer.id;
+      const newPhotoRefs = [];
 
-      const newPhotos = urls.map(url => ({
-        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        url: url,
-        name: ''
-      }));
+      for (const file of files) {
+        // db.uploadPhoto comprime + faz upload para Firebase Storage
+        // Retorna { id, name, url } onde url é a URL pública do Storage
+        const result = await db.uploadPhoto(file, containerId);
+        newPhotoRefs.push({ id: result.id, name: result.name, url: result.url });
+      }
 
-      const updatedPhotos = [...(localContainer.photos || []), ...newPhotos];
+      const updatedPhotos = [...(localContainer.photos || []), ...newPhotoRefs];
       const updated = { ...localContainer, photos: updatedPhotos };
       setLocalContainer(updated);
       await onUpdateContainer(updated);
@@ -85,12 +117,15 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
     }
   };
 
-  // Remover Foto
+  // Remover Foto (Firestore + Firebase Storage)
   const handleDeletePhoto = (photoId) => {
+    // Remove visualmente de imediato (otimista)
     const updatedPhotos = (localContainer.photos || []).filter(p => p.id !== photoId);
     const updated = { ...localContainer, photos: updatedPhotos };
     setLocalContainer(updated);
     onUpdateContainer(updated);
+    // Apaga do Firestore e do Storage em background
+    db.deletePhoto(photoId).catch(err => console.warn('deletePhoto error:', err));
   };
 
   // Reordenação de fotos

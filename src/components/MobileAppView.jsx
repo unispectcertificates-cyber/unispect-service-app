@@ -293,10 +293,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   // ── Upload de fotos
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
-  // ── Mapa de fotos carregadas: { [photoId]: dataUrl }
-  // As fotos ficam na coleção Firestore 'containerPhotos' e são exibidas via este mapa
-  const [containerPhotos, setContainerPhotos] = useState({});
-
   // ── Toast de erro (não-bloqueante, substitui alert())
   const [toastError, setToastError] = useState('');
   const toastTimerRef = useRef(null);
@@ -419,22 +415,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     setActiveTab('booking');
   }, []);
 
-  // ── Navegação: abrir Container (carrega fotos do Firestore)
+  // ── Navegação: abrir Container (carrega fotos do Firestore + Storage)
   const openContainer = useCallback(async c => {
     setSelectedContainer({ ...c });
     setScreen('container');
     setActiveTab('container');
     setSaveStatus('idle');
     setNewSealInput('');
-    setContainerPhotos({});
 
-    // Carrega fotos da coleção containerPhotos no Firestore
+    // Carrega fotos da coleção containerPhotos e popula diretamente no container
     try {
       const photos = await db.getPhotosForContainer(c.id);
       if (!isMountedRef.current) return;
+
+      // Merge: URLs do Storage são priorizadas; mantém ordem das refs no booking
       const photoMap = {};
-      photos.forEach(p => { photoMap[p.id] = p.url; });
-      setContainerPhotos(photoMap);
+      photos.forEach(p => { photoMap[p.id] = p; });
+
+      const mergedPhotos = (c.photos || []).map(ref => ({
+        ...ref,
+        url: photoMap[ref.id]?.url || ref.url || null,
+        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null
+      }));
+
+      if (isMountedRef.current) {
+        setSelectedContainer(prev => ({ ...prev, photos: mergedPhotos }));
+      }
     } catch (err) {
       console.warn('Não foi possível carregar fotos do container:', err);
     }
@@ -478,7 +484,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     }
   }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // ── Upload de fotos — salva no Firestore via db.uploadPhoto
+  // ── Upload de fotos — salva no Firebase Storage via db.uploadPhoto
   const handlePhotoUpload = async e => {
     const files = Array.from(e.target.files || []);
     // Reset input antes de processar (permite re-seleção do mesmo arquivo)
@@ -495,20 +501,19 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
       // Faz upload de cada arquivo sequencialmente (evita sobrecarga de memória)
       const newPhotoRefs = [];
       for (const f of files) {
-        // db.uploadPhoto comprime a imagem e salva no Firestore containerPhotos
-        // Retorna { id, name, url } — url é o dataURL base64 para exibição imediata
+        // db.uploadPhoto comprime + envia para Firebase Storage
+        // Retorna { id, name, url } — url é a URL pública do Storage
         const result = await db.uploadPhoto(f, containerId);
         if (!isMountedRef.current) return;
-        newPhotoRefs.push({ id: result.id, name: result.name });
-        // Atualiza o mapa de fotos em tempo real (foto aparece ao ser carregada)
-        setContainerPhotos(prev => ({ ...prev, [result.id]: result.url }));
+        // Inclui url e storagePath para exibição imediata e exclusão futura
+        newPhotoRefs.push({ id: result.id, name: result.name, url: result.url });
       }
 
       // Captura referências estáveis (evita closure stale)
       const currentContainer = selectedContainer;
       const currentBooking   = selectedBookingRef.current;
 
-      // Salva apenas as referências (id, name) no booking — não o base64
+      // Salva as referências (id, name, url) no booking
       const updatedContainer = {
         ...currentContainer,
         photos: [...(currentContainer.photos || []), ...newPhotoRefs]
@@ -529,14 +534,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
 
   const handleDeletePhoto = async id => {
     if (!isMountedRef.current) return;
-    // Remove do Firestore (coleção containerPhotos)
-    db.deletePhoto(id).catch(err => console.warn('deletePhoto error:', err));
-    // Remove do mapa local de fotos
-    setContainerPhotos(prev => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    // Pega o storagePath da foto atual para passar ao deletePhoto
+    const photo = (selectedContainer?.photos || []).find(p => p.id === id);
+    // Remove do Firestore e do Firebase Storage
+    db.deletePhoto(id, photo?.storagePath || null).catch(err => console.warn('deletePhoto error:', err));
     // Remove da lista de referências no container e salva
     setSelectedContainer(prev => {
       const updated = { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) };
@@ -848,8 +849,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
           {(c.photos || []).length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
               {(c.photos || []).map(photo => {
-                // Usa a foto do mapa carregado do Firestore; fallback para URL antiga (Firebase Storage)
-                const photoSrc = containerPhotos[photo.id] || photo.url || null;
+                // URL direta do Firebase Storage (ou fallback para base64 legado)
+                const photoSrc = photo.url || null;
                 return (
                   <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1', backgroundColor: 'var(--bg-tertiary)' }}>
                     {photoSrc ? (
