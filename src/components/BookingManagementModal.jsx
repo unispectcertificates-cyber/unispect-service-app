@@ -39,6 +39,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   // Modais de segundo nível
   const [showAddContainer, setShowAddContainer] = useState(false);
   const [showPhotoManager, setShowPhotoManager] = useState(null); // Container object
+  const [loadingPhotosId, setLoadingPhotosId] = useState(null);  // ID do container carregando fotos
   const [selectedContainerToManage, setSelectedContainerToManage] = useState(null);
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
   
@@ -161,6 +162,30 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     setBooking(updatedBooking);
     await db.saveBooking(updatedBooking);
     if (onDataChange) onDataChange();
+  };
+
+  // Abre o modal de fotos carregando as URLs do Firestore/Storage antes de exibir
+  const openPhotoManager = async (cont) => {
+    setLoadingPhotosId(cont.id);
+    try {
+      const storedPhotos = await db.getPhotosForContainer(cont.id);
+      const photoMap = {};
+      storedPhotos.forEach(p => { photoMap[p.id] = p; });
+
+      // Merge: prioriza URL do Storage; mantém ordem das referências no booking
+      const mergedPhotos = (cont.photos || []).map(ref => ({
+        ...ref,
+        url: photoMap[ref.id]?.url || ref.url || null,
+        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null
+      }));
+
+      setShowPhotoManager({ ...cont, photos: mergedPhotos });
+    } catch (err) {
+      console.warn('openPhotoManager: erro ao carregar fotos', err);
+      setShowPhotoManager(cont); // fallback: abre sem URLs
+    } finally {
+      setLoadingPhotosId(null);
+    }
   };
 
   // Upload de fotos do container selecionado
@@ -878,11 +903,12 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                     </button>
 
                     <button 
-                      onClick={() => setShowPhotoManager(cont)}
+                      onClick={() => openPhotoManager(cont)}
+                      disabled={loadingPhotosId === cont.id}
                       className="btn btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '6px', opacity: loadingPhotosId === cont.id ? 0.6 : 1 }}
                     >
-                      📷 Fotos & Anexos ({cont.photos?.length || 0})
+                      {loadingPhotosId === cont.id ? '⏳ Carregando...' : `📷 Fotos & Anexos (${cont.photos?.length || 0})`}
                     </button>
 
                     {isAdm && (
