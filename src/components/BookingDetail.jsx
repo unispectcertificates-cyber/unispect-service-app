@@ -269,6 +269,18 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
             />
           </div>
 
+          {/* Importador */}
+          <div>
+            <label>Importador</label>
+            <input 
+              type="text" 
+              disabled={!canEditBookingFields}
+              value={booking.importador || ''} 
+              onChange={e => updateBookingField('importador', e.target.value)}
+              placeholder="Digite o importador..."
+            />
+          </div>
+
           {/* Status */}
           <div>
             <label>Status do Booking</label>

@@ -93,6 +93,7 @@ export default function App() {
     stuffingReportNumber: '',
     mercadoria: 'café',
     portoDestino: '',
+    importador: '',
     armador: '',
     embalagem: 'sacaria',
     containers: []
@@ -207,6 +208,7 @@ export default function App() {
       stuffingReportNumber: '',
       mercadoria: 'café',
       portoDestino: '',
+      importador: '',
       armador: '',
       embalagem: 'sacaria',
       containers: []
@@ -273,12 +275,35 @@ export default function App() {
       const pdf = await loadingTask.promise;
 
       let fullText = '';
+      const allPageRows = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => item.str).join(' ');
-        fullText += pageText + '\n';
+        const items = (textContent.items || []).filter(item => item && item.str && item.str.trim());
+        
+        if (items.length > 0 && items[0].transform) {
+          const rows = [];
+          items.forEach(item => {
+            const x = item.transform[4];
+            const y = item.transform[5];
+            let row = rows.find(r => Math.abs(r.y - y) <= 4);
+            if (!row) {
+              row = { y, items: [] };
+              rows.push(row);
+            }
+            row.items.push({ x, str: item.str });
+          });
+
+          rows.sort((a, b) => b.y - a.y);
+          rows.forEach(r => r.items.sort((a, b) => a.x - b.x));
+          allPageRows.push(...rows);
+
+          const pageText = rows.map(r => r.items.map(it => it.str).join(' ')).join('\n');
+          fullText += pageText + '\n';
+        } else {
+          fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+        }
       }
 
       // Normalize container types that might be split across spaces/slashes (e.g. 20" / DV, 40" / HC)
@@ -286,22 +311,63 @@ export default function App() {
 
       console.log('PDF Extracted Text:', fullText);
 
-      // HEURISTIC REGEX PARSING
+      // Grid-Based Key-Value Extraction (handles two-row label-value layouts)
+      const extractGridKeyValues = (rows) => {
+        const kvMap = {};
 
-      // 1. Booking Number
-      let bookingNumber = '';
-      const bookingRegexes = [
-        /(?:booking|reserva|reserva\s*n[oºª.]?)[^a-zA-Z0-9]*([A-Z0-9-]+)/i,
-        /booking\s*number\s*([0-9A-Z-]+)/i,
-        /reserva\s*([0-9A-Z-]+)/i
-      ];
-      for (const rx of bookingRegexes) {
-        const match = fullText.match(rx);
-        if (match && match[1]) {
-          bookingNumber = match[1].trim();
-          break;
+        for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+          const currentRow = rows[rIdx];
+          const nextRow = rows[rIdx + 1];
+
+          for (let i = 0; i < currentRow.items.length; i++) {
+            const item = currentRow.items[i];
+            const str = item.str.trim();
+
+            if (str.endsWith(':') || /^(?:exportador|importador|reserva|navio|viagem|destino|descarga|armador|quantidade|tipo\s*do\s*cntr|quant\.total\s*em\s*sacas)/i.test(str)) {
+              const cleanKey = str.replace(/:$/, '').trim().toLowerCase();
+
+              // 1. Try inline value: next item on same row if close to label's X (diff < 120px)
+              const nextItemSameRow = currentRow.items[i + 1];
+              if (nextItemSameRow && !nextItemSameRow.str.trim().endsWith(':')) {
+                const xDiff = nextItemSameRow.x - item.x;
+                if (xDiff > 0 && xDiff < 120) {
+                  kvMap[cleanKey] = nextItemSameRow.str.trim();
+                  continue;
+                }
+              }
+
+              // 2. Try value on next row below at matching X position (|X_val - X_key| < 60px)
+              if (nextRow) {
+                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 60);
+                if (matchingValueItem && matchingValueItem.str.trim() && matchingValueItem.str.trim() !== '-') {
+                  kvMap[cleanKey] = matchingValueItem.str.trim();
+                }
+              }
+            }
+          }
+        }
+        return kvMap;
+      };
+
+      const kvMap = extractGridKeyValues(allPageRows);
+      console.log('Extracted Grid KV Map:', kvMap);
+
+      // 1. Booking Number / Reserva
+      let bookingNumber = kvMap['reserva'] || kvMap['booking'] || '';
+      if (!bookingNumber) {
+        const bookingRegexes = [
+          /(?:booking|reserva|reserva\s*n[oºª.]?)[^a-zA-Z0-9:]*([A-Z0-9-]+)/i,
+          /booking\s*number\s*([0-9A-Z-]+)/i
+        ];
+        for (const rx of bookingRegexes) {
+          const match = fullText.match(rx);
+          if (match && match[1]) {
+            bookingNumber = match[1].trim().replace(/^[:\s\-]+/, '');
+            break;
+          }
         }
       }
+      bookingNumber = bookingNumber.replace(/^[:\s\-]+/, '').trim();
 
       if (bookingNumber && isBookingNumberDuplicate(bookings, bookingNumber)) {
         setPdfParseStatus('error');
@@ -314,79 +380,108 @@ export default function App() {
         return;
       }
 
-      // 2. Vessel Name & Voyage
-      let vesselName = '';
-      let vesselVoyageNum = '';
+      // 2. Vessel Name & Voyage / Navio
+      let vesselName = kvMap['navio/viagem'] || kvMap['navio'] || kvMap['vessel'] || '';
+      let vesselVoyageNum = kvMap['viagem'] || kvMap['voyage'] || '';
 
-      const vesselMatch = fullText.match(/(?:vessel|navio)[^a-zA-Z0-9]*([^\n\r]+)/i);
-      if (vesselMatch && vesselMatch[1]) {
-        let rawVessel = vesselMatch[1].trim();
-        const stopKeywords = [
-          /\bviagem\b/i, /\bvoyage\b/i, /\bv\./i, /\bvoy\b/i,
-          /\bimportador\b/i, /\bexportador\b/i, /\bdestino\b/i,
-          /\bquantidade\b/i, /\bmercadoria\b/i, /\barmador\b/i,
-          /\bagente\b/i, /\brecinto\b/i
+      if (vesselName && vesselName.includes('/')) {
+        const parts = vesselName.split('/');
+        vesselName = parts[0].trim();
+        if (!vesselVoyageNum && parts[1]) {
+          vesselVoyageNum = parts[1].trim();
+        }
+      }
+
+      if (!vesselName) {
+        const vesselMatch = fullText.match(/(?:vessel|navio(?:\/viagem)?)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        if (vesselMatch && vesselMatch[1]) {
+          let rawVessel = vesselMatch[1].trim();
+          const stopKeywords = [
+            /\bquantidade\b/i, /\bquant\b/i, /\bviagem\b/i, /\bvoyage\b/i, /\bv\./i, /\bvoy\b/i,
+            /\bimportador\b/i, /\bexportador\b/i, /\bdestino\b/i,
+            /\bmercadoria\b/i, /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\bpeso\b/i
+          ];
+          for (const kw of stopKeywords) {
+            const idx = rawVessel.search(kw);
+            if (idx !== -1) {
+              rawVessel = rawVessel.substring(0, idx).trim();
+            }
+          }
+          vesselName = rawVessel.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+        }
+      }
+      vesselName = vesselName.replace(/^[:\s\-]+/, '').trim();
+
+      if (!vesselVoyageNum) {
+        const voyageRegexes = [
+          /(?:voyage|viagem|voy|v\.)[^a-zA-Z0-9:]*([A-Z0-9/]+)/i,
+          /voy\s*([A-Z0-9/]+)/i
         ];
-        for (const kw of stopKeywords) {
-          const idx = rawVessel.search(kw);
-          if (idx !== -1) {
-            rawVessel = rawVessel.substring(0, idx).trim();
+        for (const rx of voyageRegexes) {
+          const match = fullText.match(rx);
+          if (match && match[1]) {
+            vesselVoyageNum = match[1].trim().replace(/^[:\s\-]+/, '').toUpperCase();
+            break;
           }
         }
-        vesselName = rawVessel.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
       }
 
-      const voyageRegexes = [
-        /(?:voyage|viagem|voy|v\.)[^a-zA-Z0-9]*([A-Z0-9/]+)/i,
-        /voy\s*([A-Z0-9/]+)/i
-      ];
-      for (const rx of voyageRegexes) {
-        const match = fullText.match(rx);
-        if (match && match[1]) {
-          vesselVoyageNum = match[1].trim().toUpperCase();
-          break;
+      // 3. Importador
+      let importadorExtracted = kvMap['importador'] || kvMap['importer'] || '';
+      if (!importadorExtracted) {
+        const impMatch = fullText.match(/(?:importador|importer)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        if (impMatch && impMatch[1]) {
+          let rawImp = impMatch[1].trim();
+          const stopKeywords = [
+            /\bhigienização\b/i, /\bhigienizacao\b/i, /\bfito\b/i, /\bfumigação\b/i, /\bfumigacao\b/i,
+            /\bdestino\b/i, /\bquantidade\b/i, /\bmercadoria\b/i
+          ];
+          for (const kw of stopKeywords) {
+            const idx = rawImp.search(kw);
+            if (idx !== -1) {
+              rawImp = rawImp.substring(0, idx).trim();
+            }
+          }
+          importadorExtracted = rawImp.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
         }
       }
+      importadorExtracted = importadorExtracted.replace(/^[:\s\-]+/, '').trim();
 
-      // 3. Exporter
+      // 4. Exporter
       let exporterId = '';
-      let exporterNameExtracted = '';
-      const regex = /(?:exportador|exporter)[^a-zA-Z0-9]*([^\n\r]+)/gi;
-      let expMatch;
-      while ((expMatch = regex.exec(fullText)) !== null) {
-        const candidateRaw = expMatch[1];
-        const matchIndex = expMatch.index;
-        
-        // Verifica se a palavra "CNPJ" precede a palavra "Exportador" nos 15 caracteres anteriores
-        const precedingText = fullText.substring(Math.max(0, matchIndex - 15), matchIndex).toLowerCase();
-        if (precedingText.includes('cnpj')) {
-          continue;
-        }
-        
-        let candidate = candidateRaw.trim();
-        const stopKeywords = [
-          /\bcnpj\b/i,
-          /\bimportador\b/i,
-          /\bdestino\b/i,
-          /\barmador\b/i,
-          /\bagente\b/i,
-          /\brecinto\b/i,
-          /\bquantidade\b/i,
-          /\bmercadoria\b/i,
-          /\bmarca\b/i
-        ];
-        for (const kw of stopKeywords) {
-          const idx = candidate.search(kw);
-          if (idx !== -1) {
-            candidate = candidate.substring(0, idx).trim();
+      let exporterNameExtracted = kvMap['exportador'] || kvMap['exporter'] || '';
+      if (!exporterNameExtracted) {
+        const regexExp = /(?:exportador|exporter)[^a-zA-Z0-9:]*([^\n\r]+)/gi;
+        let expMatch;
+        while ((expMatch = regexExp.exec(fullText)) !== null) {
+          const candidateRaw = expMatch[1];
+          const matchIndex = expMatch.index;
+          
+          const precedingText = fullText.substring(Math.max(0, matchIndex - 15), matchIndex).toLowerCase();
+          if (precedingText.includes('cnpj')) {
+            continue;
+          }
+          
+          let candidate = candidateRaw.trim();
+          const stopKeywords = [
+            /\bcnpj\b/i, /\blocal\b/i, /\bquant\b/i, /\breserva\b/i, /\btipo\b/i,
+            /\bimportador\b/i, /\bdestino\b/i, /\barmador\b/i, /\bagente\b/i,
+            /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\bmarca\b/i
+          ];
+          for (const kw of stopKeywords) {
+            const idx = candidate.search(kw);
+            if (idx !== -1) {
+              candidate = candidate.substring(0, idx).trim();
+            }
+          }
+          candidate = candidate.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+          if (candidate && !/^\d+$/.test(candidate) && candidate.length > 2) {
+            exporterNameExtracted = candidate;
+            break;
           }
         }
-        candidate = candidate.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-        if (candidate && !/^\d+$/.test(candidate) && candidate.length > 2) {
-          exporterNameExtracted = candidate;
-          break;
-        }
       }
+      exporterNameExtracted = exporterNameExtracted.replace(/^[:\s\-]+/, '').trim();
 
       const exporters = exportadores;
       if (exporterNameExtracted) {
@@ -415,7 +510,6 @@ export default function App() {
           if (partialMatch) {
             exporterId = partialMatch.id;
           } else {
-            // Dynamically register new exporter
             const newId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
             const newExp = {
               id: newId,
@@ -453,11 +547,40 @@ export default function App() {
         }
       }
 
-      // 4. Location of Operation
+      // 5. Default Container Type
+      let defaultContainerType = "40' HC";
+      let rawType = kvMap['tipo do cntr'] || kvMap['tipo cntr'] || kvMap['cntr type'] || '';
+      if (!rawType) {
+        const typeMatch = fullText.match(/(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        if (typeMatch && typeMatch[1]) {
+          rawType = typeMatch[1].trim();
+        }
+      }
+      if (rawType) {
+        const typeStr = rawType.toUpperCase();
+        if (typeStr.includes('20') && (typeStr.includes('DRY') || typeStr.includes('DV'))) {
+          defaultContainerType = "20' Dry";
+        } else if (typeStr.includes('20')) {
+          defaultContainerType = "20' Dry";
+        } else if (typeStr.includes('40') && typeStr.includes('DRY')) {
+          defaultContainerType = "40' Dry";
+        } else if (typeStr.includes('40') && (typeStr.includes('HC') || typeStr.includes('HIGH'))) {
+          defaultContainerType = "40' HC";
+        } else if (typeStr.includes('REEFER')) {
+          defaultContainerType = "40' Reefer";
+        }
+      }
+
+      // 6. Location of Operation
       let locationId = '';
       const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
+      const rawLocation = kvMap['descarga'] || kvMap['local de coleta'] || '';
 
       for (const loc of locais) {
+        if (rawLocation && rawLocation.toLowerCase().includes(loc.name.toLowerCase())) {
+          locationId = loc.id;
+          break;
+        }
         if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
           locationId = loc.id;
           break;
@@ -475,7 +598,7 @@ export default function App() {
         }
       }
 
-      // 5. Commodity
+      // 7. Commodity
       let mercadoria = 'café';
       const lowercaseText = fullText.toLowerCase();
       if (lowercaseText.includes('cravo') || lowercaseText.includes('clove')) {
@@ -490,68 +613,87 @@ export default function App() {
         mercadoria = 'café';
       }
 
-      // 6. Bags Quantity
-      let bagsQuantity = '';
-      const qtyRegexes = [
-        /\b(\d+)\s*(?:bags|sacas|volumes|sacaria|bag|bags\s*qty)\b/i,
-        /(?:quantidade|quantity|quant|qty|qtd|bags\s*qty)[^a-zA-Z0-9]*([0-9.,]+)/i
-      ];
-      for (const rx of qtyRegexes) {
-        const match = fullText.match(rx);
-        if (match && match[1]) {
-          const cleanNum = match[1].replace(/[.\s,]/g, '').trim();
-          if (cleanNum && !isNaN(cleanNum)) {
-            bagsQuantity = cleanNum;
+      // 8. Bags Quantity Total
+      let bagsQuantity = kvMap['quant.total em sacas'] || kvMap['quantidade total em sacas'] || kvMap['quant.total'] || '';
+      if (bagsQuantity) {
+        const cleanNum = bagsQuantity.replace(/[^\d]/g, '');
+        if (cleanNum) bagsQuantity = cleanNum;
+      }
+      if (!bagsQuantity) {
+        const totalBagsMatch = fullText.match(/(?:quant\.?\s*total\s*em\s*sacas|quantidade\s*total\s*em\s*sacas)[^a-zA-Z0-9]*([0-9.,]+)/i);
+        if (totalBagsMatch && totalBagsMatch[1]) {
+          bagsQuantity = totalBagsMatch[1].replace(/[.\s,]/g, '').trim();
+        }
+      }
+      if (!bagsQuantity) {
+        const qtyRegexes = [
+          /\b(\d+)\s*(?:bags|sacas|volumes|sacaria|bag|bags\s*qty)\b/i,
+          /(?:quantidade|quantity|quant|qty|qtd|bags\s*qty)[^a-zA-Z0-9]*([0-9.,]+)/i
+        ];
+        for (const rx of qtyRegexes) {
+          const match = fullText.match(rx);
+          if (match && match[1]) {
+            const cleanNum = match[1].replace(/[.\s,]/g, '').trim();
+            if (cleanNum && !isNaN(cleanNum)) {
+              bagsQuantity = cleanNum;
+              break;
+            }
+          }
+        }
+      }
+
+      // 9. Port of Destination
+      let portoDestino = kvMap['destino'] || kvMap['porto de destino'] || kvMap['destination'] || '';
+      if (!portoDestino) {
+        const destMatch = fullText.match(/(?:destino|destination|port\s*of\s*discharge|porto\s*de\s*destino)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        if (destMatch && destMatch[1]) {
+          let rawDest = destMatch[1].trim();
+          const stopKeywords = [
+            /\bimportador\b/i, /\bhigienização\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\barmador\b/i,
+            /\bmarca\b/i, /\bagente\b/i, /\brecinto\b/i
+          ];
+          for (const kw of stopKeywords) {
+            const idx = rawDest.search(kw);
+            if (idx !== -1) {
+              rawDest = rawDest.substring(0, idx).trim();
+            }
+          }
+          portoDestino = rawDest.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+        }
+      }
+      portoDestino = portoDestino.replace(/^[:\s\-]+/, '').trim();
+
+      // 10. Carrier / Armador
+      let armador = kvMap['armador'] || kvMap['carrier'] || '';
+      if (!armador || armador.toLowerCase().includes('fumigação') || armador.toLowerCase().includes('fumigacao')) {
+        armador = '';
+        const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim'];
+        for (const carrier of carriers) {
+          if (fullText.toLowerCase().includes(carrier.toLowerCase())) {
+            armador = carrier === 'Hapag' ? 'Hapag-Lloyd' : carrier;
             break;
           }
         }
-      }
-
-      // 7. Port of Destination
-      let portoDestino = '';
-      const destMatch = fullText.match(/(?:destino|destination|port\s*of\s*discharge|porto\s*de\s*destino)[^a-zA-Z0-9]*([^\n\r]+)/i);
-      if (destMatch && destMatch[1]) {
-        let rawDest = destMatch[1].trim();
-        const stopKeywords = [
-          /\bquantidade\b/i, /\bmercadoria\b/i, /\barmador\b/i,
-          /\bmarca\b/i, /\bagente\b/i, /\brecinto\b/i
-        ];
-        for (const kw of stopKeywords) {
-          const idx = rawDest.search(kw);
-          if (idx !== -1) {
-            rawDest = rawDest.substring(0, idx).trim();
-          }
-        }
-        portoDestino = rawDest.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-      }
-
-      // 8. Carrier / Armador
-      let armador = '';
-      const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim'];
-      for (const carrier of carriers) {
-        if (fullText.toLowerCase().includes(carrier.toLowerCase())) {
-          armador = carrier === 'Hapag' ? 'Hapag-Lloyd' : carrier;
-          break;
-        }
-      }
-      if (!armador) {
-        const carrierMatch = fullText.match(/(?:carrier|shipping\s*line|armador)[^a-zA-Z0-9]*([^\n\r]+)/i);
-        if (carrierMatch && carrierMatch[1]) {
-          let rawCarrier = carrierMatch[1].trim();
-          const stopKeywords = [
-            /\bagente\b/i, /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i
-          ];
-          for (const kw of stopKeywords) {
-            const idx = rawCarrier.search(kw);
-            if (idx !== -1) {
-              rawCarrier = rawCarrier.substring(0, idx).trim();
+        if (!armador) {
+          const carrierMatch = fullText.match(/(?:carrier|shipping\s*line|armador)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+          if (carrierMatch && carrierMatch[1]) {
+            let rawCarrier = carrierMatch[1].trim();
+            const stopKeywords = [
+              /\bagente\b/i, /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i
+            ];
+            for (const kw of stopKeywords) {
+              const idx = rawCarrier.search(kw);
+              if (idx !== -1) {
+                rawCarrier = rawCarrier.substring(0, idx).trim();
+              }
             }
+            armador = rawCarrier.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
           }
-          armador = rawCarrier.replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
         }
       }
+      armador = armador.replace(/^[:\s\-]+/, '').trim();
 
-      // 9. Packaging
+      // 11. Packaging
       let embalagem = 'sacaria';
       if (lowercaseText.includes('big bag') || lowercaseText.includes('bigbag') || lowercaseText.includes('bag 1000') || lowercaseText.includes('bag 1.000')) {
         embalagem = 'Big bags';
@@ -561,150 +703,212 @@ export default function App() {
         embalagem = 'Caixa';
       }
 
-      // 10. Parse Containers and Seals
-      const containerRegex = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/gi;
-      const containerMatches = [];
-      let match;
-      while ((match = containerRegex.exec(fullText)) !== null) {
-        const rawNum = match[1].trim().toUpperCase();
+      // 12. Parse Containers and Seals
+      const containerRegexLine = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/i;
+      const lines = fullText.split('\n');
+      const lineContainers = [];
 
-        // Verificação extra forçada no Javascript (à prova de falhas de regex)
+      for (const line of lines) {
+        const cMatch = line.match(containerRegexLine);
+        if (!cMatch) continue;
+
+        const rawNum = cMatch[1].trim().toUpperCase();
         const prefixChars = rawNum.replace(/[^A-Z]/g, '');
-        if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) {
-          continue; // Se a 4ª letra não for U, J ou Z, ignora.
-        }
-        if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) {
-          continue; // Força ignorar qualquer coisa que comece com MLB (Maersk Line Booking) ou contenha MLBR (Lacres)
-        }
+        if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) continue;
+        if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
 
-        containerMatches.push({
-          number: rawNum,
-          index: match.index,
-          length: match[0].length
-        });
-      }
+        let brand = '';
+        const oicMatch = line.match(/\b(\d{3}\/\d{3,4}\/\d{3,4})\b/);
+        if (oicMatch) brand = oicMatch[1];
 
-      const parsedContainers = [];
-
-      for (let i = 0; i < containerMatches.length; i++) {
-        const currentMatch = containerMatches[i];
-        const nextMatch = containerMatches[i + 1];
-
-        const startIndex = currentMatch.index;
-        const endIndex = nextMatch ? nextMatch.index : fullText.length;
-        const segment = fullText.substring(startIndex, endIndex);
-
-        const containerNumber = currentMatch.number;
-        const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
-
-        const maxSearch = Math.min(rawTokens.length, 15);
-        let brandIndex = -1;
-        for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-          if (rawTokens[tIdx].includes('/') && rawTokens[tIdx].split('/').length === 3) {
-            // Ignorar datas
-            if (!rawTokens[tIdx].match(/\d{2}\/\d{2}\/\d{2,4}/)) {
-              brandIndex = tIdx;
-              break;
-            }
-          }
-        }
-
-        let typeIndex = -1;
-        for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-          const lowerToken = rawTokens[tIdx].toLowerCase();
-          if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer') || lowerToken.includes('"') || lowerToken.includes('\'')) {
-            typeIndex = tIdx;
-            break;
-          }
-        }
-
-        if (typeIndex === -1) {
-          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-            if (rawTokens[tIdx] === '40' || rawTokens[tIdx] === '20') {
-              typeIndex = tIdx;
-              break;
-            }
-          }
-        }
+        const containerIdx = line.indexOf(cMatch[0]);
+        const subAfterContainer = line.substring(containerIdx + cMatch[0].length);
 
         let definiteSeal = '';
-        let brand = '';
-        let containerType = "40' HC";
-        let containerBagsQuantity = '';
-        let netWeight = '';
-        let tara = '';
-        let grossWeight = '';
-
-        if (brandIndex !== -1) {
-          brand = rawTokens[brandIndex];
-          const sealsTokens = rawTokens.slice(1, brandIndex);
-          definiteSeal = sealsTokens.join(' ');
-        } else if (typeIndex !== -1) {
-          const sealsTokens = rawTokens.slice(1, typeIndex);
-          definiteSeal = sealsTokens.join(' ');
+        const sealArmadorMatch = subAfterContainer.match(/\b([A-Z]{1,3}\s*\d{6,10})\b/i);
+        if (sealArmadorMatch) {
+          definiteSeal = sealArmadorMatch[1].trim();
         }
 
-        if (typeIndex !== -1) {
-          const typeStr = rawTokens[typeIndex].toLowerCase();
-          if (typeStr.includes('40') && (typeStr.includes('hc') || typeStr.includes('high'))) {
-            containerType = "40' HC";
-          } else if (typeStr.includes('40')) {
-            containerType = "40' Dry";
-          } else if (typeStr.includes('20') && (typeStr.includes('dv') || typeStr.includes('dry') || typeStr.includes('dryvan'))) {
-            containerType = "20' Dry";
-          } else if (typeStr.includes('20')) {
-            containerType = "20' Dry";
-          } else if (typeStr.includes('reefer')) {
-            containerType = "40' Reefer";
-          }
-
-          const allMetricsTokens = rawTokens.slice(typeIndex + 1);
-          // Filter to keep only tokens that contain digits and are formatted as numbers
-          const metricsTokens = allMetricsTokens.filter(t => /^\d+([.,]\d+)*$/.test(t));
-
-          // Heuristic to fix MSMU-303940-3 issue: if the first two tokens are small (< 100), the first is likely Pallets and the second is Bags.
-          let bagsIdx = 0;
-          if (metricsTokens.length >= 2) {
-            const m0 = parseBrazilianOrStandardFloat(metricsTokens[0]);
-            const m1 = parseBrazilianOrStandardFloat(metricsTokens[1]);
-            if (m0 < 150 && m1 < 150) {
-              bagsIdx = 1;
+        let tara = '';
+        let provSeal = '';
+        const provMatch = subAfterContainer.match(/\b(\d{4,6})\b/g);
+        if (provMatch) {
+          for (const numStr of provMatch) {
+            const numVal = parseInt(numStr, 10);
+            if (numVal >= 1800 && numVal <= 5000 && !tara) {
+              tara = numStr;
+            } else if (numVal >= 1000 && numVal < 10000 && numStr !== tara && !provSeal) {
+              provSeal = numStr;
             }
           }
-
-          if (metricsTokens.length >= 4 + bagsIdx) {
-            containerBagsQuantity = metricsTokens[bagsIdx];
-            netWeight = metricsTokens[bagsIdx + 1];
-            tara = metricsTokens[bagsIdx + 2];
-            grossWeight = metricsTokens[bagsIdx + 3];
-          } else if (metricsTokens.length === 3 + bagsIdx) {
-            containerBagsQuantity = metricsTokens[bagsIdx];
-            netWeight = metricsTokens[bagsIdx + 1];
-            grossWeight = metricsTokens[bagsIdx + 2];
-          } else if (metricsTokens.length === 2 + bagsIdx) {
-            containerBagsQuantity = metricsTokens[bagsIdx];
-            netWeight = metricsTokens[bagsIdx + 1];
-          } else if (metricsTokens.length > bagsIdx) {
-            containerBagsQuantity = metricsTokens[bagsIdx];
-          }
         }
 
-        parsedContainers.push({
+        lineContainers.push({
           id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          containerNumber,
-          containerType,
-          provisionalSeals: [],
+          containerNumber: rawNum,
+          containerType: defaultContainerType,
+          provisionalSeals: provSeal ? [{ id: 'seal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), sealNumber: provSeal }] : [],
           definiteSeal: definiteSeal || '',
           fumigationDate: '',
           fitoDate: '',
           definiteSealDate: '',
           notes: '',
           photos: [],
-          bagsQuantity: containerBagsQuantity ? Math.round(parseBrazilianOrStandardFloat(containerBagsQuantity)) || 0 : 0,
-          netWeight: netWeight || '',
+          bagsQuantity: 0,
+          netWeight: '',
           tara: tara || '',
-          grossWeight: grossWeight || '',
+          grossWeight: '',
           brand: brand || ''
+        });
+      }
+
+      let parsedContainers = [];
+
+      if (lineContainers.length > 0) {
+        parsedContainers = lineContainers;
+      } else {
+        const containerRegexGlobal = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/gi;
+        const containerMatches = [];
+        let match;
+        while ((match = containerRegexGlobal.exec(fullText)) !== null) {
+          const rawNum = match[1].trim().toUpperCase();
+          const prefixChars = rawNum.replace(/[^A-Z]/g, '');
+          if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) continue;
+          if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
+
+          containerMatches.push({
+            number: rawNum,
+            index: match.index,
+            length: match[0].length
+          });
+        }
+
+        for (let i = 0; i < containerMatches.length; i++) {
+          const currentMatch = containerMatches[i];
+          const nextMatch = containerMatches[i + 1];
+
+          const startIndex = currentMatch.index;
+          const endIndex = nextMatch ? nextMatch.index : fullText.length;
+          const segment = fullText.substring(startIndex, endIndex);
+
+          const containerNumber = currentMatch.number;
+          const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
+
+          const maxSearch = Math.min(rawTokens.length, 15);
+          let brandIndex = -1;
+          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
+            if (rawTokens[tIdx].includes('/') && rawTokens[tIdx].split('/').length === 3) {
+              if (!rawTokens[tIdx].match(/\d{2}\/\d{2}\/\d{2,4}/)) {
+                brandIndex = tIdx;
+                break;
+              }
+            }
+          }
+
+          let typeIndex = -1;
+          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
+            const lowerToken = rawTokens[tIdx].toLowerCase();
+            if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer') || lowerToken.includes('"') || lowerToken.includes('\'')) {
+              typeIndex = tIdx;
+              break;
+            }
+          }
+
+          if (typeIndex === -1) {
+            for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
+              if (rawTokens[tIdx] === '40' || rawTokens[tIdx] === '20') {
+                typeIndex = tIdx;
+                break;
+              }
+            }
+          }
+
+          let definiteSeal = '';
+          let brand = '';
+          let containerType = defaultContainerType;
+          let containerBagsQuantity = '';
+          let netWeight = '';
+          let tara = '';
+          let grossWeight = '';
+
+          if (brandIndex !== -1) {
+            brand = rawTokens[brandIndex];
+            const sealsTokens = rawTokens.slice(1, brandIndex);
+            definiteSeal = sealsTokens.join(' ');
+          } else if (typeIndex !== -1) {
+            const sealsTokens = rawTokens.slice(1, typeIndex);
+            definiteSeal = sealsTokens.join(' ');
+          }
+
+          if (typeIndex !== -1) {
+            const typeStr = rawTokens[typeIndex].toLowerCase();
+            if (typeStr.includes('40') && (typeStr.includes('hc') || typeStr.includes('high'))) {
+              containerType = "40' HC";
+            } else if (typeStr.includes('40')) {
+              containerType = "40' Dry";
+            } else if (typeStr.includes('20') && (typeStr.includes('dv') || typeStr.includes('dry') || typeStr.includes('dryvan'))) {
+              containerType = "20' Dry";
+            } else if (typeStr.includes('20')) {
+              containerType = "20' Dry";
+            } else if (typeStr.includes('reefer')) {
+              containerType = "40' Reefer";
+            }
+
+            const allMetricsTokens = rawTokens.slice(typeIndex + 1);
+            const metricsTokens = allMetricsTokens.filter(t => /^\d+([.,]\d+)*$/.test(t));
+
+            let bagsIdx = 0;
+            if (metricsTokens.length >= 2) {
+              const m0 = parseBrazilianOrStandardFloat(metricsTokens[0]);
+              const m1 = parseBrazilianOrStandardFloat(metricsTokens[1]);
+              if (m0 < 150 && m1 < 150) {
+                bagsIdx = 1;
+              }
+            }
+
+            if (metricsTokens.length >= 4 + bagsIdx) {
+              containerBagsQuantity = metricsTokens[bagsIdx];
+              netWeight = metricsTokens[bagsIdx + 1];
+              tara = metricsTokens[bagsIdx + 2];
+              grossWeight = metricsTokens[bagsIdx + 3];
+            } else if (metricsTokens.length === 3 + bagsIdx) {
+              containerBagsQuantity = metricsTokens[bagsIdx];
+              netWeight = metricsTokens[bagsIdx + 1];
+              grossWeight = metricsTokens[bagsIdx + 2];
+            } else if (metricsTokens.length === 2 + bagsIdx) {
+              containerBagsQuantity = metricsTokens[bagsIdx];
+              netWeight = metricsTokens[bagsIdx + 1];
+            } else if (metricsTokens.length > bagsIdx) {
+              containerBagsQuantity = metricsTokens[bagsIdx];
+            }
+          }
+
+          parsedContainers.push({
+            id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            containerNumber,
+            containerType,
+            provisionalSeals: [],
+            definiteSeal: definiteSeal || '',
+            fumigationDate: '',
+            fitoDate: '',
+            definiteSealDate: '',
+            notes: '',
+            photos: [],
+            bagsQuantity: containerBagsQuantity ? Math.round(parseBrazilianOrStandardFloat(containerBagsQuantity)) || 0 : 0,
+            netWeight: netWeight || '',
+            tara: tara || '',
+            grossWeight: grossWeight || '',
+            brand: brand || ''
+          });
+        }
+      }
+
+      const totalBagsNum = parseBrazilianOrStandardFloat(bagsQuantity);
+      if (totalBagsNum > 0 && parsedContainers.length > 0) {
+        const perContainerBags = Math.round(totalBagsNum / parsedContainers.length);
+        parsedContainers.forEach(c => {
+          if (!c.bagsQuantity) c.bagsQuantity = perContainerBags;
         });
       }
 
@@ -719,6 +923,7 @@ export default function App() {
         mercadoria: mercadoria || prev.mercadoria,
         bagsQuantity: bagsQuantity || prev.bagsQuantity,
         portoDestino: portoDestino || prev.portoDestino,
+        importador: importadorExtracted || prev.importador,
         armador: armador || prev.armador,
         embalagem: embalagem || prev.embalagem,
         containers: parsedContainers
@@ -731,6 +936,7 @@ export default function App() {
       if (vesselName) fieldsFound.push('Navio');
       if (vesselVoyageNum) fieldsFound.push('Viagem');
       if (exporterId) fieldsFound.push('Exportador');
+      if (importadorExtracted) fieldsFound.push('Importador');
       if (bagsQuantity) fieldsFound.push('Qtd Sacas');
       if (portoDestino) fieldsFound.push('Destino');
 
@@ -1932,6 +2138,16 @@ export default function App() {
               </div>
 
               <div>
+                <label>Importador</label>
+                <input
+                  type="text"
+                  value={newBookingData.importador || ''}
+                  onChange={e => setNewBookingData({ ...newBookingData, importador: e.target.value })}
+                  placeholder="Ex: NESTLE MÉXICO"
+                />
+              </div>
+
+              <div>
                 <label>Navio *</label>
                 <input
                   type="text"
@@ -2049,6 +2265,16 @@ export default function App() {
                       {c.definiteSeal && (
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                           Lacre: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.definiteSeal}</span>
+                        </div>
+                      )}
+                      {c.tara && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Tara: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.tara} kg</span>
+                        </div>
+                      )}
+                      {c.brand && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Marca/OIC: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.brand}</span>
                         </div>
                       )}
                     </div>

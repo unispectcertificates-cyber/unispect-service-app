@@ -615,6 +615,34 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
             )}
           </div>
 
+          {/* Box Importador */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Importador</div>
+            {canEdit ? (
+              <input
+                type="text"
+                value={booking.importador || ''}
+                onChange={e => setBooking({ ...booking, importador: e.target.value })}
+                placeholder="Ex: NESTLE MÉXICO"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: 'var(--text-primary)',
+                  marginTop: '4px',
+                  padding: '4px 8px',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  width: '100%',
+                  height: '32px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>{booking.importador || '-'}</div>
+            )}
+          </div>
+
           {/* Box Data de Início */}
           <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Data de Início</div>
