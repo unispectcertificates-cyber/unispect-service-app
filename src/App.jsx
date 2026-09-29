@@ -312,22 +312,20 @@ export default function App() {
       console.log('PDF Extracted Text:', fullText);
 
       // Stop keywords list to prevent multi-column and dotted header text bleeding
-      const allStopKeywords = [
-        /\bbooking\b/i, /\breserva\b/i, /\bnavio\b/i, /\bvessel\b/i, /\bviagem\b/i, /\bvoyage\b/i,
-        /\bimportador\b/i, /\bimporter\b/i, /\bconsignat[áa]rio\b/i, /\bconsignee\b/i,
-        /\bexportador\b/i, /\bexporter\b/i, /\bcnpj\b/i, /\bshipper\b/i,
-        /\bdestino\b/i, /\bdestination\b/i, /\bquantidade\b/i, /\bquant\b/i, /\bvolumes\b/i,
-        /\bembalagem\b/i, /\bmercadoria\b/i, /\bproduto\b/i, /\breferencia\b/i, /\bref\b/i,
-        /\barmador\b/i, /\bcarrier\b/i, /\brecinto\b/i, /\bmarca\b/i, /\bagente\b/i,
-        /\bcontainer\b/i, /\bconteiner\b/i, /\blacres\b/i, /\btara\b/i, /\bpeso\b/i, /\bn[oº°ª]\b/i
+      const stopKeywords = [
+        /\bquantidade\b/i, /\bembalagem\b/i, /\bmercadoria\b/i, /\bmarca\b/i, 
+        /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\breferencia\b/i, 
+        /\bref\b/i, /\bimportador\b/i, /\bexportador\b/i, /\bdestino\b/i, 
+        /\bcnpj\b/i, /\bconteiner\b/i, /\bcontainer\b/i, /\blacres\b/i,
+        /\btara\b/i, /\bpeso\b/i, /\bn[oº°ª]\b/i
       ];
 
       // Robust field extractor with stop keywords and boundary cleanups
-      const extractFieldWithStops = (text, labelRegex, stopKeywords) => {
+      const extractFieldWithStops = (text, labelRegex, stopKeywordsList) => {
         const match = text.match(labelRegex);
         if (!match || !match[1]) return '';
-        let val = match[1].trim();
-        for (const kw of stopKeywords) {
+        let val = match[1].split('\n')[0].trim();
+        for (const kw of stopKeywordsList) {
           const idx = val.search(kw);
           if (idx !== -1) {
             val = val.substring(0, idx).trim();
@@ -339,8 +337,8 @@ export default function App() {
       // 1. Booking Number / Reserva
       let bookingNumber = extractFieldWithStops(
         fullText,
-        /(?:booking|reserva|reserva\s*n[oºª.]?|booking\s*number|n[oºª.]\s*booking)[.\s:]*([A-Z0-9\/-]+)/i,
-        allStopKeywords
+        /(?:booking(?:\s*[\/|]\s*reserva)?|reserva(?:\s*[\/|]\s*booking)?|reserva\s*n[oºª.]?|booking\s*number|n[oºª.]\s*booking)[.\s:]*([A-Z0-9\/-]+)/i,
+        stopKeywords
       );
       if (bookingNumber) {
         const bMatch = bookingNumber.match(/([A-Z0-9]{5,25})/i);
@@ -361,25 +359,40 @@ export default function App() {
       // 2. Vessel Name & Voyage / Navio / Viagem
       let vesselName = extractFieldWithStops(
         fullText,
-        /(?:navio|vessel|nome\s*do\s*navio)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        /(?:navio(?:\s*[\/|]\s*viagem)?|vessel(?:\s*[\/|]\s*voyage)?|nome\s*do\s*navio)[.\s:]*([^\n\r]+)/i,
+        stopKeywords
       );
 
-      let vesselVoyageNum = extractFieldWithStops(
-        fullText,
-        /(?:viagem|viagem\s*do\s*navio|voyage|voy|v\.)[.\s:]*([A-Z0-9\/-]+)/i,
-        allStopKeywords
-      );
-      if (vesselVoyageNum) {
-        const vMatch = vesselVoyageNum.match(/([A-Z0-9]{2,10})/i);
-        if (vMatch) vesselVoyageNum = vMatch[1].toUpperCase();
+      // Clean any trailing stop keywords from vessel name
+      if (vesselName) {
+        for (const kw of stopKeywords) {
+          const idx = vesselName.search(kw);
+          if (idx !== -1) {
+            vesselName = vesselName.substring(0, idx).trim();
+          }
+        }
+        vesselName = vesselName.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').trim();
       }
 
+      let vesselVoyageNum = '';
       if (vesselName && vesselName.includes('/')) {
         const parts = vesselName.split('/');
         vesselName = parts[0].trim();
-        if (!vesselVoyageNum && parts[1]) {
-          vesselVoyageNum = parts[1].trim().toUpperCase();
+        if (parts[1]) {
+          const vm2 = parts[1].trim().match(/([A-Z0-9]{2,10})/i);
+          if (vm2) vesselVoyageNum = vm2[1].toUpperCase();
+        }
+      }
+
+      if (!vesselVoyageNum) {
+        let rawVoyage = extractFieldWithStops(
+          fullText,
+          /(?:^|[\n\r]|[^a-z0-9])(?:viagem(?:\s*do\s*navio)?|voyage|voy|v\.)[.\s:]*([A-Z0-9\/-]+)/i,
+          stopKeywords
+        );
+        if (rawVoyage) {
+          const vm = rawVoyage.match(/([A-Z0-9]{2,10})/i);
+          if (vm) vesselVoyageNum = vm[1].toUpperCase();
         }
       }
 
@@ -396,7 +409,7 @@ export default function App() {
       let importadorExtracted = extractFieldWithStops(
         fullText,
         /(?:importador|importer|consignat[áa]rio|consignee)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
 
       // 4. Exporter & CNPJ Exportador
@@ -407,7 +420,7 @@ export default function App() {
       let exporterNameExtracted = extractFieldWithStops(
         fullText,
         /(?:exportador|exporter|shipper|empresa\s*exportadora)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
 
       let exporterId = '';
@@ -463,7 +476,7 @@ export default function App() {
       let rawType = extractFieldWithStops(
         fullText,
         /(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type|tipo)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       if (rawType) {
         const typeStr = rawType.toUpperCase();
@@ -484,7 +497,7 @@ export default function App() {
       let rawLocation = extractFieldWithStops(
         fullText,
         /(?:recinto|recinto\s*alfandegado|local\s*de\s*operaç[õo]es|local\s*de\s*operacoes|terminal|local)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       if (/^(tipo|peso|container|lacre|marca|quant|totais)/i.test(rawLocation)) {
         rawLocation = '';
@@ -519,7 +532,7 @@ export default function App() {
       let rawMercadoria = extractFieldWithStops(
         fullText,
         /(?:mercadoria|produto|commodity|descriç[ãa]o\s*da\s*carga)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       let mercadoria = 'café';
       if (rawMercadoria) {
@@ -542,7 +555,7 @@ export default function App() {
       let bagsQuantityStr = extractFieldWithStops(
         fullText,
         /(?:quantidade|quant\.?\s*total|quantidade\s*de\s*sacas|total\s*de\s*sacas|qtd\s*sacas)[.\s:]*([0-9.,]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       let bagsQuantity = '';
       if (bagsQuantityStr) {
@@ -578,7 +591,7 @@ export default function App() {
       let portoDestino = extractFieldWithStops(
         fullText,
         /(?:destino|destination|porto\s*de\s*destino|porto\s*destino|port\s*of\s*discharge|pod)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       if (/^(n[oº°ª]|container|conteiner|tipo|peso|quant|lacres|marca|totais)/i.test(portoDestino)) {
         portoDestino = '';
@@ -588,7 +601,7 @@ export default function App() {
       let armador = extractFieldWithStops(
         fullText,
         /(?:armador|carrier|linha|shipping\s*line)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       if (!armador || armador.toLowerCase().includes('fumigação') || armador.toLowerCase().includes('fumigacao')) {
         armador = '';
@@ -605,7 +618,7 @@ export default function App() {
       let rawEmbalagem = extractFieldWithStops(
         fullText,
         /(?:embalagem|tipo\s*de\s*embalagem|packaging)[.\s:]*([^\n\r]+)/i,
-        allStopKeywords
+        stopKeywords
       );
       let embalagem = 'sacaria';
       if (rawEmbalagem) {
@@ -656,12 +669,16 @@ export default function App() {
           }
 
           let tara = '';
-          let textForTara = subAfterContainer;
-          if (brand) {
-            textForTara = textForTara.replace(brand, '');
+          const numMatches = Array.from(subAfterContainer.matchAll(/\b([1-4][.,]?\d{3})\b/g)).map(m => m[1].replace(/[.,]/g, ''));
+          const plausibleTara = numMatches.filter(n => {
+            const val = parseInt(n, 10);
+            return val >= 1800 && val <= 4900;
+          });
+          if (plausibleTara.length > 0) {
+            tara = plausibleTara[plausibleTara.length - 1];
+          } else if (numMatches.length > 0) {
+            tara = numMatches[0];
           }
-          const taraMatch = textForTara.match(/\b([1-4][.,]?\d{3})\b/);
-          if (taraMatch) tara = taraMatch[1].replace(/[.,]/g, '');
 
           lineContainers.push({
             id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
