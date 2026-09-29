@@ -334,24 +334,35 @@ export default function App() {
             const item = currentRow.items[i];
             const str = item.str.trim();
 
+            // Check if item contains key: value inline in the same item (e.g. "Booking...: 241ISZ2620656")
+            if (str.includes(':')) {
+              const colonIdx = str.indexOf(':');
+              const rawKey = str.substring(0, colonIdx);
+              const rawVal = str.substring(colonIdx + 1).trim();
+              const cleanKey = rawKey.replace(/[:\.\s]+$/, '').replace(/^[:\.\s]+/, '').trim().toLowerCase();
+              if (cleanKey && rawVal && rawVal !== '-' && !rawVal.includes('Não informado')) {
+                kvMap[cleanKey] = rawVal;
+              }
+            }
+
             if (str.endsWith(':') || str.includes('...') || /^(?:exportador|importador|reserva|booking|navio|viagem|destino|descarga|armador|quantidade|tipo|quant|recinto|local|marca|embalagem|cnpj|mercadoria|produto|consignatario|consignatário|pod|carrier)/i.test(str)) {
               // Clean key by stripping colons, dots, spaces, dashes
               const cleanKey = str.replace(/[:\.\s]+$/, '').replace(/^[:\.\s]+/, '').trim().toLowerCase();
               if (!cleanKey) continue;
 
-              // 1. Try inline value: next item on same row if close to label's X (diff < 150px)
+              // 1. Try inline value: next item on same row if close to label's X (diff < 250px)
               const nextItemSameRow = currentRow.items[i + 1];
               if (nextItemSameRow && !nextItemSameRow.str.trim().endsWith(':') && !nextItemSameRow.str.trim().includes('...')) {
                 const xDiff = nextItemSameRow.x - item.x;
-                if (xDiff > 0 && xDiff < 180) {
+                if (xDiff > 0 && xDiff < 250) {
                   kvMap[cleanKey] = nextItemSameRow.str.trim();
                   continue;
                 }
               }
 
-              // 2. Try value on next row below at matching X position (|X_val - X_key| < 80px)
+              // 2. Try value on next row below at matching X position (|X_val - X_key| < 100px)
               if (nextRow) {
-                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 80);
+                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 100);
                 if (matchingValueItem && matchingValueItem.str.trim() && matchingValueItem.str.trim() !== '-') {
                   kvMap[cleanKey] = matchingValueItem.str.trim();
                 }
@@ -369,8 +380,8 @@ export default function App() {
       let bookingNumber = getKvValue(kvMap, ['booking', 'reserva', 'reserva de praça', 'booking number', 'nº booking', 'reserva nº', 'reserva n.']);
       if (!bookingNumber) {
         const bookingRegexes = [
-          /(?:booking|reserva|reserva\s*n[oºª.]?|reserva\s*de\s*praça)[^a-zA-Z0-9:]*([A-Z0-9-]+)/i,
-          /booking\s*number\s*([0-9A-Z-]+)/i
+          /(?:booking|reserva|reserva\s*n[oºª.]?|reserva\s*de\s*praça|booking\s*number|n[oºª.]\s*booking)[^a-zA-Z0-9\n\r]*([A-Z0-9-]+)/i,
+          /booking\s*number\s*[:\s\-.]*([0-9A-Z-]+)/i
         ];
         for (const rx of bookingRegexes) {
           const match = fullText.match(rx);
@@ -406,7 +417,7 @@ export default function App() {
       }
 
       if (!vesselName) {
-        const vesselMatch = fullText.match(/(?:vessel|navio(?:\/viagem)?)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        const vesselMatch = fullText.match(/(?:vessel|navio(?:\/viagem)?)[^a-zA-Z0-9\n\r]*([^\n\r]+)/i);
         if (vesselMatch && vesselMatch[1]) {
           let rawVessel = vesselMatch[1].trim();
           const stopKeywords = [
@@ -427,8 +438,8 @@ export default function App() {
 
       if (!vesselVoyageNum) {
         const voyageRegexes = [
-          /(?:voyage|viagem(?:\s*do\s*navio)?|voy|v\.)[^a-zA-Z0-9:]*([A-Z0-9/]+)/i,
-          /voy\s*([A-Z0-9/]+)/i
+          /(?:viagem(?:\s*do\s*navio)?|voyage|voy|v\.)[^a-zA-Z0-9\n\r]*([A-Z0-9/]+)/i,
+          /voy\s*[:\s\-.]*([A-Z0-9/]+)/i
         ];
         for (const rx of voyageRegexes) {
           const match = fullText.match(rx);
@@ -438,6 +449,7 @@ export default function App() {
           }
         }
       }
+      vesselVoyageNum = (vesselVoyageNum || '').replace(/^[:\s\-.]+/, '').trim();
 
       let vesselVoyage = '';
       if (vesselName && vesselVoyageNum) {
