@@ -640,7 +640,7 @@ export default function App() {
         }
       }
 
-      // 12. Parse Containers and Seals
+      // 12. Parse Containers, Seals, Weights (Net & Gross), Tara, and Brand
       const containerRegexLine = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
       const lines = fullText.split('\n');
       const lineContainers = [];
@@ -652,38 +652,110 @@ export default function App() {
           const rawNum = cMatch[1].trim().toUpperCase().replace(/[-\s]/g, '');
           if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
 
-          let brand = '';
-          const oicMatch = line.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|\d{4})\b/);
-          if (oicMatch) brand = oicMatch[1];
-
           const containerIdx = line.indexOf(cMatch[0]);
-          const subAfterContainer = line.substring(containerIdx + cMatch[0].length);
+          let subAfter = line.substring(containerIdx + cMatch[0].length).trim();
 
+          // 1. Definite Seal
           let definiteSeal = '';
-          const sealArmadorMatch = subAfterContainer.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
-          if (sealArmadorMatch) {
-            const candidateSeal = sealArmadorMatch[1].trim();
-            if (!/^(20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS)$/i.test(candidateSeal)) {
-              definiteSeal = candidateSeal;
+          const sealMatch = subAfter.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
+          if (sealMatch) {
+            const candidate = sealMatch[1].trim();
+            if (!/^(20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|45G1|22G1|42G1)$/i.test(candidate)) {
+              definiteSeal = candidate;
+              subAfter = subAfter.replace(sealMatch[0], ' ');
             }
           }
 
+          // 2. Brand / Lote (e.g. 002/1500/1339 or MAC.323/2026 or 0056)
+          let brand = '';
+          const oicMatch = subAfter.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
+          if (oicMatch) {
+            brand = oicMatch[1].trim();
+            subAfter = subAfter.replace(oicMatch[0], ' ');
+          } else {
+            const codeMatch = subAfter.match(/^\s*(0\d{3})\b/);
+            if (codeMatch) {
+              brand = codeMatch[1];
+              subAfter = subAfter.replace(codeMatch[0], ' ');
+            }
+          }
+
+          // 3. Container Type
+          let containerType = defaultContainerType;
+          const typeMatch = subAfter.match(/(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:45G1|22G1|42G1)\b/i);
+          if (typeMatch) {
+            const rawT = typeMatch[0].toUpperCase();
+            if (rawT.includes('20') || rawT.includes('22G1') || rawT.includes('DV')) containerType = "20' Dry";
+            else if (rawT.includes('45G1') || rawT.includes('HC')) containerType = "40' HC";
+            else if (rawT.includes('REEFER')) containerType = "40' Reefer";
+            else if (rawT.includes('40')) containerType = "40' Dry";
+            subAfter = subAfter.replace(typeMatch[0], ' ');
+          }
+
+          // 4. Extract all numeric tokens (weights and quantities)
+          const rawNumTokens = subAfter.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
+          
+          const parseVal = (str) => {
+            if (!str) return 0;
+            let s = str.trim();
+            if (s.includes(',')) {
+              s = s.replace(/\./g, '').replace(/,/g, '.');
+            } else if (/\.\d{3}$/.test(s)) {
+              s = s.replace(/\./g, '');
+            }
+            return parseFloat(s) || 0;
+          };
+
+          let rowBags = 0;
+          let netWeight = '';
           let tara = '';
-          const numMatches = Array.from(subAfterContainer.matchAll(/\b([1-4][.,]?\d{3})\b/g)).map(m => m[1].replace(/[.,]/g, ''));
-          const plausibleTara = numMatches.filter(n => {
-            const val = parseInt(n, 10);
-            return val >= 1800 && val <= 4900;
-          });
-          if (plausibleTara.length > 0) {
-            tara = plausibleTara[plausibleTara.length - 1];
-          } else if (numMatches.length > 0) {
-            tara = numMatches[0];
+          let grossWeight = '';
+
+          if (rawNumTokens.length >= 4) {
+            // 4 columns: Quant, Net Weight (Peso Carga), Tara, Gross Weight (Peso Bruto)
+            rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
+            netWeight = rawNumTokens[1];
+            tara = rawNumTokens[2].replace(/[.,]/g, '');
+            grossWeight = rawNumTokens[3];
+          } else if (rawNumTokens.length === 3) {
+            const v0 = parseVal(rawNumTokens[0]);
+            const v1 = parseVal(rawNumTokens[1]);
+            const v2 = parseVal(rawNumTokens[2]);
+            if (v1 >= 1800 && v1 <= 4900 && v2 > v0) {
+              netWeight = rawNumTokens[0];
+              tara = rawNumTokens[1].replace(/[.,]/g, '');
+              grossWeight = rawNumTokens[2];
+            } else {
+              rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
+              netWeight = rawNumTokens[1];
+              grossWeight = rawNumTokens[2];
+            }
+          } else if (rawNumTokens.length === 2) {
+            netWeight = rawNumTokens[0];
+            grossWeight = rawNumTokens[1];
+          } else if (rawNumTokens.length === 1) {
+            const v0 = parseVal(rawNumTokens[0]);
+            if (v0 >= 1800 && v0 <= 4900) {
+              tara = rawNumTokens[0].replace(/[.,]/g, '');
+            } else if (v0 > 5000) {
+              netWeight = rawNumTokens[0];
+            } else {
+              rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
+            }
+          }
+
+          if (!tara) {
+            const taraCand = rawNumTokens.find(t => {
+              const v = parseVal(t);
+              return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
+            });
+            if (taraCand) tara = taraCand.replace(/[.,]/g, '');
           }
 
           lineContainers.push({
             id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             containerNumber: rawNum,
-            containerType: defaultContainerType,
+            containerType: containerType,
             provisionalSeals: [], // Array of strings only
             definiteSeal: definiteSeal || '',
             fumigationDate: '',
@@ -691,10 +763,10 @@ export default function App() {
             definiteSealDate: '',
             notes: '',
             photos: [],
-            bagsQuantity: 0,
-            netWeight: '',
+            bagsQuantity: rowBags,
+            netWeight: netWeight || '',
             tara: tara || '',
-            grossWeight: '',
+            grossWeight: grossWeight || '',
             brand: brand || ''
           });
         }
@@ -741,6 +813,43 @@ export default function App() {
             definiteSeal = sealMatch[1].trim();
           }
 
+          let brand = '';
+          const oicMatch = segment.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
+          if (oicMatch) brand = oicMatch[1].trim();
+
+          const rawNumTokens = segment.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
+          const parseVal = (str) => {
+            if (!str) return 0;
+            let s = str.trim();
+            if (s.includes(',')) {
+              s = s.replace(/\./g, '').replace(/,/g, '.');
+            } else if (/\.\d{3}$/.test(s)) {
+              s = s.replace(/\./g, '');
+            }
+            return parseFloat(s) || 0;
+          };
+
+          let rowBags = 0;
+          let netWeight = '';
+          let tara = '';
+          let grossWeight = '';
+
+          const weightTokens = rawNumTokens.filter(t => t !== containerNumber && !containerNumber.includes(t));
+          if (weightTokens.length >= 4) {
+            rowBags = parseInt(weightTokens[0].replace(/[.,]/g, ''), 10) || 0;
+            netWeight = weightTokens[1];
+            tara = weightTokens[2].replace(/[.,]/g, '');
+            grossWeight = weightTokens[3];
+          } else if (weightTokens.length >= 2) {
+            netWeight = weightTokens[0];
+            grossWeight = weightTokens[weightTokens.length - 1];
+            const taraCand = weightTokens.find(t => {
+              const v = parseVal(t);
+              return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
+            });
+            if (taraCand) tara = taraCand.replace(/[.,]/g, '');
+          }
+
           parsedContainers.push({
             id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             containerNumber,
@@ -752,11 +861,11 @@ export default function App() {
             definiteSealDate: '',
             notes: '',
             photos: [],
-            bagsQuantity: 0,
-            netWeight: '',
-            tara: '',
-            grossWeight: '',
-            brand: ''
+            bagsQuantity: rowBags,
+            netWeight: netWeight || '',
+            tara: tara || '',
+            grossWeight: grossWeight || '',
+            brand: brand || ''
           });
         }
       }
@@ -2128,9 +2237,19 @@ export default function App() {
                           Lacre: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{getSealText(c.definiteSeal)}</span>
                         </div>
                       )}
+                      {c.netWeight && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Peso Carga: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.netWeight} kg</span>
+                        </div>
+                      )}
                       {c.tara && (
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                           Tara: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.tara} kg</span>
+                        </div>
+                      )}
+                      {c.grossWeight && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Peso Bruto: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.grossWeight} kg</span>
                         </div>
                       )}
                       {c.brand && (
