@@ -312,6 +312,17 @@ export default function App() {
       console.log('PDF Extracted Text:', fullText);
 
       // Grid-Based Key-Value Extraction (handles two-row label-value layouts)
+      // Helper to retrieve value from kvMap with key cleaning and fallback keys
+      const getKvValue = (map, keys) => {
+        for (const k of keys) {
+          if (map[k]) return map[k];
+          const foundKey = Object.keys(map).find(mapKey => mapKey === k || mapKey.startsWith(k) || mapKey.includes(k));
+          if (foundKey && map[foundKey]) return map[foundKey];
+        }
+        return '';
+      };
+
+      // Grid-Based Key-Value Extraction (handles label-value layouts & dotted labels)
       const extractGridKeyValues = (rows) => {
         const kvMap = {};
 
@@ -323,22 +334,24 @@ export default function App() {
             const item = currentRow.items[i];
             const str = item.str.trim();
 
-            if (str.endsWith(':') || /^(?:exportador|importador|reserva|navio|viagem|destino|descarga|armador|quantidade|tipo\s*do\s*cntr|quant\.total\s*em\s*sacas)/i.test(str)) {
-              const cleanKey = str.replace(/:$/, '').trim().toLowerCase();
+            if (str.endsWith(':') || str.includes('...') || /^(?:exportador|importador|reserva|booking|navio|viagem|destino|descarga|armador|quantidade|tipo|quant|recinto|local|marca|embalagem|cnpj|mercadoria|produto|consignatario|consignatário|pod|carrier)/i.test(str)) {
+              // Clean key by stripping colons, dots, spaces, dashes
+              const cleanKey = str.replace(/[:\.\s]+$/, '').replace(/^[:\.\s]+/, '').trim().toLowerCase();
+              if (!cleanKey) continue;
 
-              // 1. Try inline value: next item on same row if close to label's X (diff < 120px)
+              // 1. Try inline value: next item on same row if close to label's X (diff < 150px)
               const nextItemSameRow = currentRow.items[i + 1];
-              if (nextItemSameRow && !nextItemSameRow.str.trim().endsWith(':')) {
+              if (nextItemSameRow && !nextItemSameRow.str.trim().endsWith(':') && !nextItemSameRow.str.trim().includes('...')) {
                 const xDiff = nextItemSameRow.x - item.x;
-                if (xDiff > 0 && xDiff < 120) {
+                if (xDiff > 0 && xDiff < 180) {
                   kvMap[cleanKey] = nextItemSameRow.str.trim();
                   continue;
                 }
               }
 
-              // 2. Try value on next row below at matching X position (|X_val - X_key| < 60px)
+              // 2. Try value on next row below at matching X position (|X_val - X_key| < 80px)
               if (nextRow) {
-                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 60);
+                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 80);
                 if (matchingValueItem && matchingValueItem.str.trim() && matchingValueItem.str.trim() !== '-') {
                   kvMap[cleanKey] = matchingValueItem.str.trim();
                 }
@@ -353,21 +366,21 @@ export default function App() {
       console.log('Extracted Grid KV Map:', kvMap);
 
       // 1. Booking Number / Reserva
-      let bookingNumber = kvMap['reserva'] || kvMap['booking'] || '';
+      let bookingNumber = getKvValue(kvMap, ['booking', 'reserva', 'reserva de praça', 'booking number', 'nº booking', 'reserva nº', 'reserva n.']);
       if (!bookingNumber) {
         const bookingRegexes = [
-          /(?:booking|reserva|reserva\s*n[oºª.]?)[^a-zA-Z0-9:]*([A-Z0-9-]+)/i,
+          /(?:booking|reserva|reserva\s*n[oºª.]?|reserva\s*de\s*praça)[^a-zA-Z0-9:]*([A-Z0-9-]+)/i,
           /booking\s*number\s*([0-9A-Z-]+)/i
         ];
         for (const rx of bookingRegexes) {
           const match = fullText.match(rx);
           if (match && match[1]) {
-            bookingNumber = match[1].trim().replace(/^[:\s\-]+/, '');
+            bookingNumber = match[1].trim().replace(/^[:\s\-.]+/, '');
             break;
           }
         }
       }
-      bookingNumber = bookingNumber.replace(/^[:\s\-]+/, '').trim();
+      bookingNumber = bookingNumber.replace(/^[:\s\-.]+/, '').trim();
 
       if (bookingNumber && isBookingNumberDuplicate(bookings, bookingNumber)) {
         setPdfParseStatus('error');
@@ -380,12 +393,12 @@ export default function App() {
         return;
       }
 
-      // 2. Vessel Name & Voyage / Navio
-      let vesselName = kvMap['navio/viagem'] || kvMap['navio'] || kvMap['vessel'] || '';
-      let vesselVoyageNum = kvMap['viagem'] || kvMap['voyage'] || '';
+      // 2. Vessel Name & Voyage / Navio / Viagem
+      let vesselName = getKvValue(kvMap, ['navio', 'vessel', 'nome do navio', 'embarcação', 'navio/viagem']);
+      let vesselVoyageNum = getKvValue(kvMap, ['viagem', 'viagem do navio', 'voyage', 'voy', 'v.']);
 
-      if (vesselName && vesselName.includes('/')) {
-        const parts = vesselName.split('/');
+      if (vesselName && (vesselName.includes('/') || vesselName.includes(' V.'))) {
+        const parts = vesselName.split(/\/| V\./i);
         vesselName = parts[0].trim();
         if (!vesselVoyageNum && parts[1]) {
           vesselVoyageNum = parts[1].trim();
@@ -407,29 +420,38 @@ export default function App() {
               rawVessel = rawVessel.substring(0, idx).trim();
             }
           }
-          vesselName = rawVessel.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+          vesselName = rawVessel.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
         }
       }
-      vesselName = vesselName.replace(/^[:\s\-]+/, '').trim();
+      vesselName = vesselName.replace(/^[:\s\-.]+/, '').trim();
 
       if (!vesselVoyageNum) {
         const voyageRegexes = [
-          /(?:voyage|viagem|voy|v\.)[^a-zA-Z0-9:]*([A-Z0-9/]+)/i,
+          /(?:voyage|viagem(?:\s*do\s*navio)?|voy|v\.)[^a-zA-Z0-9:]*([A-Z0-9/]+)/i,
           /voy\s*([A-Z0-9/]+)/i
         ];
         for (const rx of voyageRegexes) {
           const match = fullText.match(rx);
           if (match && match[1]) {
-            vesselVoyageNum = match[1].trim().replace(/^[:\s\-]+/, '').toUpperCase();
+            vesselVoyageNum = match[1].trim().replace(/^[:\s\-.]+/, '').toUpperCase();
             break;
           }
         }
       }
 
+      let vesselVoyage = '';
+      if (vesselName && vesselVoyageNum) {
+        vesselVoyage = `${vesselName} V.${vesselVoyageNum}`;
+      } else if (vesselName) {
+        vesselVoyage = vesselName;
+      } else if (vesselVoyageNum) {
+        vesselVoyage = vesselVoyageNum;
+      }
+
       // 3. Importador
-      let importadorExtracted = kvMap['importador'] || kvMap['importer'] || '';
+      let importadorExtracted = getKvValue(kvMap, ['importador', 'importer', 'consignatario', 'consignatário', 'consignee', 'importador / consignatario']);
       if (!importadorExtracted) {
-        const impMatch = fullText.match(/(?:importador|importer)[^a-zA-Z0-9:]*([^\n\r]+)/i);
+        const impMatch = fullText.match(/(?:importador|importer|consignat[áa]rio|consignee)[^a-zA-Z0-9:]*([^\n\r]+)/i);
         if (impMatch && impMatch[1]) {
           let rawImp = impMatch[1].trim();
           const stopKeywords = [
@@ -442,14 +464,19 @@ export default function App() {
               rawImp = rawImp.substring(0, idx).trim();
             }
           }
-          importadorExtracted = rawImp.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+          importadorExtracted = rawImp.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
         }
       }
-      importadorExtracted = importadorExtracted.replace(/^[:\s\-]+/, '').trim();
+      importadorExtracted = importadorExtracted.replace(/^[:\s\-.]+/, '').trim();
 
-      // 4. Exporter
-      let exporterId = '';
-      let exporterNameExtracted = kvMap['exportador'] || kvMap['exporter'] || '';
+      // 4. Exporter & CNPJ Exportador
+      let cnpjExtracted = getKvValue(kvMap, ['cnpj exportador', 'cnpj', 'cnpj/cpf', 'cnpj do exportador']);
+      if (!cnpjExtracted) {
+        const cnpjMatch = fullText.match(/(?:cnpj\s*exportador|cnpj)[^0-9]*(\d{2}[.\s]?\d{3}[.\s]?\d{3}\/?\d{4}[-.\s]?\d{2}|\d{14})/i);
+        if (cnpjMatch) cnpjExtracted = cnpjMatch[1];
+      }
+
+      let exporterNameExtracted = getKvValue(kvMap, ['exportador', 'exporter', 'shipper', 'empresa exportadora']);
       if (!exporterNameExtracted) {
         const regexExp = /(?:exportador|exporter)[^a-zA-Z0-9:]*([^\n\r]+)/gi;
         let expMatch;
@@ -474,18 +501,25 @@ export default function App() {
               candidate = candidate.substring(0, idx).trim();
             }
           }
-          candidate = candidate.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+          candidate = candidate.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
           if (candidate && !/^\d+$/.test(candidate) && candidate.length > 2) {
             exporterNameExtracted = candidate;
             break;
           }
         }
       }
-      exporterNameExtracted = exporterNameExtracted.replace(/^[:\s\-]+/, '').trim();
+      exporterNameExtracted = exporterNameExtracted.replace(/^[:\s\-.]+/, '').trim();
 
-      const exporters = exportadores;
-      if (exporterNameExtracted) {
-        const exactMatch = exporters.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
+      let exporterId = '';
+      const cleanCnpjDigits = (cnpjExtracted || '').replace(/\D/g, '');
+
+      if (cleanCnpjDigits && cleanCnpjDigits.length >= 11) {
+        const foundByCnpj = exportadores.find(exp => (exp.cnpj || '').replace(/\D/g, '') === cleanCnpjDigits);
+        if (foundByCnpj) exporterId = foundByCnpj.id;
+      }
+
+      if (!exporterId && exporterNameExtracted) {
+        const exactMatch = exportadores.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
         if (exactMatch) {
           exporterId = exactMatch.id;
         } else {
@@ -493,12 +527,12 @@ export default function App() {
             'exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 
             'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria', 'indústria', 
             'trading', 'cafe', 'café', 'coffee', 'cooperativa', 'coop', 'sa', 'limitada', 'group', 
-            'grupo', 'brasil', 'brazil', 'alimentos', 'comercial'
+            'grupo', 'brasil', 'brazil', 'alimentos', 'comercial', 'eireli'
           ];
-          const partialMatch = exporters.find(exp => {
+          const partialMatch = exportadores.find(exp => {
             const expWords = exp.name.split(' ')
               .map(w => w.toLowerCase().replace(/[^a-z0-9à-ú]/gi, '').trim())
-              .filter(w => w.length > 4 && !commonWords.includes(w));
+              .filter(w => w.length > 3 && !commonWords.includes(w));
             
             if (expWords.length === 0) return false;
             
@@ -514,42 +548,19 @@ export default function App() {
             const newExp = {
               id: newId,
               name: exporterNameExtracted,
-              email: `${exporterNameExtracted.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
+              cnpj: cnpjExtracted || '',
+              email: '',
               phone: ''
             };
             db.saveExportador(newExp).catch(e => console.error("Erro background saveExportador:", e));
             exporterId = newId;
           }
         }
-      } else {
-        const commonWords = [
-          'exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 
-          'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria', 'indústria', 
-          'trading', 'cafe', 'café', 'coffee', 'cooperativa', 'coop', 'sa', 'limitada', 'group', 
-          'grupo', 'brasil', 'brazil', 'alimentos', 'comercial'
-        ];
-        for (const exp of exporters) {
-          if (fullText.toLowerCase().includes(exp.name.toLowerCase())) {
-            exporterId = exp.id;
-            break;
-          }
-          const signWords = exp.name.split(' ')
-            .map(w => w.toLowerCase().replace(/[^a-z0-9à-ú]/gi, '').trim())
-            .filter(w => w.length > 4 && !commonWords.includes(w));
-          
-          if (signWords.length > 0 && signWords.some(w => {
-            const normalizedText = fullText.toLowerCase().replace(/[^a-z0-9à-ú]/gi, ' ');
-            return normalizedText.split(/\s+/).includes(w);
-          })) {
-            exporterId = exp.id;
-            break;
-          }
-        }
       }
 
       // 5. Default Container Type
       let defaultContainerType = "40' HC";
-      let rawType = kvMap['tipo do cntr'] || kvMap['tipo cntr'] || kvMap['cntr type'] || '';
+      let rawType = getKvValue(kvMap, ['tipo do cntr', 'tipo cntr', 'cntr type', 'tipo', 'container type']);
       if (!rawType) {
         const typeMatch = fullText.match(/(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type)[^a-zA-Z0-9:]*([^\n\r]+)/i);
         if (typeMatch && typeMatch[1]) {
@@ -564,63 +575,85 @@ export default function App() {
           defaultContainerType = "20' Dry";
         } else if (typeStr.includes('40') && typeStr.includes('DRY')) {
           defaultContainerType = "40' Dry";
-        } else if (typeStr.includes('40') && (typeStr.includes('HC') || typeStr.includes('HIGH'))) {
+        } else if (typeStr.includes('40') && (typeStr.includes('HC') || typeStr.includes('HIGH') || typeStr.includes('45G1'))) {
           defaultContainerType = "40' HC";
         } else if (typeStr.includes('REEFER')) {
           defaultContainerType = "40' Reefer";
         }
       }
 
-      // 6. Location of Operation
+      // 6. Recinto / Location of Operation
+      let rawLocation = getKvValue(kvMap, ['recinto', 'recinto alfandegado', 'local de operações', 'local de operacoes', 'local de estufagem', 'local de coleta', 'terminal', 'local']);
+      if (rawLocation) {
+        rawLocation = rawLocation.replace(/^[:\s\-.]+/, '').trim();
+      }
+
       let locationId = '';
-      const ignoreWordsLoc = ['logistica', 'terminal', 'armazéns', 'gerais', 'exportação'];
-      const rawLocation = kvMap['descarga'] || kvMap['local de coleta'] || '';
-
-      for (const loc of locais) {
-        if (rawLocation && rawLocation.toLowerCase().includes(loc.name.toLowerCase())) {
-          locationId = loc.id;
-          break;
-        }
-        if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
-          locationId = loc.id;
-          break;
-        }
-        const signWords = loc.name.split(' ').filter(w => w.length > 4 && !ignoreWordsLoc.includes(w.toLowerCase()));
-        if (signWords.length > 0 && signWords.some(w => fullText.toLowerCase().includes(w.toLowerCase()))) {
-          locationId = loc.id;
-          break;
-        }
-      }
-      if (!locationId && fullText.toLowerCase().includes('interport')) {
-        const interportLoc = locais.find(l => l.name.toLowerCase().includes('interport'));
-        if (interportLoc) {
-          locationId = interportLoc.id;
+      if (rawLocation) {
+        const cleanRawLoc = rawLocation.toLowerCase();
+        const foundLoc = locais.find(loc => cleanRawLoc.includes(loc.name.toLowerCase()) || loc.name.toLowerCase().includes(cleanRawLoc));
+        if (foundLoc) {
+          locationId = foundLoc.id;
         }
       }
 
-      // 7. Commodity
+      if (!locationId) {
+        for (const loc of locais) {
+          if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
+            locationId = loc.id;
+            break;
+          }
+        }
+      }
+
+      if (!locationId && rawLocation && rawLocation.length > 2) {
+        const newId = 'loc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        const newLoc = { id: newId, name: rawLocation };
+        db.saveLocal(newLoc).catch(e => console.error("Erro background saveLocal:", e));
+        locationId = newId;
+      }
+
+      // 7. Commodity / Mercadoria
+      let mercadoriaExtracted = getKvValue(kvMap, ['mercadoria', 'produto', 'commodity', 'descrição da carga', 'descricao da carga']);
       let mercadoria = 'café';
-      const lowercaseText = fullText.toLowerCase();
-      if (lowercaseText.includes('cravo') || lowercaseText.includes('clove')) {
-        mercadoria = 'Cravo';
-      } else if (lowercaseText.includes('pimenta preta') || lowercaseText.includes('black pepper')) {
-        mercadoria = 'Pimenta Preta';
-      } else if (lowercaseText.includes('pimenta vermelha') || lowercaseText.includes('red pepper')) {
-        mercadoria = 'Pimenta Vermelha';
-      } else if (lowercaseText.includes('pimenta branca') || lowercaseText.includes('white pepper')) {
-        mercadoria = 'Pimenta Branca';
-      } else if (lowercaseText.includes('café') || lowercaseText.includes('coffee') || lowercaseText.includes('cafe')) {
-        mercadoria = 'café';
+      if (mercadoriaExtracted) {
+        const cleanMerc = mercadoriaExtracted.replace(/^[:\s\-.]+/, '').trim();
+        const lowerMerc = cleanMerc.toLowerCase();
+        if (lowerMerc.includes('pimenta')) {
+          if (lowerMerc.includes('vermelha')) mercadoria = 'Pimenta Vermelha';
+          else if (lowerMerc.includes('branca')) mercadoria = 'Pimenta Branca';
+          else mercadoria = 'Pimenta Preta';
+        } else if (lowerMerc.includes('cravo') || lowerMerc.includes('clove')) {
+          mercadoria = 'Cravo';
+        } else if (lowerMerc.includes('café') || lowerMerc.includes('cafe') || lowerMerc.includes('coffee')) {
+          mercadoria = 'café';
+        } else {
+          mercadoria = cleanMerc;
+        }
+      } else {
+        const lowercaseText = fullText.toLowerCase();
+        if (lowercaseText.includes('cravo') || lowercaseText.includes('clove')) {
+          mercadoria = 'Cravo';
+        } else if (lowercaseText.includes('pimenta')) {
+          if (lowercaseText.includes('vermelha')) mercadoria = 'Pimenta Vermelha';
+          else if (lowercaseText.includes('branca')) mercadoria = 'Pimenta Branca';
+          else mercadoria = 'Pimenta Preta';
+        } else if (lowercaseText.includes('café') || lowercaseText.includes('coffee') || lowercaseText.includes('cafe')) {
+          mercadoria = 'café';
+        }
       }
 
-      // 8. Bags Quantity Total
-      let bagsQuantity = kvMap['quant.total em sacas'] || kvMap['quantidade total em sacas'] || kvMap['quant.total'] || '';
-      if (bagsQuantity) {
-        const cleanNum = bagsQuantity.replace(/[^\d]/g, '');
-        if (cleanNum) bagsQuantity = cleanNum;
+      // 8. Bags Quantity Total / Quantidade
+      let bagsQuantityStr = getKvValue(kvMap, ['quantidade', 'quantidade de sacas', 'quant.total em sacas', 'quant.total', 'total de sacas', 'qtd sacas', 'quant', 'volumes', 'total sacas']);
+      let bagsQuantity = '';
+      if (bagsQuantityStr) {
+        const matchNum = bagsQuantityStr.match(/([0-9.,]+)/);
+        if (matchNum) {
+          bagsQuantity = matchNum[1].replace(/\./g, '').replace(/,/g, '').trim();
+        }
       }
       if (!bagsQuantity) {
-        const totalBagsMatch = fullText.match(/(?:quant\.?\s*total\s*em\s*sacas|quantidade\s*total\s*em\s*sacas)[^a-zA-Z0-9]*([0-9.,]+)/i);
+        const totalBagsMatch = fullText.match(/(?:quant\.?\s*total\s*em\s*sacas|quantidade\s*total\s*em\s*sacas|quantidade|total\s*de\s*sacas)[^0-9]*([0-9.,]+)/i);
         if (totalBagsMatch && totalBagsMatch[1]) {
           bagsQuantity = totalBagsMatch[1].replace(/[.\s,]/g, '').trim();
         }
@@ -642,8 +675,8 @@ export default function App() {
         }
       }
 
-      // 9. Port of Destination
-      let portoDestino = kvMap['destino'] || kvMap['porto de destino'] || kvMap['destination'] || '';
+      // 9. Port of Destination / Destino
+      let portoDestino = getKvValue(kvMap, ['destino', 'porto de destino', 'porto destino', 'destination', 'porto de descarga', 'pod', 'port of discharge']);
       if (!portoDestino) {
         const destMatch = fullText.match(/(?:destino|destination|port\s*of\s*discharge|porto\s*de\s*destino)[^a-zA-Z0-9:]*([^\n\r]+)/i);
         if (destMatch && destMatch[1]) {
@@ -658,19 +691,19 @@ export default function App() {
               rawDest = rawDest.substring(0, idx).trim();
             }
           }
-          portoDestino = rawDest.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+          portoDestino = rawDest.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
         }
       }
-      portoDestino = portoDestino.replace(/^[:\s\-]+/, '').trim();
+      portoDestino = portoDestino.replace(/^[:\s\-.]+/, '').trim();
 
       // 10. Carrier / Armador
-      let armador = kvMap['armador'] || kvMap['carrier'] || '';
+      let armador = getKvValue(kvMap, ['armador', 'carrier', 'linha', 'shipping line', 'armador / linha']);
       if (!armador || armador.toLowerCase().includes('fumigação') || armador.toLowerCase().includes('fumigacao')) {
         armador = '';
-        const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim'];
+        const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim', 'Log-In', 'Login', 'Evergreen'];
         for (const carrier of carriers) {
           if (fullText.toLowerCase().includes(carrier.toLowerCase())) {
-            armador = carrier === 'Hapag' ? 'Hapag-Lloyd' : carrier;
+            armador = carrier === 'Hapag' ? 'Hapag-Lloyd' : (carrier === 'Login' ? 'Log-In' : carrier);
             break;
           }
         }
@@ -687,94 +720,102 @@ export default function App() {
                 rawCarrier = rawCarrier.substring(0, idx).trim();
               }
             }
-            armador = rawCarrier.replace(/^[:\s\-]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
+            armador = rawCarrier.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
           }
         }
       }
-      armador = armador.replace(/^[:\s\-]+/, '').trim();
+      armador = armador.replace(/^[:\s\-.]+/, '').trim();
 
-      // 11. Packaging
-      let embalagem = 'sacaria';
-      if (lowercaseText.includes('big bag') || lowercaseText.includes('bigbag') || lowercaseText.includes('bag 1000') || lowercaseText.includes('bag 1.000')) {
-        embalagem = 'Big bags';
-      } else if (lowercaseText.includes('bulk') || lowercaseText.includes('granel')) {
-        embalagem = 'Bulk Line';
-      } else if (lowercaseText.includes('box') || lowercaseText.includes('caixa')) {
-        embalagem = 'Caixa';
+      // 11. Packaging / Embalagem
+      let embalagem = getKvValue(kvMap, ['embalagem', 'tipo de embalagem', 'packaging']);
+      if (embalagem) {
+        const lowerEmb = embalagem.toLowerCase();
+        if (lowerEmb.includes('big') || lowerEmb.includes('bag')) embalagem = 'Big bags';
+        else if (lowerEmb.includes('bulk') || lowerEmb.includes('granel')) embalagem = 'Bulk Line';
+        else if (lowerEmb.includes('caixa') || lowerEmb.includes('box')) embalagem = 'Caixa';
+        else embalagem = 'sacaria';
+      } else {
+        const lowercaseText = fullText.toLowerCase();
+        if (lowercaseText.includes('big bag') || lowercaseText.includes('bigbag') || lowercaseText.includes('bag 1000') || lowercaseText.includes('bag 1.000')) {
+          embalagem = 'Big bags';
+        } else if (lowercaseText.includes('bulk') || lowercaseText.includes('granel')) {
+          embalagem = 'Bulk Line';
+        } else if (lowercaseText.includes('box') || lowercaseText.includes('caixa')) {
+          embalagem = 'Caixa';
+        } else {
+          embalagem = 'sacaria';
+        }
       }
 
       // 12. Parse Containers and Seals
-      const containerRegexLine = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/i;
+      const containerRegexLine = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
       const lines = fullText.split('\n');
       const lineContainers = [];
 
       for (const line of lines) {
-        const cMatch = line.match(containerRegexLine);
-        if (!cMatch) continue;
+        let cMatch;
+        containerRegexLine.lastIndex = 0;
+        while ((cMatch = containerRegexLine.exec(line)) !== null) {
+          const rawNum = cMatch[1].trim().toUpperCase().replace(/[-\s]/g, '');
+          if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
 
-        const rawNum = cMatch[1].trim().toUpperCase();
-        const prefixChars = rawNum.replace(/[^A-Z]/g, '');
-        if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) continue;
-        if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
+          let brand = '';
+          const oicMatch = line.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|\d{4})\b/);
+          if (oicMatch) brand = oicMatch[1];
 
-        let brand = '';
-        const oicMatch = line.match(/\b(\d{3}\/\d{3,4}\/\d{3,4})\b/);
-        if (oicMatch) brand = oicMatch[1];
+          const containerIdx = line.indexOf(cMatch[0]);
+          const subAfterContainer = line.substring(containerIdx + cMatch[0].length);
 
-        const containerIdx = line.indexOf(cMatch[0]);
-        const subAfterContainer = line.substring(containerIdx + cMatch[0].length);
-
-        let definiteSeal = '';
-        const sealArmadorMatch = subAfterContainer.match(/\b([A-Z]{1,3}\s*\d{6,10})\b/i);
-        if (sealArmadorMatch) {
-          definiteSeal = sealArmadorMatch[1].trim();
-        }
-
-        let tara = '';
-        let provSeal = '';
-        const provMatch = subAfterContainer.match(/\b(\d{4,6})\b/g);
-        if (provMatch) {
-          for (const numStr of provMatch) {
-            const numVal = parseInt(numStr, 10);
-            if (numVal >= 1800 && numVal <= 5000 && !tara) {
-              tara = numStr;
-            } else if (numVal >= 1000 && numVal < 10000 && numStr !== tara && !provSeal) {
-              provSeal = numStr;
+          let definiteSeal = '';
+          // Match seal from table column after container number (e.g. LINE FJ27075213, MLBR0727759, etc.)
+          const sealArmadorMatch = subAfterContainer.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
+          if (sealArmadorMatch) {
+            const candidateSeal = sealArmadorMatch[1].trim();
+            if (!/^(20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS)$/i.test(candidateSeal)) {
+              definiteSeal = candidateSeal;
             }
           }
-        }
 
-        lineContainers.push({
-          id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          containerNumber: rawNum,
-          containerType: defaultContainerType,
-          provisionalSeals: provSeal ? [{ id: 'seal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), sealNumber: provSeal }] : [],
-          definiteSeal: definiteSeal || '',
-          fumigationDate: '',
-          fitoDate: '',
-          definiteSealDate: '',
-          notes: '',
-          photos: [],
-          bagsQuantity: 0,
-          netWeight: '',
-          tara: tara || '',
-          grossWeight: '',
-          brand: brand || ''
-        });
+          let tara = '';
+          const taraMatch = subAfterContainer.match(/\b([1-9]\d{3})\b/);
+          if (taraMatch) tara = taraMatch[1];
+
+          lineContainers.push({
+            id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            containerNumber: rawNum,
+            containerType: defaultContainerType,
+            provisionalSeals: [], // Array of strings only
+            definiteSeal: definiteSeal || '',
+            fumigationDate: '',
+            fitoDate: '',
+            definiteSealDate: '',
+            notes: '',
+            photos: [],
+            bagsQuantity: 0,
+            netWeight: '',
+            tara: tara || '',
+            grossWeight: '',
+            brand: brand || ''
+          });
+        }
       }
 
       let parsedContainers = [];
 
       if (lineContainers.length > 0) {
-        parsedContainers = lineContainers;
+        // Remove duplicates by containerNumber
+        const seen = new Set();
+        parsedContainers = lineContainers.filter(c => {
+          if (seen.has(c.containerNumber)) return false;
+          seen.add(c.containerNumber);
+          return true;
+        });
       } else {
-        const containerRegexGlobal = /\b([A-Z]{3}[UJZ][-\s]?\d{6}[-\s]?\d)\b/gi;
+        const containerRegexGlobal = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
         const containerMatches = [];
         let match;
         while ((match = containerRegexGlobal.exec(fullText)) !== null) {
-          const rawNum = match[1].trim().toUpperCase();
-          const prefixChars = rawNum.replace(/[^A-Z]/g, '');
-          if (prefixChars.length >= 4 && !['U', 'J', 'Z'].includes(prefixChars[3])) continue;
+          const rawNum = match[1].trim().toUpperCase().replace(/[-\s]/g, '');
           if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
 
           containerMatches.push({
@@ -795,99 +836,16 @@ export default function App() {
           const containerNumber = currentMatch.number;
           const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
 
-          const maxSearch = Math.min(rawTokens.length, 15);
-          let brandIndex = -1;
-          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-            if (rawTokens[tIdx].includes('/') && rawTokens[tIdx].split('/').length === 3) {
-              if (!rawTokens[tIdx].match(/\d{2}\/\d{2}\/\d{2,4}/)) {
-                brandIndex = tIdx;
-                break;
-              }
-            }
-          }
-
-          let typeIndex = -1;
-          for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-            const lowerToken = rawTokens[tIdx].toLowerCase();
-            if (lowerToken.includes('hc') || lowerToken.includes('dry') || lowerToken.includes('dv') || lowerToken.includes('reefer') || lowerToken.includes('"') || lowerToken.includes('\'')) {
-              typeIndex = tIdx;
-              break;
-            }
-          }
-
-          if (typeIndex === -1) {
-            for (let tIdx = 1; tIdx < maxSearch; tIdx++) {
-              if (rawTokens[tIdx] === '40' || rawTokens[tIdx] === '20') {
-                typeIndex = tIdx;
-                break;
-              }
-            }
-          }
-
           let definiteSeal = '';
-          let brand = '';
-          let containerType = defaultContainerType;
-          let containerBagsQuantity = '';
-          let netWeight = '';
-          let tara = '';
-          let grossWeight = '';
-
-          if (brandIndex !== -1) {
-            brand = rawTokens[brandIndex];
-            const sealsTokens = rawTokens.slice(1, brandIndex);
-            definiteSeal = sealsTokens.join(' ');
-          } else if (typeIndex !== -1) {
-            const sealsTokens = rawTokens.slice(1, typeIndex);
-            definiteSeal = sealsTokens.join(' ');
-          }
-
-          if (typeIndex !== -1) {
-            const typeStr = rawTokens[typeIndex].toLowerCase();
-            if (typeStr.includes('40') && (typeStr.includes('hc') || typeStr.includes('high'))) {
-              containerType = "40' HC";
-            } else if (typeStr.includes('40')) {
-              containerType = "40' Dry";
-            } else if (typeStr.includes('20') && (typeStr.includes('dv') || typeStr.includes('dry') || typeStr.includes('dryvan'))) {
-              containerType = "20' Dry";
-            } else if (typeStr.includes('20')) {
-              containerType = "20' Dry";
-            } else if (typeStr.includes('reefer')) {
-              containerType = "40' Reefer";
-            }
-
-            const allMetricsTokens = rawTokens.slice(typeIndex + 1);
-            const metricsTokens = allMetricsTokens.filter(t => /^\d+([.,]\d+)*$/.test(t));
-
-            let bagsIdx = 0;
-            if (metricsTokens.length >= 2) {
-              const m0 = parseBrazilianOrStandardFloat(metricsTokens[0]);
-              const m1 = parseBrazilianOrStandardFloat(metricsTokens[1]);
-              if (m0 < 150 && m1 < 150) {
-                bagsIdx = 1;
-              }
-            }
-
-            if (metricsTokens.length >= 4 + bagsIdx) {
-              containerBagsQuantity = metricsTokens[bagsIdx];
-              netWeight = metricsTokens[bagsIdx + 1];
-              tara = metricsTokens[bagsIdx + 2];
-              grossWeight = metricsTokens[bagsIdx + 3];
-            } else if (metricsTokens.length === 3 + bagsIdx) {
-              containerBagsQuantity = metricsTokens[bagsIdx];
-              netWeight = metricsTokens[bagsIdx + 1];
-              grossWeight = metricsTokens[bagsIdx + 2];
-            } else if (metricsTokens.length === 2 + bagsIdx) {
-              containerBagsQuantity = metricsTokens[bagsIdx];
-              netWeight = metricsTokens[bagsIdx + 1];
-            } else if (metricsTokens.length > bagsIdx) {
-              containerBagsQuantity = metricsTokens[bagsIdx];
-            }
+          const sealMatch = segment.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
+          if (sealMatch && sealMatch[1] !== containerNumber) {
+            definiteSeal = sealMatch[1].trim();
           }
 
           parsedContainers.push({
             id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             containerNumber,
-            containerType,
+            containerType: defaultContainerType,
             provisionalSeals: [],
             definiteSeal: definiteSeal || '',
             fumigationDate: '',
@@ -895,11 +853,11 @@ export default function App() {
             definiteSealDate: '',
             notes: '',
             photos: [],
-            bagsQuantity: containerBagsQuantity ? Math.round(parseBrazilianOrStandardFloat(containerBagsQuantity)) || 0 : 0,
-            netWeight: netWeight || '',
-            tara: tara || '',
-            grossWeight: grossWeight || '',
-            brand: brand || ''
+            bagsQuantity: 0,
+            netWeight: '',
+            tara: '',
+            grossWeight: '',
+            brand: ''
           });
         }
       }
@@ -918,6 +876,7 @@ export default function App() {
         bookingNumber: bookingNumber || prev.bookingNumber,
         vesselName: vesselName || prev.vesselName,
         vesselVoyageNum: vesselVoyageNum || prev.vesselVoyageNum,
+        vesselVoyage: vesselVoyage || prev.vesselVoyage,
         exporterId: exporterId || prev.exporterId,
         locationId: locationId || prev.locationId,
         mercadoria: mercadoria || prev.mercadoria,
@@ -939,6 +898,9 @@ export default function App() {
       if (importadorExtracted) fieldsFound.push('Importador');
       if (bagsQuantity) fieldsFound.push('Qtd Sacas');
       if (portoDestino) fieldsFound.push('Destino');
+      if (armador) fieldsFound.push('Armador');
+      if (locationId) fieldsFound.push('Recinto');
+      if (mercadoria) fieldsFound.push('Mercadoria');
 
       if (fieldsFound.length > 0) {
         let msg = `Sucesso! Preenchido: ${fieldsFound.join(', ')}.`;

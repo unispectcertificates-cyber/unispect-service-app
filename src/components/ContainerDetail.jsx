@@ -343,7 +343,7 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
                 fontWeight: '600'
               }}
             >
-              <span>{seal}</span>
+              <span>{typeof seal === 'object' ? (seal.sealNumber || seal.seal || String(seal)) : String(seal)}</span>
               {canEdit && (
                 <button 
                   type="button" 

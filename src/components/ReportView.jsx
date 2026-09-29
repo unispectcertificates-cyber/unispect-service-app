@@ -28,7 +28,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       // Build container tables HTML
       let containersHtml = '';
       (booking.containers || []).forEach((cont, idx) => {
-        let seals = (cont.provisionalSeals || []).join(', ') || 'N/A';
+        let seals = (cont.provisionalSeals || []).map(s => typeof s === 'object' ? (s.sealNumber || s.seal || '') : String(s)).filter(Boolean).join(', ') || 'N/A';
         let photosHtml = '';
         const photos = cont.photos || [];
         if (photos.length > 0) {
@@ -646,7 +646,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>PROVISIONAL SEAL</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>
-                              {(page.container.provisionalSeals || []).join(', ') || 'N/A'}
+                              {(page.container.provisionalSeals || []).map(s => typeof s === 'object' ? (s.sealNumber || s.seal || '') : String(s)).filter(Boolean).join(', ') || 'N/A'}
                             </td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL DATE</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSealDate || booking.definiteSealDate || 'N/A'}</td>

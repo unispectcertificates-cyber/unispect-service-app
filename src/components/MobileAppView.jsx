@@ -946,21 +946,24 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
               </button>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {(c.provisionalSeals || []).map((seal, idx) => (
-                <div key={idx} style={{
-                  display: 'flex', alignItems: 'center', gap: '6px',
-                  padding: '5px 10px',
-                  backgroundColor: 'var(--bg-tertiary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '20px',
-                  fontSize: '12px', fontWeight: '700'
-                }}>
-                  <span>{idx + 1}. {seal}</span>
-                  <button onClick={() => handleRemoveSeal(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1 }}>
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
+              {(c.provisionalSeals || []).map((seal, idx) => {
+                const sealText = typeof seal === 'object' ? (seal.sealNumber || seal.seal || String(seal)) : String(seal);
+                return (
+                  <div key={idx} style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    padding: '5px 10px',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '20px',
+                    fontSize: '12px', fontWeight: '700'
+                  }}>
+                    <span>{idx + 1}. {sealText}</span>
+                    <button onClick={() => handleRemoveSeal(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1 }}>
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
               {!(c.provisionalSeals?.length) && (
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhum lacre provisório.</span>
               )}
