@@ -311,87 +311,41 @@ export default function App() {
 
       console.log('PDF Extracted Text:', fullText);
 
-      // Grid-Based Key-Value Extraction (handles two-row label-value layouts)
-      // Helper to retrieve value from kvMap with key cleaning and fallback keys
-      const getKvValue = (map, keys) => {
-        for (const k of keys) {
-          if (map[k]) return map[k];
-          const foundKey = Object.keys(map).find(mapKey => mapKey === k || mapKey.startsWith(k) || mapKey.includes(k));
-          if (foundKey && map[foundKey]) return map[foundKey];
-        }
-        return '';
-      };
+      // Stop keywords list to prevent multi-column and dotted header text bleeding
+      const allStopKeywords = [
+        /\bbooking\b/i, /\breserva\b/i, /\bnavio\b/i, /\bvessel\b/i, /\bviagem\b/i, /\bvoyage\b/i,
+        /\bimportador\b/i, /\bimporter\b/i, /\bconsignat[áa]rio\b/i, /\bconsignee\b/i,
+        /\bexportador\b/i, /\bexporter\b/i, /\bcnpj\b/i, /\bshipper\b/i,
+        /\bdestino\b/i, /\bdestination\b/i, /\bquantidade\b/i, /\bquant\b/i, /\bvolumes\b/i,
+        /\bembalagem\b/i, /\bmercadoria\b/i, /\bproduto\b/i, /\breferencia\b/i, /\bref\b/i,
+        /\barmador\b/i, /\bcarrier\b/i, /\brecinto\b/i, /\bmarca\b/i, /\bagente\b/i,
+        /\bcontainer\b/i, /\bconteiner\b/i, /\blacres\b/i, /\btara\b/i, /\bpeso\b/i, /\bn[oº°ª]\b/i
+      ];
 
-      // Grid-Based Key-Value Extraction (handles label-value layouts & dotted labels)
-      const extractGridKeyValues = (rows) => {
-        const kvMap = {};
-
-        for (let rIdx = 0; rIdx < rows.length; rIdx++) {
-          const currentRow = rows[rIdx];
-          const nextRow = rows[rIdx + 1];
-
-          for (let i = 0; i < currentRow.items.length; i++) {
-            const item = currentRow.items[i];
-            const str = item.str.trim();
-
-            // Check if item contains key: value inline in the same item (e.g. "Booking...: 241ISZ2620656")
-            if (str.includes(':')) {
-              const colonIdx = str.indexOf(':');
-              const rawKey = str.substring(0, colonIdx);
-              const rawVal = str.substring(colonIdx + 1).trim();
-              const cleanKey = rawKey.replace(/[:\.\s]+$/, '').replace(/^[:\.\s]+/, '').trim().toLowerCase();
-              if (cleanKey && rawVal && rawVal !== '-' && !rawVal.includes('Não informado')) {
-                kvMap[cleanKey] = rawVal;
-              }
-            }
-
-            if (str.endsWith(':') || str.includes('...') || /^(?:exportador|importador|reserva|booking|navio|viagem|destino|descarga|armador|quantidade|tipo|quant|recinto|local|marca|embalagem|cnpj|mercadoria|produto|consignatario|consignatário|pod|carrier)/i.test(str)) {
-              // Clean key by stripping colons, dots, spaces, dashes
-              const cleanKey = str.replace(/[:\.\s]+$/, '').replace(/^[:\.\s]+/, '').trim().toLowerCase();
-              if (!cleanKey) continue;
-
-              // 1. Try inline value: next item on same row if close to label's X (diff < 250px)
-              const nextItemSameRow = currentRow.items[i + 1];
-              if (nextItemSameRow && !nextItemSameRow.str.trim().endsWith(':') && !nextItemSameRow.str.trim().includes('...')) {
-                const xDiff = nextItemSameRow.x - item.x;
-                if (xDiff > 0 && xDiff < 250) {
-                  kvMap[cleanKey] = nextItemSameRow.str.trim();
-                  continue;
-                }
-              }
-
-              // 2. Try value on next row below at matching X position (|X_val - X_key| < 100px)
-              if (nextRow) {
-                const matchingValueItem = nextRow.items.find(valItem => Math.abs(valItem.x - item.x) < 100);
-                if (matchingValueItem && matchingValueItem.str.trim() && matchingValueItem.str.trim() !== '-') {
-                  kvMap[cleanKey] = matchingValueItem.str.trim();
-                }
-              }
-            }
+      // Robust field extractor with stop keywords and boundary cleanups
+      const extractFieldWithStops = (text, labelRegex, stopKeywords) => {
+        const match = text.match(labelRegex);
+        if (!match || !match[1]) return '';
+        let val = match[1].trim();
+        for (const kw of stopKeywords) {
+          const idx = val.search(kw);
+          if (idx !== -1) {
+            val = val.substring(0, idx).trim();
           }
         }
-        return kvMap;
+        return val.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').replace(/\s+/g, ' ').trim();
       };
-
-      const kvMap = extractGridKeyValues(allPageRows);
-      console.log('Extracted Grid KV Map:', kvMap);
 
       // 1. Booking Number / Reserva
-      let bookingNumber = getKvValue(kvMap, ['booking', 'reserva', 'reserva de praça', 'booking number', 'nº booking', 'reserva nº', 'reserva n.']);
-      if (!bookingNumber) {
-        const bookingRegexes = [
-          /(?:booking|reserva|reserva\s*n[oºª.]?|reserva\s*de\s*praça|booking\s*number|n[oºª.]\s*booking)[^a-zA-Z0-9\n\r]*([A-Z0-9-]+)/i,
-          /booking\s*number\s*[:\s\-.]*([0-9A-Z-]+)/i
-        ];
-        for (const rx of bookingRegexes) {
-          const match = fullText.match(rx);
-          if (match && match[1]) {
-            bookingNumber = match[1].trim().replace(/^[:\s\-.]+/, '');
-            break;
-          }
-        }
+      let bookingNumber = extractFieldWithStops(
+        fullText,
+        /(?:booking|reserva|reserva\s*n[oºª.]?|booking\s*number|n[oºª.]\s*booking)[.\s:]*([A-Z0-9\/-]+)/i,
+        allStopKeywords
+      );
+      if (bookingNumber) {
+        const bMatch = bookingNumber.match(/([A-Z0-9]{5,25})/i);
+        if (bMatch) bookingNumber = bMatch[1].toUpperCase();
       }
-      bookingNumber = bookingNumber.replace(/^[:\s\-.]+/, '').trim();
 
       if (bookingNumber && isBookingNumberDuplicate(bookings, bookingNumber)) {
         setPdfParseStatus('error');
@@ -405,51 +359,29 @@ export default function App() {
       }
 
       // 2. Vessel Name & Voyage / Navio / Viagem
-      let vesselName = getKvValue(kvMap, ['navio', 'vessel', 'nome do navio', 'embarcação', 'navio/viagem']);
-      let vesselVoyageNum = getKvValue(kvMap, ['viagem', 'viagem do navio', 'voyage', 'voy', 'v.']);
+      let vesselName = extractFieldWithStops(
+        fullText,
+        /(?:navio|vessel|nome\s*do\s*navio)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
 
-      if (vesselName && (vesselName.includes('/') || vesselName.includes(' V.'))) {
-        const parts = vesselName.split(/\/| V\./i);
+      let vesselVoyageNum = extractFieldWithStops(
+        fullText,
+        /(?:viagem|viagem\s*do\s*navio|voyage|voy|v\.)[.\s:]*([A-Z0-9\/-]+)/i,
+        allStopKeywords
+      );
+      if (vesselVoyageNum) {
+        const vMatch = vesselVoyageNum.match(/([A-Z0-9]{2,10})/i);
+        if (vMatch) vesselVoyageNum = vMatch[1].toUpperCase();
+      }
+
+      if (vesselName && vesselName.includes('/')) {
+        const parts = vesselName.split('/');
         vesselName = parts[0].trim();
         if (!vesselVoyageNum && parts[1]) {
-          vesselVoyageNum = parts[1].trim();
+          vesselVoyageNum = parts[1].trim().toUpperCase();
         }
       }
-
-      if (!vesselName) {
-        const vesselMatch = fullText.match(/(?:vessel|navio(?:\/viagem)?)[^a-zA-Z0-9\n\r]*([^\n\r]+)/i);
-        if (vesselMatch && vesselMatch[1]) {
-          let rawVessel = vesselMatch[1].trim();
-          const stopKeywords = [
-            /\bquantidade\b/i, /\bquant\b/i, /\bviagem\b/i, /\bvoyage\b/i, /\bv\./i, /\bvoy\b/i,
-            /\bimportador\b/i, /\bexportador\b/i, /\bdestino\b/i,
-            /\bmercadoria\b/i, /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\bpeso\b/i
-          ];
-          for (const kw of stopKeywords) {
-            const idx = rawVessel.search(kw);
-            if (idx !== -1) {
-              rawVessel = rawVessel.substring(0, idx).trim();
-            }
-          }
-          vesselName = rawVessel.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-        }
-      }
-      vesselName = vesselName.replace(/^[:\s\-.]+/, '').trim();
-
-      if (!vesselVoyageNum) {
-        const voyageRegexes = [
-          /(?:viagem(?:\s*do\s*navio)?|voyage|voy|v\.)[^a-zA-Z0-9\n\r]*([A-Z0-9/]+)/i,
-          /voy\s*[:\s\-.]*([A-Z0-9/]+)/i
-        ];
-        for (const rx of voyageRegexes) {
-          const match = fullText.match(rx);
-          if (match && match[1]) {
-            vesselVoyageNum = match[1].trim().replace(/^[:\s\-.]+/, '').toUpperCase();
-            break;
-          }
-        }
-      }
-      vesselVoyageNum = (vesselVoyageNum || '').replace(/^[:\s\-.]+/, '').trim();
 
       let vesselVoyage = '';
       if (vesselName && vesselVoyageNum) {
@@ -461,66 +393,22 @@ export default function App() {
       }
 
       // 3. Importador
-      let importadorExtracted = getKvValue(kvMap, ['importador', 'importer', 'consignatario', 'consignatário', 'consignee', 'importador / consignatario']);
-      if (!importadorExtracted) {
-        const impMatch = fullText.match(/(?:importador|importer|consignat[áa]rio|consignee)[^a-zA-Z0-9:]*([^\n\r]+)/i);
-        if (impMatch && impMatch[1]) {
-          let rawImp = impMatch[1].trim();
-          const stopKeywords = [
-            /\bhigienização\b/i, /\bhigienizacao\b/i, /\bfito\b/i, /\bfumigação\b/i, /\bfumigacao\b/i,
-            /\bdestino\b/i, /\bquantidade\b/i, /\bmercadoria\b/i
-          ];
-          for (const kw of stopKeywords) {
-            const idx = rawImp.search(kw);
-            if (idx !== -1) {
-              rawImp = rawImp.substring(0, idx).trim();
-            }
-          }
-          importadorExtracted = rawImp.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-        }
-      }
-      importadorExtracted = importadorExtracted.replace(/^[:\s\-.]+/, '').trim();
+      let importadorExtracted = extractFieldWithStops(
+        fullText,
+        /(?:importador|importer|consignat[áa]rio|consignee)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
 
       // 4. Exporter & CNPJ Exportador
-      let cnpjExtracted = getKvValue(kvMap, ['cnpj exportador', 'cnpj', 'cnpj/cpf', 'cnpj do exportador']);
-      if (!cnpjExtracted) {
-        const cnpjMatch = fullText.match(/(?:cnpj\s*exportador|cnpj)[^0-9]*(\d{2}[.\s]?\d{3}[.\s]?\d{3}\/?\d{4}[-.\s]?\d{2}|\d{14})/i);
-        if (cnpjMatch) cnpjExtracted = cnpjMatch[1];
-      }
+      let cnpjExtracted = '';
+      const cnpjMatch = fullText.match(/(?:cnpj\s*exportador|cnpj)[^0-9]*(\d{2}[.\s]?\d{3}[.\s]?\d{3}\/?\d{4}[-.\s]?\d{2}|\d{14})/i);
+      if (cnpjMatch) cnpjExtracted = cnpjMatch[1].replace(/\D/g, '');
 
-      let exporterNameExtracted = getKvValue(kvMap, ['exportador', 'exporter', 'shipper', 'empresa exportadora']);
-      if (!exporterNameExtracted) {
-        const regexExp = /(?:exportador|exporter)[^a-zA-Z0-9:]*([^\n\r]+)/gi;
-        let expMatch;
-        while ((expMatch = regexExp.exec(fullText)) !== null) {
-          const candidateRaw = expMatch[1];
-          const matchIndex = expMatch.index;
-          
-          const precedingText = fullText.substring(Math.max(0, matchIndex - 15), matchIndex).toLowerCase();
-          if (precedingText.includes('cnpj')) {
-            continue;
-          }
-          
-          let candidate = candidateRaw.trim();
-          const stopKeywords = [
-            /\bcnpj\b/i, /\blocal\b/i, /\bquant\b/i, /\breserva\b/i, /\btipo\b/i,
-            /\bimportador\b/i, /\bdestino\b/i, /\barmador\b/i, /\bagente\b/i,
-            /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\bmarca\b/i
-          ];
-          for (const kw of stopKeywords) {
-            const idx = candidate.search(kw);
-            if (idx !== -1) {
-              candidate = candidate.substring(0, idx).trim();
-            }
-          }
-          candidate = candidate.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-          if (candidate && !/^\d+$/.test(candidate) && candidate.length > 2) {
-            exporterNameExtracted = candidate;
-            break;
-          }
-        }
-      }
-      exporterNameExtracted = exporterNameExtracted.replace(/^[:\s\-.]+/, '').trim();
+      let exporterNameExtracted = extractFieldWithStops(
+        fullText,
+        /(?:exportador|exporter|shipper|empresa\s*exportadora)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
 
       let exporterId = '';
       const cleanCnpjDigits = (cnpjExtracted || '').replace(/\D/g, '');
@@ -572,13 +460,11 @@ export default function App() {
 
       // 5. Default Container Type
       let defaultContainerType = "40' HC";
-      let rawType = getKvValue(kvMap, ['tipo do cntr', 'tipo cntr', 'cntr type', 'tipo', 'container type']);
-      if (!rawType) {
-        const typeMatch = fullText.match(/(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type)[^a-zA-Z0-9:]*([^\n\r]+)/i);
-        if (typeMatch && typeMatch[1]) {
-          rawType = typeMatch[1].trim();
-        }
-      }
+      let rawType = extractFieldWithStops(
+        fullText,
+        /(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type|tipo)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
       if (rawType) {
         const typeStr = rawType.toUpperCase();
         if (typeStr.includes('20') && (typeStr.includes('DRY') || typeStr.includes('DV'))) {
@@ -595,9 +481,13 @@ export default function App() {
       }
 
       // 6. Recinto / Location of Operation
-      let rawLocation = getKvValue(kvMap, ['recinto', 'recinto alfandegado', 'local de operações', 'local de operacoes', 'local de estufagem', 'local de coleta', 'terminal', 'local']);
-      if (rawLocation) {
-        rawLocation = rawLocation.replace(/^[:\s\-.]+/, '').trim();
+      let rawLocation = extractFieldWithStops(
+        fullText,
+        /(?:recinto|recinto\s*alfandegado|local\s*de\s*operaç[õo]es|local\s*de\s*operacoes|terminal|local)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
+      if (/^(tipo|peso|container|lacre|marca|quant|totais)/i.test(rawLocation)) {
+        rawLocation = '';
       }
 
       let locationId = '';
@@ -626,10 +516,14 @@ export default function App() {
       }
 
       // 7. Commodity / Mercadoria
-      let mercadoriaExtracted = getKvValue(kvMap, ['mercadoria', 'produto', 'commodity', 'descrição da carga', 'descricao da carga']);
+      let rawMercadoria = extractFieldWithStops(
+        fullText,
+        /(?:mercadoria|produto|commodity|descriç[ãa]o\s*da\s*carga)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
       let mercadoria = 'café';
-      if (mercadoriaExtracted) {
-        const cleanMerc = mercadoriaExtracted.replace(/^[:\s\-.]+/, '').trim();
+      if (rawMercadoria) {
+        const cleanMerc = rawMercadoria.replace(/^[:\s\-.]+/, '').trim();
         const lowerMerc = cleanMerc.toLowerCase();
         if (lowerMerc.includes('pimenta')) {
           if (lowerMerc.includes('vermelha')) mercadoria = 'Pimenta Vermelha';
@@ -642,21 +536,14 @@ export default function App() {
         } else {
           mercadoria = cleanMerc;
         }
-      } else {
-        const lowercaseText = fullText.toLowerCase();
-        if (lowercaseText.includes('cravo') || lowercaseText.includes('clove')) {
-          mercadoria = 'Cravo';
-        } else if (lowercaseText.includes('pimenta')) {
-          if (lowercaseText.includes('vermelha')) mercadoria = 'Pimenta Vermelha';
-          else if (lowercaseText.includes('branca')) mercadoria = 'Pimenta Branca';
-          else mercadoria = 'Pimenta Preta';
-        } else if (lowercaseText.includes('café') || lowercaseText.includes('coffee') || lowercaseText.includes('cafe')) {
-          mercadoria = 'café';
-        }
       }
 
       // 8. Bags Quantity Total / Quantidade
-      let bagsQuantityStr = getKvValue(kvMap, ['quantidade', 'quantidade de sacas', 'quant.total em sacas', 'quant.total', 'total de sacas', 'qtd sacas', 'quant', 'volumes', 'total sacas']);
+      let bagsQuantityStr = extractFieldWithStops(
+        fullText,
+        /(?:quantidade|quant\.?\s*total|quantidade\s*de\s*sacas|total\s*de\s*sacas|qtd\s*sacas)[.\s:]*([0-9.,]+)/i,
+        allStopKeywords
+      );
       let bagsQuantity = '';
       if (bagsQuantityStr) {
         const matchNum = bagsQuantityStr.match(/([0-9.,]+)/);
@@ -688,28 +575,21 @@ export default function App() {
       }
 
       // 9. Port of Destination / Destino
-      let portoDestino = getKvValue(kvMap, ['destino', 'porto de destino', 'porto destino', 'destination', 'porto de descarga', 'pod', 'port of discharge']);
-      if (!portoDestino) {
-        const destMatch = fullText.match(/(?:destino|destination|port\s*of\s*discharge|porto\s*de\s*destino)[^a-zA-Z0-9:]*([^\n\r]+)/i);
-        if (destMatch && destMatch[1]) {
-          let rawDest = destMatch[1].trim();
-          const stopKeywords = [
-            /\bimportador\b/i, /\bhigienização\b/i, /\bquantidade\b/i, /\bmercadoria\b/i, /\barmador\b/i,
-            /\bmarca\b/i, /\bagente\b/i, /\brecinto\b/i
-          ];
-          for (const kw of stopKeywords) {
-            const idx = rawDest.search(kw);
-            if (idx !== -1) {
-              rawDest = rawDest.substring(0, idx).trim();
-            }
-          }
-          portoDestino = rawDest.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-        }
+      let portoDestino = extractFieldWithStops(
+        fullText,
+        /(?:destino|destination|porto\s*de\s*destino|porto\s*destino|port\s*of\s*discharge|pod)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
+      if (/^(n[oº°ª]|container|conteiner|tipo|peso|quant|lacres|marca|totais)/i.test(portoDestino)) {
+        portoDestino = '';
       }
-      portoDestino = portoDestino.replace(/^[:\s\-.]+/, '').trim();
 
       // 10. Carrier / Armador
-      let armador = getKvValue(kvMap, ['armador', 'carrier', 'linha', 'shipping line', 'armador / linha']);
+      let armador = extractFieldWithStops(
+        fullText,
+        /(?:armador|carrier|linha|shipping\s*line)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
       if (!armador || armador.toLowerCase().includes('fumigação') || armador.toLowerCase().includes('fumigacao')) {
         armador = '';
         const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim', 'Log-In', 'Login', 'Evergreen'];
@@ -719,29 +599,17 @@ export default function App() {
             break;
           }
         }
-        if (!armador) {
-          const carrierMatch = fullText.match(/(?:carrier|shipping\s*line|armador)[^a-zA-Z0-9:]*([^\n\r]+)/i);
-          if (carrierMatch && carrierMatch[1]) {
-            let rawCarrier = carrierMatch[1].trim();
-            const stopKeywords = [
-              /\bagente\b/i, /\brecinto\b/i, /\bquantidade\b/i, /\bmercadoria\b/i
-            ];
-            for (const kw of stopKeywords) {
-              const idx = rawCarrier.search(kw);
-              if (idx !== -1) {
-                rawCarrier = rawCarrier.substring(0, idx).trim();
-              }
-            }
-            armador = rawCarrier.replace(/^[:\s\-.]+/, '').replace(/\s+/g, ' ').trim().replace(/[:\-.\s]+$/, '').trim();
-          }
-        }
       }
-      armador = armador.replace(/^[:\s\-.]+/, '').trim();
 
       // 11. Packaging / Embalagem
-      let embalagem = getKvValue(kvMap, ['embalagem', 'tipo de embalagem', 'packaging']);
-      if (embalagem) {
-        const lowerEmb = embalagem.toLowerCase();
+      let rawEmbalagem = extractFieldWithStops(
+        fullText,
+        /(?:embalagem|tipo\s*de\s*embalagem|packaging)[.\s:]*([^\n\r]+)/i,
+        allStopKeywords
+      );
+      let embalagem = 'sacaria';
+      if (rawEmbalagem) {
+        const lowerEmb = rawEmbalagem.toLowerCase();
         if (lowerEmb.includes('big') || lowerEmb.includes('bag')) embalagem = 'Big bags';
         else if (lowerEmb.includes('bulk') || lowerEmb.includes('granel')) embalagem = 'Bulk Line';
         else if (lowerEmb.includes('caixa') || lowerEmb.includes('box')) embalagem = 'Caixa';
@@ -779,7 +647,6 @@ export default function App() {
           const subAfterContainer = line.substring(containerIdx + cMatch[0].length);
 
           let definiteSeal = '';
-          // Match seal from table column after container number (e.g. LINE FJ27075213, MLBR0727759, etc.)
           const sealArmadorMatch = subAfterContainer.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
           if (sealArmadorMatch) {
             const candidateSeal = sealArmadorMatch[1].trim();
@@ -789,8 +656,12 @@ export default function App() {
           }
 
           let tara = '';
-          const taraMatch = subAfterContainer.match(/\b([1-9]\d{3})\b/);
-          if (taraMatch) tara = taraMatch[1];
+          let textForTara = subAfterContainer;
+          if (brand) {
+            textForTara = textForTara.replace(brand, '');
+          }
+          const taraMatch = textForTara.match(/\b([1-4][.,]?\d{3})\b/);
+          if (taraMatch) tara = taraMatch[1].replace(/[.,]/g, '');
 
           lineContainers.push({
             id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -846,7 +717,6 @@ export default function App() {
           const segment = fullText.substring(startIndex, endIndex);
 
           const containerNumber = currentMatch.number;
-          const rawTokens = segment.split(/[\s|]+/).map(t => t.trim()).filter(Boolean);
 
           let definiteSeal = '';
           const sealMatch = segment.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
