@@ -1,5 +1,5 @@
 import { ChevronLeft, Download, Printer } from 'lucide-react';
-import { db, useLocais, useExportadores, useBookings } from '../db';
+import { db, useLocais, useExportadores, useBookings, getSealText } from '../db';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
   const exporters = useExportadores();
@@ -28,7 +28,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       // Build container tables HTML
       let containersHtml = '';
       (booking.containers || []).forEach((cont, idx) => {
-        let seals = (cont.provisionalSeals || []).map(s => typeof s === 'object' ? (s.sealNumber || s.seal || '') : String(s)).filter(Boolean).join(', ') || 'N/A';
+        let seals = (cont.provisionalSeals || []).map(s => getSealText(s)).filter(Boolean).join(', ') || 'N/A';
         let photosHtml = '';
         const photos = cont.photos || [];
         if (photos.length > 0) {
@@ -96,7 +96,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
             </tr>
             <tr>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">DEFINITE SEAL</td>
-              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${cont.definiteSeal || '-'}</td>
+              <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: #000;">${getSealText(cont.definiteSeal) || '-'}</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; background-color: #f0f4f8; font-weight: bold; color: #4a607a;">INSPECTION STATUS</td>
               <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold; color: ${booking.status === 'Finalizado' ? '#10b981' : '#f59e0b'};">
                 ${booking.status === 'Finalizado' ? 'FINISHED' : 'IN_PROGRESS'}
@@ -213,7 +213,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                 <tr>
                   <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold;">${cont.containerNumber}</td>
                   <td style="border: 1px solid #c2d1e0; padding: 6px 8px;">${cont.containerType || '-'}</td>
-                  <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold;">${cont.definiteSeal || '-'}</td>
+                  <td style="border: 1px solid #c2d1e0; padding: 6px 8px; font-weight: bold;">${getSealText(cont.definiteSeal) || '-'}</td>
                   <td style="border: 1px solid #c2d1e0; padding: 6px 8px; text-align: center;">
                     ${(cont.bagsQuantity !== undefined && cont.bagsQuantity !== null && cont.bagsQuantity !== '')
                       ? `${cont.bagsQuantity} Bags`
@@ -602,7 +602,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               <tr key={cont.id || cIdx}>
                                 <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{cont.containerNumber}</td>
                                 <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px' }}>{cont.containerType || '-'}</td>
-                                <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{cont.definiteSeal || '-'}</td>
+                                <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{getSealText(cont.definiteSeal) || '-'}</td>
                                 <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', textAlign: 'center' }}>
                                   {(cont.bagsQuantity !== undefined && cont.bagsQuantity !== null && cont.bagsQuantity !== '')
                                     ? `${cont.bagsQuantity} Bags`
@@ -646,14 +646,14 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>PROVISIONAL SEAL</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>
-                              {(page.container.provisionalSeals || []).map(s => typeof s === 'object' ? (s.sealNumber || s.seal || '') : String(s)).filter(Boolean).join(', ') || 'N/A'}
+                              {(page.container.provisionalSeals || []).map(s => getSealText(s)).filter(Boolean).join(', ') || 'N/A'}
                             </td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL DATE</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSealDate || booking.definiteSealDate || 'N/A'}</td>
                           </tr>
                           <tr>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>DEFINITE SEAL</td>
-                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{page.container.definiteSeal || '-'}</td>
+                            <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold' }}>{getSealText(page.container.definiteSeal) || '-'}</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9px' }}>INSPECTION STATUS</td>
                             <td style={{ border: '1px solid #c2d1e0', padding: '5px 7px', fontWeight: 'bold', color: booking.status === 'Finalizado' ? '#10b981' : '#f59e0b' }}>
                               {booking.status === 'Finalizado' ? 'FINISHED' : 'IN_PROGRESS'}

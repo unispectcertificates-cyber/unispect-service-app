@@ -357,3 +357,19 @@ export function isBookingNumberDuplicate(bookings, bookingNumber, currentBooking
     return (b.bookingNumber || '').trim().toLowerCase() === cleanNumber;
   });
 }
+
+/**
+ * Retorna com segurança a representação em texto (string) de um lacre,
+ * seja ele uma string simples, número ou um objeto (ex: { sealNumber: "..." }, { seal: "..." }, etc.).
+ * Evita o erro 'React Error #31: Objects are not valid as a React child'.
+ */
+export function getSealText(seal) {
+  if (seal === null || seal === undefined) return '';
+  if (typeof seal === 'string') return seal;
+  if (typeof seal === 'number') return String(seal);
+  if (typeof seal === 'object') {
+    return seal.sealNumber || seal.seal || seal.number || seal.value || seal.lacre || seal.id || '';
+  }
+  return String(seal);
+}
+

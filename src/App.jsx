@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate } from './db';
+import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate, getSealText } from './db';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -2236,9 +2236,9 @@ export default function App() {
                         <span>{c.containerNumber}</span>
                         <span style={{ color: 'var(--text-secondary)' }}>{c.containerType}</span>
                       </div>
-                      {c.definiteSeal && (
+                      {getSealText(c.definiteSeal) && (
                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          Lacre: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{c.definiteSeal}</span>
+                          Lacre: <span style={{ color: 'var(--text-primary)', fontWeight: '500' }}>{getSealText(c.definiteSeal)}</span>
                         </div>
                       )}
                       {c.tara && (

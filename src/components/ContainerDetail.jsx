@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Trash2, ArrowLeft, ArrowRight, CheckCircle2, RefreshCw, Plus, Camera, Image } from 'lucide-react';
-import { db } from '../db';
+import { db, getSealText } from '../db';
 
 export default function ContainerDetail({ container, user, onUpdateContainer, onDeleteContainer }) {
   const [localContainer, setLocalContainer] = useState(container);
@@ -221,7 +221,7 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
           <input 
             type="text" 
             disabled={!canEdit}
-            value={localContainer.definiteSeal || ''} 
+            value={getSealText(localContainer.definiteSeal)} 
             onChange={e => handleChange('definiteSeal', e.target.value)}
             placeholder="Nº Lacre Definitivo"
           />
@@ -343,7 +343,7 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
                 fontWeight: '600'
               }}
             >
-              <span>{typeof seal === 'object' ? (seal.sealNumber || seal.seal || String(seal)) : String(seal)}</span>
+              <span>{getSealText(seal)}</span>
               {canEdit && (
                 <button 
                   type="button" 

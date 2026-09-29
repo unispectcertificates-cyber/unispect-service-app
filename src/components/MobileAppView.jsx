@@ -4,7 +4,7 @@ import {
   CheckCircle2, Package, ClipboardList, Settings,
   ChevronRight, Loader2, User, LogOut
 } from 'lucide-react';
-import { db, useBookings, useExportadores, useLocais } from '../db';
+import { db, useBookings, useExportadores, useLocais, getSealText } from '../db';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
@@ -716,7 +716,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
               </div>
             ) : containers.map(c => {
               const hasPhotos  = (c.photos || []).length > 0;
-              const hasDefSeal = !!c.definiteSeal;
+              const sealText   = getSealText(c.definiteSeal);
+              const hasDefSeal = !!sealText;
               return (
                 <div
                   key={c.id}
@@ -739,7 +740,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#3b82f6' }}>📸 {c.photos.length} foto{c.photos.length !== 1 ? 's' : ''}</span>
                       )}
                       {hasDefSeal ? (
-                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#10b981' }}>🔒 {c.definiteSeal}</span>
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#10b981' }}>🔒 {sealText}</span>
                       ) : (
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#f59e0b' }}>⚠️ Sem lacre definitivo</span>
                       )}
@@ -898,7 +899,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
             <label style={S.label}>Lacre Definitivo</label>
             <input
               type="text"
-              value={c.definiteSeal || ''}
+              value={getSealText(c.definiteSeal)}
               onChange={e => updateContField('definiteSeal', e.target.value)}
               placeholder="Nº do Lacre Definitivo"
               style={S.input}
@@ -947,7 +948,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {(c.provisionalSeals || []).map((seal, idx) => {
-                const sealText = typeof seal === 'object' ? (seal.sealNumber || seal.seal || String(seal)) : String(seal);
+                const sealText = getSealText(seal);
                 return (
                   <div key={idx} style={{
                     display: 'flex', alignItems: 'center', gap: '6px',
