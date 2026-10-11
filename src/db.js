@@ -1,4 +1,5 @@
 import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
+import { removeFieldPhotoMetadata } from './utils/fieldService';
 import { useState, useEffect } from 'react';
 import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
@@ -262,20 +263,24 @@ export const db = {
    * getPhotosForContainer — busca todos os metadados de fotos de um container.
    * Retorna { id, url, name, storagePath } — url aponta para o Firebase Storage.
    */
-  async getPhotosForContainer(containerId) {
-    const q    = query(collection(dbFirestore, PHOTOS_COL), where('containerId', '==', containerId));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => {
+  async getPhotosForContainer(containerId, sourceIds = []) {
+    const snapshots = await Promise.all([...new Set([containerId, ...sourceIds])].map(id =>
+      getDocs(query(collection(dbFirestore, PHOTOS_COL), where('containerId', '==', id)))));
+    return [...new Map(snapshots.flatMap(snap => snap.docs).map(d => {
       const data = d.data();
       // Compatibilidade retroativa: fotos antigas podem ter dataUrl em vez de url
-      return { ...data, id: d.id, url: data.url || data.dataUrl || null };
-    });
+      return [d.id, { ...data, id: d.id, url: data.url || data.dataUrl || null }];
+    })).values()];
   },
 
   /**
    * deletePhoto — apaga a foto do Firestore E do Firebase Storage.
    */
   async deletePhoto(photoId, storagePath = null) {
+    // Remove the source reference too, so a later field upload cannot restore a deleted photo.
+    const registeredPath = await removeFieldPhotoMetadata(photoId);
+    storagePath = storagePath || registeredPath;
+
     // 1. Apaga do Firestore
     try {
       // Busca o storagePath se não foi fornecido

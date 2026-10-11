@@ -1,0 +1,69 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Teste local de armazenamento de campo</title><body><pre id="result">Testando...</pre>
+<script type="module">
+import { fieldQueue } from '../src/utils/fieldQueue.js';
+const results = [];
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const run = async (name, fn) => { await fn(); results.push({ name, passed: true }); };
+const input = number => ({ containerNumber: number, tara: '3800', sealType: 'definitive', sealNumber: 'SEAL' });
+const actor = { id: 'test', name: 'Teste local' };
+const image = size => new File([new Uint8Array(size)], 'photo.jpg', { type: 'image/jpeg' });
+window.fieldTestPromise = (async () => {
+  const phase = new URL(location.href).searchParams.get('phase');
+  if (phase === 'read') {
+    const drafts = await fieldQueue.listDrafts(), jobs = await fieldQueue.listOperations();
+    assert(drafts.length === 2 && jobs.length === 3, 'Armazenamento não persistiu entre páginas');
+    return { results: [{ name: 'Dados e fotos persistem depois de recarregar e reabrir', passed: true }], drafts: drafts.length, jobs: jobs.length };
+  }
+  await new Promise((resolve, reject) => { const request = indexedDB.deleteDatabase('unispect-field-captures-v1'); request.onsuccess = resolve; request.onerror = () => reject(request.error); });
+  let first, elapsed;
+  await run('Gravação local de 20 fotos de 1 MB', async () => {
+    const start = performance.now();
+    first = await fieldQueue.save(input('ABCU0000001'), Array.from({ length: 20 }, () => image(1024 * 1024)), actor);
+    elapsed = performance.now() - start;
+    assert((await fieldQueue.listDrafts()).length === 1, 'Cadastro não foi salvo');
+    const job = (await fieldQueue.listOperations())[0];
+    assert(job.photoIds.length === 20, 'Fotos ausentes da fila');
+    assert((await fieldQueue.getPhoto(job.photoIds[0])).blob.size === 1024 * 1024, 'Blob da foto não persistiu');
+  });
+  await run('Mesmo número com hífens acrescenta fotos ao mesmo cadastro', async () => {
+    const next = await fieldQueue.save(input('abcu-000000-1'), [image(30), image(30)], actor);
+    assert(next.sourceContainerId === first.sourceContainerId, 'Identidade foi duplicada');
+    assert(next.photos.length === 22 && (await fieldQueue.listDrafts()).length === 1, 'Fotos foram substituídas');
+  });
+  await run('Confirmação de uma operação preserva fotos de outra ainda pendente', async () => {
+    const jobs = await fieldQueue.listOperations(); const job = jobs.find(item => item.photoIds.length === 20);
+    const photos = job.photoIds.map(id => ({ id, url: `https://example.test/${id}`, name: '', storagePath: `test/${id}` }));
+    await fieldQueue.acknowledge(job, { photos, sourceContainerId: first.sourceContainerId, status: 'pending', bookingId: '', linkedContainerId: '' });
+    const draft = (await fieldQueue.listDrafts())[0];
+    assert(draft.pendingOperationIds.length === 1 && draft.photos.length === 22, 'Outra operação foi apagada');
+    assert(await fieldQueue.getPhoto(job.photoIds[0]) === undefined, 'Blob enviado não foi liberado');
+    assert((await fieldQueue.listOperations()).length === 1, 'Operação pendente foi apagada');
+  });
+  await run('Duas gravações concorrentes mantêm um único registro local', async () => {
+    await Promise.all([fieldQueue.save(input('ABCU0000002'), [image(30)], actor), fieldQueue.save(input('abcu 0000002'), [image(30)], actor)]);
+    const drafts = await fieldQueue.listDrafts();
+    assert(drafts.length === 2, 'Registros locais duplicados');
+    assert(drafts.find(item => item.number === 'ABCU0000002').photos.length === 2, 'Fotos de uma gravação se perderam');
+  });
+  await run('Abortar a transação não salva parcialmente nem retorna sucesso', async () => {
+    const oldPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function(value, ...args) {
+      const request = oldPut.call(this, value, ...args);
+      if (this.name === 'photos' && value.number === 'ABCU0000003') this.transaction.abort();
+      return request;
+    };
+    let rejected = false;
+    try { await fieldQueue.save(input('ABCU0000003'), [image(30)], actor); } catch { rejected = true; }
+    finally { IDBObjectStore.prototype.put = oldPut; }
+    assert(rejected, 'Gravação abortada retornou sucesso');
+    assert(!(await fieldQueue.listDrafts()).some(item => item.number === 'ABCU0000003'), 'Cadastro parcial permaneceu');
+    assert(!(await fieldQueue.listOperations()).some(item => item.number === 'ABCU0000003'), 'Fila parcial permaneceu');
+  });
+  await run('Erro de envio mantém a fila para retentativa', async () => {
+    const job = (await fieldQueue.listOperations())[0]; await fieldQueue.fail(job.id, new Error('Sem sinal'));
+    const stored = (await fieldQueue.listOperations()).find(item => item.id === job.id);
+    assert(stored.attempts === 1 && stored.error === 'Sem sinal', 'Erro não foi guardado');
+  });
+  return { results, save20PhotosMilliseconds: Math.round(elapsed) };
+})().then(result => { document.getElementById('result').textContent = JSON.stringify(result, null, 2); return result; });
+</script></body></html>

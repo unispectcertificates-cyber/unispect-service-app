@@ -5,6 +5,9 @@ import {
   ChevronRight, Loader2, User, LogOut, RefreshCw
 } from 'lucide-react';
 import { db, useBookings, useExportadores, useLocais, getSealText, matchesBooking, getMatchedContainers } from '../db';
+import FieldCapturePanel from './FieldCapturePanel';
+import FieldCaptureNotice from './FieldCaptureNotice';
+import { startFieldSynchronization } from '../utils/fieldService';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
@@ -297,6 +300,10 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing }) {
 // Componente Principal
 // ────────────────────────────────────────────────────────────────────────────
 export default function MobileAppView({ user, onLogout, hideHeader = false, onRefresh, isRefreshing: parentRefreshing = false }) {
+  useEffect(() => {
+    const role = String(user?.role || '').trim().toUpperCase();
+    if (role === 'ADM' || role === 'INSPECTOR') return startFieldSynchronization();
+  }, [user?.role]);
   const bookings     = useBookings();
   const exportadores = useExportadores();
   const locais       = useLocais();
@@ -473,7 +480,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
     // Carrega fotos da coleção containerPhotos e popula diretamente no container
     try {
-      const photos = await db.getPhotosForContainer(c.id);
+      const photos = await db.getPhotosForContainer(c.id, c.fieldPhotoSourceIds || []);
       if (!isMountedRef.current) return;
 
       // Merge: URLs do Storage são priorizadas; mantém ordem das refs no booking
@@ -611,6 +618,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   // ─────────────────────────────────────────────────────────────────────────
   const renderList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <FieldCapturePanel user={user} bookings={bookings} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>
           📋 Bookings
@@ -863,6 +871,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         </div>
 
         {/* Card do Container */}
+        <FieldCaptureNotice container={c} />
         <div style={{
           ...S.card,
           background: 'linear-gradient(135deg, var(--color-brand) 0%, #0ea5e9 100%)',

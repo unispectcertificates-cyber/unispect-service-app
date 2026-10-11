@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Armazenamento de fotos de containers:
+    // Padrão: containers/{containerId}/{photoId}.jpg
+    // Também utilizado pelas fotos do Modo Campo: containers/{sourceContainerId}/{photoId}.jpg
+    match /containers/{containerId}/{photoFile} {
+      allow read: if true; // Leitura permitida para exibição de laudos e visualização de fotos
+      allow write: if isAuthenticated()
+                   && request.resource.size < 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if isAuthenticated();
+    }
+  }
+}

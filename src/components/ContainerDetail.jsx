@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Trash2, ArrowLeft, ArrowRight, CheckCircle2, RefreshCw, Plus, Camera, Image } from 'lucide-react';
 import { db, getSealText } from '../db';
+import FieldCaptureNotice from './FieldCaptureNotice';
 
 export default function ContainerDetail({ container, user, onUpdateContainer, onDeleteContainer }) {
   const [localContainer, setLocalContainer] = useState(container);
@@ -21,7 +22,7 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
     let cancelled = false;
     async function loadPhotoUrls() {
       try {
-        const photos = await db.getPhotosForContainer(container.id);
+        const photos = await db.getPhotosForContainer(container.id, container.fieldPhotoSourceIds || []);
         if (cancelled) return;
         if (!photos.length) return;
 
@@ -163,6 +164,8 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
   };
 
   return (
+    <>
+    <FieldCaptureNotice container={localContainer} />
     <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border-color)' }}>
       
       {/* Cabeçalho do Container */}
@@ -582,5 +585,6 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
       )}
 
     </div>
+    </>
   );
 }

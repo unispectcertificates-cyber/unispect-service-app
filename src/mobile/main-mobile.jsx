@@ -4,6 +4,25 @@ import '../index.css';
 import MobileAppView from '../components/MobileAppView';
 import Login from '../components/Login';
 import { db } from '../db';
+import { registerSW } from 'virtual:pwa-register';
+
+registerSW({ 
+  immediate: true,
+  onNeedRefresh() {
+    window.location.reload();
+  }
+});
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (let registration of registrations) {
+      registration.update();
+    }
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+}
 
 // Inicializar banco
 db.init().catch(err => console.error('DB init error:', err));

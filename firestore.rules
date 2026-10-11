@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Funções auxiliares de autenticação e validação
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Coleções existentes do UNISPECT
+    match /usuarios/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /locais/{localId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /exportadores/{exporterId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /inspectors/{inspectorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    match /bookingImports/{importId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /bookingNumberKeys/{key} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /bookingCounters/{counter} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /containerPhotos/{photoId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // NOVAS COLEÇÕES DO MODO CAMPO (Sem Booking)
+    // ─────────────────────────────────────────────────────────────
+
+    // Cadastro único pendente de container conferido no campo
+    match /fieldContainers/{normalizedNumber} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // Histórico e idempotência de envio das operações de campo
+    match /fieldOperations/{operationId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+  }
+}

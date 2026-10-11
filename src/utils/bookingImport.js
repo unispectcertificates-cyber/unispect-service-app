@@ -1,6 +1,8 @@
+import { normalizeContainerNumber } from './containerIdentity.js';
+import { attachPendingFields } from './fieldContainers.js';
+export { normalizeContainerNumber } from './containerIdentity.js';
 // Shared by preview and persistence. Search normalization is intentionally separate.
 export const normalizeBookingNumber = value => String(value ?? '').trim().toUpperCase().replace(/[\s./-]/g, '');
-export const normalizeContainerNumber = value => String(value ?? '').trim().toUpperCase().replace(/[\s-]/g, '');
 export const importFieldLabels = { containerType: 'tipo', definiteSeal: 'lacre definitivo', bagsQuantity: 'quantidade de sacas',
   netWeight: 'peso líquido', tara: 'tara', grossWeight: 'peso bruto', brand: 'marca' };
 
@@ -183,6 +185,11 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         if (expectedPreview !== previewToken(current, plan)) throw new Error('A prévia mudou. Confira os dados atualizados e confirme novamente.');
         if (current && !(incoming.containers || []).length) throw new Error('Selecione um romaneio com containers para atualizar este Booking.');
         const counter = !current && !incoming.certificateNumber ? await read(tx, certificateRef()) : null;
+        const fieldRecords = new Map();
+        for (const number of new Set((incoming.containers || []).map(c => normalizeContainerNumber(c.containerNumber)))) {
+          const field = await read(tx, reference('fieldContainers', number));
+          if (field) fieldRecords.set(number, field);
+        }
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
         let booking;
         let fieldUpdates = {};
@@ -208,29 +215,38 @@ export function createBookingRepository({ listBookings, reference, newId, transa
             ],
             _revision: (current._revision || 0) + (hasContainerChanges || hasFieldChanges ? 1 : 0)
           };
-          if (hasContainerChanges || hasFieldChanges) {
-            tx.update(bookingRef, {
-              ...fieldUpdates,
-              containers: booking.containers,
-              _revision: booking._revision
-            });
-          }
         } else {
           if (!incoming.exporterId || !incoming.locationId) throw new Error('Selecione o exportador e o recinto.');
           booking = { ...incoming, id: bookingId, bookingNumber: String(incoming.bookingNumber).trim().toUpperCase(),
             containers: plan.added.map(c => ({ ...c, id: newId('container') })), _revision: 1,
             certificateNumber: incoming.certificateNumber || `UN${next}/${year}` };
-          tx.set(bookingRef, booking);
           if (!incoming.certificateNumber) tx.set(certificateRef(), { year, value: next });
           for (const record of relatedRecords) tx.set(reference(record.collection, record.data.id), record.data);
+        }
+
+        const attached = attachPendingFields(booking, fieldRecords, new Set((current?.containers || []).map(c => c.id)));
+        booking = attached.booking;
+        if (current) {
+          if (attached.linked.length && booking._revision === (current._revision || 0)) booking._revision++;
+          if (booking._revision !== (current._revision || 0)) {
+            tx.update(bookingRef, { ...fieldUpdates, containers: booking.containers, _revision: booking._revision });
+          }
+        } else {
+          tx.set(bookingRef, booking);
+        }
+        for (const field of attached.linked) {
+          tx.update(reference('fieldContainers', field.id), {
+            status: 'linked', bookingId, linkedContainerId: field.linkedContainerId, linkedAt: timestamp
+          });
         }
         tx.set(keyRef(key), { bookingId, normalizedNumber: key });
         tx.set(reference('bookingImports', operationId), { id: operationId, bookingId, bookingNumber: booking.bookingNumber,
           createdAt: timestamp, actor: actor ? { id: actor.id || '', name: actor.name || '' } : null, sourceName,
           added: plan.added.map(c => c.containerNumber), addedIds: booking.containers.slice(current?.containers?.length || 0).map(c => c.id),
           existing: plan.preserved.map(c => normalizeContainerNumber(c.containerNumber)), repeated: plan.repeated,
-          conflicts: plan.conflicts, updatedFields: Object.keys(fieldUpdates), before: current?.containers?.length || 0, after: booking.containers.length });
-        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, updatedFields: Object.keys(fieldUpdates), operationId };
+          conflicts: plan.conflicts, fieldLinked: attached.linked.map(f => ({ number: f.id, sourceContainerId: f.sourceContainerId, containerId: f.linkedContainerId })),
+          updatedFields: Object.keys(fieldUpdates), before: current?.containers?.length || 0, after: booking.containers.length });
+        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, fieldLinkedCount: attached.linked.length, updatedFields: Object.keys(fieldUpdates), operationId };
       });
     },
 

@@ -25,3 +25,5 @@ dist-ssr
 scratch/
 *.zip
 incremental_extracted/
+extracted_modo_campo/
+field-ui-test-build/

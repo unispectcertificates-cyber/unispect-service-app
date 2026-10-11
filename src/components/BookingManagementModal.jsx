@@ -200,6 +200,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       if (onDataChange) onDataChange();
       setShowIncrementalImportModal(false);
       let feedback = `✅ Romaneio atualizado com sucesso!`;
+      if (result.fieldLinkedCount) feedback += ` ${result.fieldLinkedCount} registro(s) de campo vinculado(s) com fotos e dados.`;
       if (result.addedCount > 0) feedback += ` ${result.addedCount} novos containers inseridos (Total: ${result.booking.containers?.length || 0}).`;
       if (detectedChanges.length > 0) feedback += ` Dados atualizados: ${detectedChanges.map(c => c.label).join(', ')}.`;
       setModalFeedback(feedback);
@@ -294,7 +295,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const openPhotoManager = async (cont) => {
     setLoadingPhotosId(cont.id);
     try {
-      const storedPhotos = await db.getPhotosForContainer(cont.id);
+      const storedPhotos = await db.getPhotosForContainer(cont.id, cont.fieldPhotoSourceIds || []);
       const photoMap = {};
       storedPhotos.forEach(p => { photoMap[p.id] = p; });
 

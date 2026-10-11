@@ -229,7 +229,7 @@ export default function App() {
       setShowCreateModal(false);
       handleRefreshData();
       setSelectedBookingId(result.booking.id);
-      setRefreshFeedback(`${result.addedCount} container(s) novo(s) inserido(s). ${result.preservedCount} já existente(s) preservado(s).`);
+      setRefreshFeedback(`${result.addedCount} container(s) novo(s) inserido(s). ${result.preservedCount} já existente(s) preservado(s). ${result.fieldLinkedCount || 0} registro(s) de campo vinculado(s).`);
       setTimeout(() => setRefreshFeedback(''), 6000);
     } catch (err) {
       alert(err.message || 'Erro ao importar o romaneio. Nenhuma alteração foi confirmada.');
