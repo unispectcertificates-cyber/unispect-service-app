@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Image, X, Save, RefreshCw, PackagePlus } from 'lucide-react';
+import { Camera, Image, X, Save, RefreshCw, PackagePlus, Trash2, AlertTriangle } from 'lucide-react';
 import { fieldQueue } from '../utils/fieldQueue';
-import { fieldSyncState, subscribePendingFieldContainers, syncFieldNow } from '../utils/fieldService';
+import { fieldSyncState, subscribePendingFieldContainers, syncFieldNow, deleteFieldContainer } from '../utils/fieldService';
 import { findFieldTarget, mergePhotos, validateFieldCapture } from '../utils/fieldContainers';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
 
@@ -53,12 +53,80 @@ export default function FieldCapturePanel({ user, bookings }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [showPending, setShowPending] = useState(false);
+  const [deleteConfirmRecord, setDeleteConfirmRecord] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
   const urls = useRef(new Set());
   const savingRef = useRef(false);
   const camera = useRef(null);
   const gallery = useRef(null);
   const userRole = String(user?.role || '').trim().toUpperCase();
   const canCapture = userRole === 'ADM' || userRole === 'INSPECTOR';
+
+  const canDeleteRecord = (record) => {
+    if (userRole === 'ADM') return true;
+    const actor = record?.remote?.container?.fieldCapture?.actor || record?.draft?.actor || record?.actor;
+    if (!actor) return false;
+    const currentId = String(user?.id || '');
+    const currentName = String(user?.name || user?.username || '').trim().toLowerCase();
+    const currentLogin = String(user?.login || '').trim().toLowerCase();
+    return Boolean(
+      (currentId && actor.id && String(actor.id) === currentId) ||
+      (currentName && actor.name && String(actor.name).trim().toLowerCase() === currentName) ||
+      (currentLogin && actor.login && String(actor.login).trim().toLowerCase() === currentLogin)
+    );
+  };
+
+  const handleRequestDelete = (record, e) => {
+    if (e) e.stopPropagation();
+    if (!canDeleteRecord(record)) {
+      alert('Permissão negada. Apenas o inspetor que cadastrou ou um administrador pode excluir este container.');
+      return;
+    }
+    setDeleteModalError('');
+    setDeleteConfirmRecord(record);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmRecord) return;
+    setIsDeleting(true);
+    setDeleteModalError('');
+    const targetNumber = deleteConfirmRecord.number;
+    const sourceContainerId = deleteConfirmRecord.sourceContainerId || deleteConfirmRecord.remote?.sourceContainerId || deleteConfirmRecord.draft?.sourceContainerId;
+    const isOnline = navigator.onLine;
+
+    try {
+      if (!isOnline) {
+        if (deleteConfirmRecord.remote || deleteConfirmRecord.draft?.remoteStatus === 'pending') {
+          await fieldQueue.enqueueDeletion(targetNumber, sourceContainerId, user);
+          setMessage(`Exclusão de ${targetNumber} salva no aparelho. Sincronizará quando o sinal voltar.`);
+        } else {
+          await fieldQueue.deleteLocal(targetNumber);
+          setMessage(`Container ${targetNumber} e fotos locais removidos do aparelho.`);
+        }
+      } else {
+        if (deleteConfirmRecord.remote || deleteConfirmRecord.draft?.remoteStatus === 'pending') {
+          await deleteFieldContainer(targetNumber, user);
+          setMessage(`Container ${targetNumber} e suas fotos foram excluídos com sucesso.`);
+        } else {
+          await fieldQueue.deleteLocal(targetNumber);
+          setMessage(`Container ${targetNumber} e fotos locais removidos com sucesso.`);
+        }
+      }
+
+      setDeleteConfirmRecord(null);
+      if (open && number === targetNumber) {
+        releasePhotos();
+        setOpen(false);
+      }
+      setTimeout(() => setMessage(''), 6000);
+    } catch (err) {
+      console.error('Erro ao excluir container:', err);
+      setDeleteModalError(err.message || 'Erro ao excluir o container.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     const resize = () => setIsDevice(checkIsDevice());
@@ -162,9 +230,42 @@ export default function FieldCapturePanel({ user, bookings }) {
       <button type="button" className="btn btn-secondary" onClick={() => setShowPending(!showPending)}>Containers sem Booking / envios pendentes ({records.length})</button>
       {operations.length > 0 && <button type="button" className="btn btn-secondary" onClick={syncFieldNow}><RefreshCw size={16} /> Tentar enviar agora</button>}
     </div>
-    {showPending && records.map(record => <button key={record.number} data-container-number={record.number} type="button" className="btn btn-secondary" style={{ justifyContent: 'space-between', minHeight: '48px' }} onClick={openPendingRecord}>
-      <strong>{record.number}</strong><span>{record.draft?.pendingOperationIds.length ? 'Aguardando envio' : 'Enviado · aguardando Booking'}</span>
-    </button>)}
+    {showPending && records.map(record => {
+      const isDeletingPending = record.draft?.pendingDeletion;
+      const canDel = canDeleteRecord(record);
+      return (
+        <div key={record.number} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <button
+            data-container-number={record.number}
+            type="button"
+            className="btn btn-secondary"
+            style={{ flex: 1, justifyContent: 'space-between', minHeight: '48px' }}
+            onClick={openPendingRecord}
+            disabled={isDeletingPending}
+          >
+            <strong>{record.number}</strong>
+            <span style={{ fontSize: '12px', color: isDeletingPending ? '#ef4444' : undefined, fontWeight: isDeletingPending ? '700' : undefined }}>
+              {isDeletingPending
+                ? 'Exclusão pendente de sincronização'
+                : record.draft?.pendingOperationIds?.length
+                ? 'Aguardando envio'
+                : 'Enviado · aguardando Booking'}
+            </span>
+          </button>
+          {!isDeletingPending && canDel && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              style={{ minHeight: '48px', padding: '0 12px' }}
+              onClick={e => handleRequestDelete(record, e)}
+              title="Excluir container sem Booking"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+      );
+    })}
     {open && <div role="dialog" aria-modal="true" aria-labelledby="field-capture-title" style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'var(--bg-primary)', overflowY: 'auto', padding: 'max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom))' }}>
       <form onSubmit={save} style={{ maxWidth: '700px', margin: '0 auto', display: 'grid', gap: '16px' }}>
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><h2 id="field-capture-title" style={{ fontSize: '20px' }}>Container sem Booking</h2><button type="button" aria-label="Voltar para a tela principal" disabled={saving} onClick={close} className="btn btn-secondary"><X /></button></header>
@@ -188,8 +289,60 @@ export default function FieldCapturePanel({ user, bookings }) {
           {error && <p role="alert" style={{ color: '#dc2626' }}>{error}</p>}
           <button type="submit" className="btn btn-primary" style={{ ...buttonStyle, width: '100%', fontSize: '17px', background: '#059669' }} disabled={saving || !context || !newPhotos.length}><Save /> {saving ? 'Salvando no aparelho…' : `Salvar${newPhotos.length ? ` (${newPhotos.length} foto${newPhotos.length > 1 ? 's' : ''})` : ''}`}</button>
           <p style={{ fontSize: '12px' }}>Ao salvar, você volta à tela principal. As fotos são enviadas automaticamente em segundo plano.</p>
+
+          {context?.exists && !context.booking && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              style={{ ...buttonStyle, width: '100%', fontSize: '15px', marginTop: '10px' }}
+              disabled={saving}
+              onClick={() => {
+                const matchedRec = records.find(r => r.number === number) || {
+                  number,
+                  sourceContainerId: context.sourceContainerId,
+                  remote: remoteRecords.find(r => r.id === number),
+                  draft: drafts.find(d => d.number === number)
+                };
+                handleRequestDelete(matchedRec);
+              }}
+            >
+              <Trash2 size={18} /> Excluir container sem Booking
+            </button>
+          )}
         </fieldset>
       </form>
     </div>}
+
+    {deleteConfirmRecord && (
+      <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 6000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+        <div className="glass-panel" style={{ maxWidth: '440px', width: '100%', padding: '20px', backgroundColor: 'var(--bg-primary)', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'grid', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>Excluir container sem Booking?</h3>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Confirmação de remoção</span>
+            </div>
+          </div>
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '8px', fontSize: '13px', display: 'grid', gap: '4px' }}>
+            <div>Container: <strong style={{ color: 'var(--color-brand)' }}>{deleteConfirmRecord.number}</strong></div>
+            <div>Fotos: <strong>{(deleteConfirmRecord.remote?.container?.photos || deleteConfirmRecord.draft?.photos || []).length} foto(s)</strong></div>
+          </div>
+          <p style={{ margin: 0, fontSize: '12px', color: '#ef4444' }}>
+            Atenção: Todos os dados desta conferência e as fotografias serão removidos em definitivo.
+          </p>
+          {deleteModalError && (
+            <p role="alert" style={{ margin: 0, fontSize: '12px', color: '#ef4444' }}>{deleteModalError}</p>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+            <button type="button" className="btn btn-secondary" disabled={isDeleting} onClick={() => setDeleteConfirmRecord(null)}>Cancelar</button>
+            <button type="button" className="btn btn-danger" disabled={isDeleting} onClick={handleConfirmDelete} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {isDeleting ? <><RefreshCw size={14} className="rotating" /> Excluindo…</> : <><Trash2 size={14} /> Confirmar Exclusão</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </section>;
 }

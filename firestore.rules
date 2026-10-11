@@ -68,5 +68,12 @@ service cloud.firestore {
       allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
+
+    // Histórico de exclusões e tombstones anti-ressurreição
+    match /fieldContainerDeletions/{deletionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
   }
 }

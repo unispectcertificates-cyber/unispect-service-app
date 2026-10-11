@@ -97,18 +97,83 @@ export const fieldQueue = {
     }));
     emitChange();
   },
+  async deleteLocal(containerNumber) {
+    await localTransaction(STORES, 'readwrite', tx => requestValue(tx, 'drafts', containerNumber, draft => {
+      if (draft) {
+        tx.objectStore('drafts').delete(containerNumber);
+        for (const p of draft.photos || []) tx.objectStore('photos').delete(p.id);
+      }
+      const outboxStore = tx.objectStore('outbox');
+      const req = outboxStore.getAll();
+      req.onsuccess = () => {
+        for (const op of req.result || []) {
+          if (op.number === containerNumber) {
+            outboxStore.delete(op.id);
+            for (const pid of op.photoIds || []) tx.objectStore('photos').delete(pid);
+          }
+        }
+      };
+    }));
+    emitChange();
+  },
+  async enqueueDeletion(containerNumber, sourceContainerId, actor) {
+    const timestamp = Date.now();
+    const opId = uid('delete');
+    await localTransaction(STORES, 'readwrite', tx => requestValue(tx, 'drafts', containerNumber, draft => {
+      const outboxStore = tx.objectStore('outbox');
+      const req = outboxStore.getAll();
+      req.onsuccess = () => {
+        for (const op of req.result || []) {
+          if (op.number === containerNumber && op.type !== 'delete') {
+            outboxStore.delete(op.id);
+          }
+        }
+      };
+      if (draft) {
+        tx.objectStore('drafts').put({
+          ...draft,
+          pendingDeletion: true,
+          remoteStatus: 'deleting',
+          updatedAt: timestamp
+        });
+      }
+      outboxStore.put({
+        id: opId,
+        type: 'delete',
+        number: containerNumber,
+        sourceContainerId: sourceContainerId || draft?.sourceContainerId || '',
+        actor,
+        createdAt: timestamp,
+        photoIds: [],
+        attempts: 0,
+        error: ''
+      });
+    }));
+    emitChange();
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('unispect-field-enqueued'));
+  },
+  async acknowledgeDeletion(operation) {
+    await localTransaction(STORES, 'readwrite', tx => requestValue(tx, 'drafts', operation.number, draft => {
+      tx.objectStore('drafts').delete(operation.number);
+      tx.objectStore('outbox').delete(operation.id);
+      if (draft) {
+        for (const p of draft.photos || []) tx.objectStore('photos').delete(p.id);
+      }
+    }));
+    emitChange();
+  },
   async acknowledge(operation, result) {
     await localTransaction(STORES, 'readwrite', tx => requestValue(tx, 'drafts', operation.number, draft => {
       if (draft) {
-        const remotePhotos = new Map(result.photos.map(p => [p.id, p]));
+        const remotePhotos = new Map((result.photos || []).map(p => [p.id, p]));
         const updated = { ...draft, sourceContainerId: result.sourceContainerId, remoteStatus: result.status,
           bookingId: result.bookingId, linkedContainerId: result.linkedContainerId,
-          pendingOperationIds: draft.pendingOperationIds.filter(id => id !== operation.id),
-          photos: draft.photos.map(p => remotePhotos.has(p.id) ? { ...remotePhotos.get(p.id), local: false } : p) };
+          pendingOperationIds: (draft.pendingOperationIds || []).filter(id => id !== operation.id),
+          photos: (draft.photos || []).map(p => remotePhotos.has(p.id) ? { ...remotePhotos.get(p.id), local: false } : p) };
         tx.objectStore('drafts').put(updated);
       }
       tx.objectStore('outbox').delete(operation.id);
-      for (const id of operation.photoIds) tx.objectStore('photos').delete(id);
+      for (const id of operation.photoIds || []) tx.objectStore('photos').delete(id);
     }));
     emitChange();
   }
@@ -126,6 +191,15 @@ export function createFieldSync({ queue, remote, upload, isOnline = () => true, 
       for (const operation of operations) {
         if (!isOnline()) break;
         onState({ syncing: true, number: operation.number });
+        if (operation.type === 'delete') {
+          try {
+            await remote.deleteFieldContainer(operation.number, operation.actor);
+            await queue.acknowledgeDeletion(operation);
+          } catch (error) {
+            await queue.fail(operation.id, formatError(error));
+          }
+          continue;
+        }
         try {
           const prepared = await remote.prepare(operation);
           if (prepared.completed) { await queue.acknowledge(operation, prepared.result); continue; }

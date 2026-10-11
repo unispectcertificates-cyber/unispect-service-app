@@ -12,6 +12,7 @@ import ReportView from './components/ReportView';
 import MobileAppView from './components/MobileAppView';
 import Login from './components/Login';
 import UsersList from './components/UsersList';
+import FieldContainersView from './components/FieldContainersView';
 
 export default function App() {
   const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth <= 1024);
@@ -1285,6 +1286,12 @@ export default function App() {
               {currentTab === 'inspectors' && (
                 <motion.div key="tab-inspectors" {...pageTransition}>
                   <InspectorsList onDataChange={handleRefreshData} />
+                </motion.div>
+              )}
+
+              {currentTab === 'containers-sem-booking' && (
+                <motion.div key="tab-containers-sem-booking" {...pageTransition}>
+                  <FieldContainersView user={user} />
                 </motion.div>
               )}
 

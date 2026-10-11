@@ -1,12 +1,23 @@
-import { useState } from 'react';
-import { LayoutDashboard, ClipboardList, Users, MapPin, Trash2, ShieldAlert, Moon, Sun, UserCheck, Camera } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { LayoutDashboard, ClipboardList, Users, MapPin, Trash2, ShieldAlert, Moon, Sun, UserCheck, Camera, PackagePlus } from 'lucide-react';
+import { subscribePendingFieldContainers } from '../utils/fieldService';
 
 export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange, isDark, toggleDarkMode }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pendingFieldCount, setPendingFieldCount] = useState(0);
+
+  useEffect(() => {
+    const unsub = subscribePendingFieldContainers(
+      records => setPendingFieldCount(records.length),
+      () => setPendingFieldCount(0)
+    );
+    return () => unsub();
+  }, []);
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADM', 'Inspector'] },
     { id: 'bookings', label: 'Gerenciar Bookings', icon: ClipboardList, roles: ['ADM', 'Inspector'] },
+    { id: 'containers-sem-booking', label: 'Containers sem Booking', icon: PackagePlus, roles: ['ADM', 'Inspector'] },
     { id: 'field-portal', label: 'Modo Campo (Mobile App)', icon: Camera, roles: ['ADM', 'Inspector'] },
     { id: 'exportadores', label: 'Exportadores', icon: Users, roles: ['ADM'] },
     { id: 'locais', label: 'Locais da Operação', icon: MapPin, roles: ['ADM'] },
@@ -146,7 +157,20 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange,
                     }}
                   >
                     <Icon size={18} style={{ color: isActive ? 'var(--color-brand)' : 'var(--text-muted)' }} />
-                    {item.label}
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {item.id === 'containers-sem-booking' && pendingFieldCount > 0 && (
+                      <span style={{
+                        backgroundColor: isActive ? 'var(--color-brand)' : '#10b981',
+                        color: '#fff',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        padding: '2px 7px',
+                        borderRadius: 'var(--radius-full)',
+                        marginLeft: 'auto'
+                      }}>
+                        {pendingFieldCount}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

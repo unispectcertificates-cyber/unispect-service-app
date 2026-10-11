@@ -213,3 +213,133 @@ test('acknowledgement lost after cloud commit is recovered without a second uplo
   const runner = createFieldSync({ queue, remote: { prepare: async () => ({ completed: true, result: { photos: [photo('p1')] } }) }, upload: () => { uploads++; } });
   await runner.run(); assert.equal(uploads, 0); assert.equal(queue.jobs.size, 0);
 });
+
+test('exclusão de container sem Booking permitida para criador e ADM, bloqueada para outro inspetor', async () => {
+  const h = harness();
+  const creator = { id: 'insp_1', name: 'Carlos', role: 'Inspector' };
+  const otherInspector = { id: 'insp_2', name: 'Marcos', role: 'Inspector' };
+  const adm = { id: 'adm_1', name: 'Admin', role: 'ADM' };
+
+  await h.field.prepare({ ...operation('op1'), actor: creator });
+  await h.field.complete({ ...operation('op1'), actor: creator }, [photo('p1'), photo('p2')]);
+  assert.ok(h.data.has(`fieldContainers/${number}`));
+  assert.ok(h.data.has('containerPhotos/p1'));
+  assert.ok(h.data.has('containerPhotos/p2'));
+
+  // Outro inspetor tenta excluir -> deve falhar
+  await assert.rejects(
+    () => h.field.deleteFieldContainer(number, otherInspector),
+    /Permissão negada/
+  );
+  assert.ok(h.data.has(`fieldContainers/${number}`));
+
+  // Criador exclui com sucesso
+  const delRes = await h.field.deleteFieldContainer(number, creator);
+  assert.equal(delRes.success, true);
+  assert.equal(delRes.photosToDelete.length, 2);
+  assert.equal(h.data.has(`fieldContainers/${number}`), false);
+  assert.equal(h.data.has('containerPhotos/p1'), false);
+  assert.equal(h.data.has('containerPhotos/p2'), false);
+
+  // Histórico de exclusão registrado com autor e data
+  const delRecord = h.data.get('fieldContainerDeletions/field-identity');
+  assert.ok(delRecord);
+  assert.equal(delRecord.containerNumber, number);
+  assert.equal(delRecord.deletedBy.name, 'Carlos');
+  assert.equal(delRecord.photoCount, 2);
+
+  // Recadastro e exclusão por ADM
+  await h.field.prepare({ ...operation('op2'), sourceContainerId: 'field-identity-2', actor: creator });
+  await h.field.complete({ ...operation('op2'), sourceContainerId: 'field-identity-2', actor: creator }, [photo('p3')]);
+  assert.ok(h.data.has(`fieldContainers/${number}`));
+
+  const admDelRes = await h.field.deleteFieldContainer(number, adm);
+  assert.equal(admDelRes.success, true);
+  assert.equal(h.data.has(`fieldContainers/${number}`), false);
+  assert.equal(h.data.has('containerPhotos/p3'), false);
+});
+
+test('exclusão é bloqueada atomicamente se container já foi vinculado ao Booking', async () => {
+  const h = harness();
+  const creator = { id: 'insp_1', name: 'Carlos', role: 'Inspector' };
+  const adm = { id: 'adm_1', name: 'Admin', role: 'ADM' };
+
+  await h.field.prepare({ ...operation('op1'), actor: creator });
+  await h.field.complete({ ...operation('op1'), actor: creator }, [photo('p1')]);
+
+  // Vincula ao Booking (simulando importação de romaneio)
+  const bookingData = booking();
+  h.data.set('bookings/booking', bookingData);
+  const rec = h.data.get(`fieldContainers/${number}`);
+  rec.status = 'linked';
+  rec.bookingId = 'BK-2026-XYZ';
+  h.data.set(`fieldContainers/${number}`, rec);
+
+  // Tentativa de exclusão deve ser bloqueada informando o Booking
+  await assert.rejects(
+    () => h.field.deleteFieldContainer(number, adm),
+    /já foi vinculado ao Booking BK-2026-XYZ/
+  );
+  // O container e as fotos continuam intactos
+  assert.ok(h.data.has(`fieldContainers/${number}`));
+  assert.ok(h.data.has('containerPhotos/p1'));
+});
+
+test('envios antigos de outros aparelhos não recriam container excluído, mas novo cadastro intencional é aceito', async () => {
+  const h = harness();
+  const creator = { id: 'insp_1', name: 'Carlos', role: 'Inspector' };
+  const adm = { id: 'adm_1', name: 'Admin', role: 'ADM' };
+
+  // Aparelho 1 cadastra e sincroniza
+  await h.field.prepare({ ...operation('op1'), sourceContainerId: 'identity-v1', actor: creator });
+  await h.field.complete({ ...operation('op1'), sourceContainerId: 'identity-v1', actor: creator }, [photo('p1')]);
+
+  // Admin exclui o container
+  await h.field.deleteFieldContainer(number, adm);
+  assert.equal(h.data.has(`fieldContainers/${number}`), false);
+
+  // Aparelho 2 (estava offline com a mesma identity-v1) tenta sincronizar atrasado
+  const stalePrepare = await h.field.prepare({ ...operation('op-stale'), sourceContainerId: 'identity-v1', actor: creator });
+  assert.equal(stalePrepare.completed, true);
+  assert.equal(stalePrepare.result.discarded, true);
+  // Não recriou o fieldContainer
+  assert.equal(h.data.has(`fieldContainers/${number}`), false);
+
+  const staleComplete = await h.field.complete({ ...operation('op-stale'), sourceContainerId: 'identity-v1', actor: creator }, [photo('p_stale')]);
+  assert.equal(staleComplete.discarded, true);
+  assert.equal(h.data.has(`fieldContainers/${number}`), false);
+
+  // Novo cadastro intencional do mesmo número (gera nova identity)
+  const freshPrepare = await h.field.prepare({ ...operation('op-fresh'), sourceContainerId: 'identity-v2', actor: creator });
+  assert.equal(freshPrepare.completed, false);
+  const freshComplete = await h.field.complete({ ...operation('op-fresh'), sourceContainerId: 'identity-v2', actor: creator }, [photo('p_fresh')]);
+  assert.equal(freshComplete.status, 'pending');
+  assert.equal(h.data.has(`fieldContainers/${number}`), true);
+  assert.equal(h.data.get(`fieldContainers/${number}`).sourceContainerId, 'identity-v2');
+});
+
+test('sincronizador executa operação de exclusão offline com sucesso', async () => {
+  let deletedNumber = null;
+  const deleteOp = { id: 'del_1', type: 'delete', number, sourceContainerId: 'id1', actor: { id: 'adm', role: 'ADM' } };
+  const jobs = new Map([['del_1', deleteOp]]);
+  let acknowledged = 0;
+  const queue = {
+    listOperations: async () => [...jobs.values()],
+    acknowledgeDeletion: async op => { jobs.delete(op.id); acknowledged++; },
+    fail: async () => {}
+  };
+  const runner = createFieldSync({
+    queue,
+    isOnline: () => true,
+    remote: {
+      deleteFieldContainer: async (num, act) => { deletedNumber = num; return { success: true }; }
+    },
+    upload: async () => {}
+  });
+
+  await runner.run();
+  assert.equal(deletedNumber, number);
+  assert.equal(acknowledged, 1);
+  assert.equal(jobs.size, 0);
+});
+

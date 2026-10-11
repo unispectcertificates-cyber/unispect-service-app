@@ -1,5 +1,5 @@
 import { collection, doc, getDocsFromServer, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { dbFirestore, storage } from '../firebase';
 import { createFieldRepository, fieldErrorMessage } from './fieldContainers.js';
 import { fieldQueue, createFieldSync } from './fieldQueue.js';
@@ -14,6 +14,27 @@ const repository = createFieldRepository({
   now: () => Date.now()
 });
 export const removeFieldPhotoMetadata = photoId => repository.removePhotoMetadata(photoId);
+
+export async function deleteFieldContainer(number, actor) {
+  const result = await repository.deleteFieldContainer(number, actor);
+  if (result.photosToDelete?.length) {
+    await Promise.allSettled(result.photosToDelete.map(async photo => {
+      if (photo.storagePath) {
+        try {
+          await deleteObject(ref(storage, photo.storagePath));
+        } catch (err) {
+          if (err.code !== 'storage/object-not-found') console.warn('Erro ao remover foto do storage:', err);
+        }
+      }
+    }));
+  }
+  try {
+    await fieldQueue.deleteLocal(number);
+  } catch {
+    // ignore
+  }
+  return result;
+}
 
 export function subscribePendingFieldContainers(next, error) {
   return onSnapshot(query(collection(dbFirestore, 'fieldContainers'), where('status', '==', 'pending')),

@@ -80,7 +80,54 @@ export function createFieldRepository({ listBookings, reference, transaction, no
   const read = async (tx, ref) => { const snapshot = await tx.get(ref); return snapshot.exists() ? snapshot.data() : null; };
   const fieldRef = number => reference('fieldContainers', number);
   const opRef = id => reference('fieldOperations', id);
+  const delRef = id => reference('fieldContainerDeletions', id);
   return {
+    async deleteFieldContainer(rawNumber, actor) {
+      const key = normalizeContainerNumber(rawNumber);
+      return transaction(async tx => {
+        const field = await read(tx, fieldRef(key));
+        if (!field) return { success: true, alreadyDeleted: true };
+        if (field.status === 'linked' || field.bookingId) {
+          throw new Error(`Este container já foi vinculado ao Booking ${field.bookingId || 'ativo'}. A exclusão não é permitida.`);
+        }
+        const actorRole = String(actor?.role || '').trim().toUpperCase();
+        const isAdm = actorRole === 'ADM';
+        const creator = field.container?.fieldCapture?.actor;
+        const isCreator = Boolean(creator && (
+          (actor?.id && creator?.id && String(actor.id) === String(creator.id)) ||
+          (actor?.name && creator?.name && String(actor.name).trim().toLowerCase() === String(creator.name).trim().toLowerCase()) ||
+          (actor?.login && creator?.login && String(actor.login).trim().toLowerCase() === String(creator.login).trim().toLowerCase())
+        ));
+        if (!isAdm && !isCreator) {
+          throw new Error('Permissão negada. O inspetor pode excluir apenas seus próprios cadastros.');
+        }
+        const deletionId = `${key}_${field.sourceContainerId}_${now()}`;
+        const deletionRecord = {
+          id: deletionId,
+          containerNumber: key,
+          sourceContainerId: field.sourceContainerId,
+          status: 'deleted',
+          deletedAt: now(),
+          deletedBy: {
+            id: actor?.id || '',
+            name: actor?.name || '',
+            role: actor?.role || ''
+          },
+          photoCount: (field.container?.photos || []).length,
+          container: field.container
+        };
+        tx.set(delRef(field.sourceContainerId), deletionRecord);
+        tx.delete(fieldRef(key));
+        for (const p of field.container?.photos || []) {
+          tx.delete(reference('containerPhotos', p.id));
+        }
+        return {
+          success: true,
+          deletedRecord: deletionRecord,
+          photosToDelete: field.container?.photos || []
+        };
+      });
+    },
     async removePhotoMetadata(photoId) {
       return transaction(async tx => {
         const photoRef = reference('containerPhotos', photoId);
@@ -94,6 +141,8 @@ export function createFieldRepository({ listBookings, reference, transaction, no
     },
     async prepare(operation) {
       return transaction(async tx => {
+        const deleted = await read(tx, delRef(operation.sourceContainerId));
+        if (deleted) return { completed: true, result: { discarded: true, deleted: true } };
         const completed = await read(tx, opRef(operation.id));
         if (completed) return { completed: true, result: completed.result };
         const existing = await read(tx, fieldRef(operation.number));
@@ -108,6 +157,8 @@ export function createFieldRepository({ listBookings, reference, transaction, no
     async complete(operation, photos) {
       const bookings = await listBookings();
       return transaction(async tx => {
+        const deleted = await read(tx, delRef(operation.sourceContainerId));
+        if (deleted) return { discarded: true, deleted: true };
         const completed = await read(tx, opRef(operation.id));
         if (completed) return completed.result;
         const field = await read(tx, fieldRef(operation.number));
