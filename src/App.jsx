@@ -554,7 +554,7 @@ export default function App() {
               {user.role === 'ADM' ? 'MASTER' : 'INSPETOR'}
             </span>
             <span style={{ fontSize: '10px', backgroundColor: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', color: 'var(--color-brand)', fontWeight: '700' }} title="Versão do Sistema">
-              v2.1.0
+              v2.1.1
             </span>
           </div>
 

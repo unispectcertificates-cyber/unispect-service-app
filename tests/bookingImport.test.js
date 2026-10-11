@@ -260,3 +260,72 @@ test('divergência ou falta de Booking no PDF bloqueia atualização', () => {
   assert.equal(Boolean(unidentPdfBooking), false);
 });
 
+test('romaneio atualizado: altera sacas (60 para 180), navio, viagem, destino e embalagem mantendo fotos dos existentes', async () => {
+  const old = {
+    ...b([
+      c(1, { photos: [{ id: 'p1', url: 'photo1.jpg' }], bagsQuantity: 20 }),
+      c(2, { photos: [{ id: 'p2', url: 'photo2.jpg' }], bagsQuantity: 20 }),
+      c(3, { photos: [{ id: 'p3', url: 'photo3.jpg' }], bagsQuantity: 20 })
+    ]),
+    bookingNumber: '277311214',
+    bagsQuantity: 60,
+    embalagem: 'sacaria',
+    vesselVoyage: 'OLD SHIP V.100',
+    portoDestino: 'SANTOS'
+  };
+
+  const h = harness([old]);
+
+  // Novo romaneio traz 9 containers (3 existentes + 6 novos), 180 sacas, navio LOG-IN PANTANAL V.620S
+  const incoming = {
+    ...old,
+    bagsQuantity: 180,
+    embalagem: 'Big bags',
+    vesselVoyage: 'LOG-IN PANTANAL V.620S',
+    portoDestino: 'DURBAN - AFRICA DO SUL',
+    containers: [
+      c(1, { bagsQuantity: 20 }),
+      c(2, { bagsQuantity: 20 }),
+      c(3, { bagsQuantity: 20 }),
+      ...Array.from({ length: 6 }, (_, i) => c(i + 4, { bagsQuantity: 20 }))
+    ]
+  };
+
+  const plan = planImport(old, incoming.containers);
+  assert.equal(plan.added.length, 6);
+  assert.equal(plan.preserved.length, 3);
+  assert.equal(plan.total, 9);
+
+  const result = await h.repo.importBooking(incoming, {
+    expectedPreview: previewToken(old, plan),
+    sourceName: 'romaneio_atualizado_180.pdf',
+    actor: { id: 'admin', name: 'Administrador' }
+  });
+
+  // 1. Total de containers atualizado para 9
+  assert.equal(result.booking.containers.length, 9);
+  assert.equal(result.addedCount, 6);
+  assert.equal(result.preservedCount, 3);
+
+  // 2. Sacas e dados cadastrais atualizados do novo romaneio
+  assert.equal(result.booking.bagsQuantity, 180);
+  assert.equal(result.booking.embalagem, 'Big bags');
+  assert.equal(result.booking.vesselVoyage, 'LOG-IN PANTANAL V.620S');
+  assert.equal(result.booking.portoDestino, 'DURBAN - AFRICA DO SUL');
+
+  // 3. Fotos dos containers existentes 100% preservadas
+  assert.deepEqual(result.booking.containers[0].photos, [{ id: 'p1', url: 'photo1.jpg' }]);
+  assert.deepEqual(result.booking.containers[1].photos, [{ id: 'p2', url: 'photo2.jpg' }]);
+  assert.deepEqual(result.booking.containers[2].photos, [{ id: 'p3', url: 'photo3.jpg' }]);
+
+  // 4. Auditoria registrou os campos atualizados
+  const audit = h.data.get(`bookingImports/${result.operationId}`);
+  assert.ok(audit.updatedFields.includes('bagsQuantity'));
+  assert.ok(audit.updatedFields.includes('vesselVoyage'));
+  assert.ok(audit.updatedFields.includes('embalagem'));
+  assert.ok(audit.updatedFields.includes('portoDestino'));
+  assert.equal(audit.before, 3);
+  assert.equal(audit.after, 9);
+});
+
+

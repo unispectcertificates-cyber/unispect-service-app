@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight, Search, UploadCloud, CheckCircle2 } from 'lucide-react';
 import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery } from '../db';
-import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNumber, importFieldLabels } from '../utils/bookingImport';
+import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNumber, importFieldLabels, detectBookingFieldChanges } from '../utils/bookingImport';
 import { parseRomaneioPdf } from '../utils/pdfParser';
 import ContainerDetail from './ContainerDetail';
 import BookingImportHistory from './BookingImportHistory';
@@ -143,12 +143,15 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     }
   }
 
+  const detectedChanges = parsedRomaneio ? detectBookingFieldChanges(booking, parsedRomaneio) : [];
+
   const canConfirmIncremental = Boolean(
     parsedRomaneio &&
     romaneioPlan &&
     isBookingMatch &&
     !isSavingIncremental &&
-    romaneioPlan.invalid.length === 0
+    romaneioPlan.invalid.length === 0 &&
+    (romaneioPlan.added.length > 0 || detectedChanges.length > 0)
   );
 
   const handleConfirmIncrementalUpdate = async () => {
@@ -166,10 +169,24 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     setIsSavingIncremental(true);
     try {
       const token = previewToken(booking, romaneioPlan);
-      // Grava estritamente os containers novos, preservando todos os campos, fotos e dados do Booking aberto
+      // Lê todo o romaneio e sincroniza os campos atualizados (sacas, navio, viagem, embalagem, armador, destino etc.)
+      // enquanto preserva 100% dos containers existentes, seus IDs, fotos e laudos.
       const incomingData = {
         ...booking,
         bookingNumber: booking.bookingNumber,
+        bagsQuantity: (parsedRomaneio.bagsQuantity !== undefined && parsedRomaneio.bagsQuantity !== '')
+          ? (parseInt(parsedRomaneio.bagsQuantity, 10) || parsedRomaneio.bagsQuantity)
+          : booking.bagsQuantity,
+        embalagem: parsedRomaneio.embalagem || booking.embalagem,
+        vesselVoyage: parsedRomaneio.vesselVoyage || booking.vesselVoyage,
+        vesselName: parsedRomaneio.vesselName || booking.vesselName,
+        vesselVoyageNum: parsedRomaneio.vesselVoyageNum || booking.vesselVoyageNum,
+        portoDestino: parsedRomaneio.portoDestino || booking.portoDestino,
+        armador: parsedRomaneio.armador || booking.armador,
+        mercadoria: parsedRomaneio.mercadoria || booking.mercadoria,
+        importador: parsedRomaneio.importador || booking.importador,
+        exporterId: parsedRomaneio.exporterId || booking.exporterId,
+        locationId: parsedRomaneio.locationId || booking.locationId,
         containers: parsedRomaneio.containers || []
       };
 
@@ -182,7 +199,10 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       setBooking(result.booking);
       if (onDataChange) onDataChange();
       setShowIncrementalImportModal(false);
-      setModalFeedback(`✅ Romaneio atualizado! ${result.addedCount} novos containers foram inseridos e ${result.preservedCount} existentes preservados com fotos e inspeções.`);
+      let feedback = `✅ Romaneio atualizado com sucesso!`;
+      if (result.addedCount > 0) feedback += ` ${result.addedCount} novos containers inseridos (Total: ${result.booking.containers?.length || 0}).`;
+      if (detectedChanges.length > 0) feedback += ` Dados atualizados: ${detectedChanges.map(c => c.label).join(', ')}.`;
+      setModalFeedback(feedback);
       setTimeout(() => setModalFeedback(''), 8000);
     } catch (err) {
       console.error('Erro na atualização incremental:', err);
@@ -371,9 +391,17 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         {/* Topo do Modal */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px', flexShrink: 0 }}>
           <div>
-            <h2 style={{ fontSize: '18px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)' }}>
-              Gerenciar Booking / Certificado: {booking.certificateNumber}
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h2 style={{ fontSize: '18px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)', margin: 0 }}>
+                Gerenciar Booking / Certificado: {booking.certificateNumber}
+              </h2>
+              <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '800' }}>
+                {booking.containers?.length || 0} Containers
+              </span>
+              <span style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '800' }}>
+                {booking.bagsQuantity || 0} Bags ({booking.embalagem || 'Sacaria'})
+              </span>
+            </div>
             <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>
               Perfil atual: {user.role === 'ADM' ? '✅ Administrador (Edição Liberada)' : '✅ Inspetor (Edição Liberada)'}
             </div>
@@ -993,6 +1021,15 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               <option value="Fito">Fito</option>
               <option value="Lacre Definitivo">Lacre Definitivo</option>
             </select>
+          </div>
+
+          {/* Box Total de Containers */}
+          <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '4px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Total de Containers</div>
+            <div style={{ fontSize: '14px', fontWeight: '800', color: '#10b981', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>{booking.containers?.length || 0} container{(booking.containers?.length || 0) === 1 ? '' : 's'}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 'normal' }}>cadastrado{(booking.containers?.length || 0) === 1 ? '' : 's'}</span>
+            </div>
           </div>
         </div>
 
@@ -1740,7 +1777,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                     </div>
                   )}
 
-                  {/* Cards de Resumo da Prévia (4 Categorias) */}
+                  {/* Cards de Resumo da Prévia (Categorias e Totais) */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                     
                     <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #10b981' }}>
@@ -1759,12 +1796,22 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                       <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>fotos e dados mantidos</div>
                     </div>
 
-                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #f59e0b' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700' }}>REPETIDOS NO PDF</div>
-                      <div style={{ fontSize: '22px', fontWeight: '800', color: '#f59e0b', marginTop: '2px' }}>
-                        {romaneioPlan.repeated.length}
+                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #8b5cf6' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700' }}>TOTAL FINAL</div>
+                      <div style={{ fontSize: '22px', fontWeight: '800', color: '#8b5cf6', marginTop: '2px' }}>
+                        {(booking.containers?.length || 0) + romaneioPlan.added.length}
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>duplicidades ignoradas</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>containers no Booking</div>
+                    </div>
+
+                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #06b6d4' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700' }}>TOTAL BAGS</div>
+                      <div style={{ fontSize: '22px', fontWeight: '800', color: '#06b6d4', marginTop: '2px' }}>
+                        {parsedRomaneio.bagsQuantity || booking.bagsQuantity || 0}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        {booking.bagsQuantity !== (parsedRomaneio.bagsQuantity || 0) ? `(era ${booking.bagsQuantity || 0})` : 'inalterado'}
+                      </div>
                     </div>
 
                     <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: `4px solid ${romaneioPlan.invalid.length ? '#ef4444' : 'var(--border-color)'}` }}>
@@ -1777,9 +1824,31 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
 
                   </div>
 
+                  {/* Detecção de Informações Cadastrais Alteradas do Romaneio */}
+                  {detectedChanges.length > 0 && (
+                    <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: '6px', padding: '12px 14px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#10b981', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <CheckCircle2 size={16} />
+                        Informações do Booking atualizadas no novo Romaneio ({detectedChanges.length}):
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                        {detectedChanges.map((ch, idx) => (
+                          <div key={idx} style={{ backgroundColor: 'var(--bg-secondary)', padding: '8px 10px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '10px', textTransform: 'uppercase', fontWeight: '700' }}>{ch.label}</div>
+                            <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{String(ch.oldValue || '(vazio)')}</span>
+                              <span style={{ color: 'var(--text-secondary)' }}>➔</span>
+                              <span style={{ fontWeight: '800', color: '#10b981' }}>{String(ch.newValue)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Alerta de Preservação Segura */}
                   <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: '6px', padding: '10px 14px', border: '1px solid rgba(59, 130, 246, 0.25)', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    🛡️ <strong>Preservação Integral:</strong> Todos os IDs, vistorias, laudos e fotos dos containers existentes são 100% preservados. Containers ausentes do PDF não são excluídos e os campos cadastrais do Booking não são sobrescritos.
+                    🛡️ <strong>Preservação Integral:</strong> Todos os IDs, fotos, laudos e status dos containers existentes são 100% preservados. Containers ausentes do PDF não são excluídos. As informações gerais (Navio, Viagem, Quantidade de Sacas, Embalagem, Destino etc.) são atualizadas com os dados do novo romaneio.
                   </div>
 
                   {/* Containers Repetidos no PDF */}
@@ -1848,9 +1917,9 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                     </div>
                   )}
 
-                  {romaneioPlan.added.length === 0 && (
+                  {romaneioPlan.added.length === 0 && detectedChanges.length === 0 && (
                     <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', padding: '12px', color: '#3b82f6', fontSize: '13px' }}>
-                      ℹ️ Todos os {parsedRomaneio.containers?.length || 0} containers deste romaneio já estão cadastrados na reserva. Nenhuma duplicidade será criada.
+                      ℹ️ Todos os {parsedRomaneio.containers?.length || 0} containers e dados deste romaneio já coincidem com a reserva cadastrada. Nenhuma alteração pendente.
                     </div>
                   )}
 

@@ -4,6 +4,103 @@ export const normalizeContainerNumber = value => String(value ?? '').trim().toUp
 export const importFieldLabels = { containerType: 'tipo', definiteSeal: 'lacre definitivo', bagsQuantity: 'quantidade de sacas',
   netWeight: 'peso líquido', tara: 'tara', grossWeight: 'peso bruto', brand: 'marca' };
 
+export const headerSyncFields = [
+  'bagsQuantity', 'embalagem', 'vesselVoyage', 'vesselName', 'vesselVoyageNum',
+  'portoDestino', 'armador', 'mercadoria', 'importador', 'exporterId', 'locationId'
+];
+
+export function detectBookingFieldChanges(current, incoming) {
+  if (!current || !incoming) return [];
+  const changes = [];
+  const labelMap = {
+    bagsQuantity: 'Quantidade de Sacas/Bags',
+    embalagem: 'Tipo de Embalagem',
+    vesselVoyage: 'Navio / Viagem',
+    portoDestino: 'Porto de Destino',
+    armador: 'Armador / Linha',
+    mercadoria: 'Mercadoria',
+    importador: 'Importador',
+    exporterId: 'Exportador',
+    locationId: 'Local da Operação'
+  };
+
+  // bagsQuantity
+  if (incoming.bagsQuantity !== undefined && incoming.bagsQuantity !== '' && incoming.bagsQuantity !== null) {
+    const newBags = parseInt(incoming.bagsQuantity, 10);
+    const oldBags = parseInt(current.bagsQuantity, 10) || 0;
+    if (!isNaN(newBags) && newBags > 0 && newBags !== oldBags) {
+      changes.push({ field: 'bagsQuantity', label: labelMap.bagsQuantity, oldValue: oldBags, newValue: newBags });
+    }
+  }
+
+  // embalagem
+  if (incoming.embalagem && typeof incoming.embalagem === 'string' && incoming.embalagem.trim()) {
+    const newEmb = incoming.embalagem.trim();
+    const oldEmb = (current.embalagem || '').trim();
+    if (newEmb && oldEmb && newEmb.toLowerCase() !== oldEmb.toLowerCase()) {
+      changes.push({ field: 'embalagem', label: labelMap.embalagem, oldValue: oldEmb, newValue: newEmb });
+    }
+  }
+
+  // vesselVoyage
+  if (incoming.vesselVoyage && typeof incoming.vesselVoyage === 'string' && incoming.vesselVoyage.trim()) {
+    const newVessel = incoming.vesselVoyage.trim();
+    const oldVessel = (current.vesselVoyage || '').trim();
+    if (newVessel && newVessel !== oldVessel) {
+      changes.push({ field: 'vesselVoyage', label: labelMap.vesselVoyage, oldValue: oldVessel, newValue: newVessel });
+    }
+  }
+
+  // portoDestino
+  if (incoming.portoDestino && typeof incoming.portoDestino === 'string' && incoming.portoDestino.trim()) {
+    const newDest = incoming.portoDestino.trim();
+    const oldDest = (current.portoDestino || '').trim();
+    if (newDest && newDest.toLowerCase() !== oldDest.toLowerCase()) {
+      changes.push({ field: 'portoDestino', label: labelMap.portoDestino, oldValue: oldDest, newValue: newDest });
+    }
+  }
+
+  // armador
+  if (incoming.armador && typeof incoming.armador === 'string' && incoming.armador.trim()) {
+    const newArm = incoming.armador.trim();
+    const oldArm = (current.armador || '').trim();
+    if (newArm && newArm.toLowerCase() !== oldArm.toLowerCase()) {
+      changes.push({ field: 'armador', label: labelMap.armador, oldValue: oldArm, newValue: newArm });
+    }
+  }
+
+  // mercadoria
+  if (incoming.mercadoria && typeof incoming.mercadoria === 'string' && incoming.mercadoria.trim()) {
+    const newMerc = incoming.mercadoria.trim();
+    const oldMerc = (current.mercadoria || '').trim();
+    if (newMerc && newMerc.toLowerCase() !== oldMerc.toLowerCase()) {
+      changes.push({ field: 'mercadoria', label: labelMap.mercadoria, oldValue: oldMerc, newValue: newMerc });
+    }
+  }
+
+  // importador
+  if (incoming.importador && typeof incoming.importador === 'string' && incoming.importador.trim()) {
+    const newImp = incoming.importador.trim();
+    const oldImp = (current.importador || '').trim();
+    if (newImp && newImp.toLowerCase() !== oldImp.toLowerCase()) {
+      changes.push({ field: 'importador', label: labelMap.importador, oldValue: oldImp, newValue: newImp });
+    }
+  }
+
+  // exporterId
+  if (incoming.exporterId && incoming.exporterId !== current.exporterId) {
+    changes.push({ field: 'exporterId', label: labelMap.exporterId, oldValue: current.exporterId, newValue: incoming.exporterId });
+  }
+
+  // locationId
+  if (incoming.locationId && incoming.locationId !== current.locationId) {
+    changes.push({ field: 'locationId', label: labelMap.locationId, oldValue: current.locationId, newValue: incoming.locationId });
+  }
+
+  return changes;
+}
+
+
 export function findBooking(bookings, number) {
   const key = normalizeBookingNumber(number);
   const matches = bookings.filter(b => key && normalizeBookingNumber(b.bookingNumber) === key);
@@ -88,17 +185,32 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         const counter = !current && !incoming.certificateNumber ? await read(tx, certificateRef()) : null;
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
         let booking;
+        let fieldUpdates = {};
         if (current) {
+          const changes = detectBookingFieldChanges(current, incoming);
+          for (const change of changes) {
+            fieldUpdates[change.field] = change.newValue;
+          }
+          if (fieldUpdates.vesselVoyage) {
+            if (incoming.vesselName) fieldUpdates.vesselName = incoming.vesselName;
+            if (incoming.vesselVoyageNum) fieldUpdates.vesselVoyageNum = incoming.vesselVoyageNum;
+          }
+
+          const hasContainerChanges = plan.added.length > 0;
+          const hasFieldChanges = Object.keys(fieldUpdates).length > 0;
+
           booking = {
             ...current,
+            ...fieldUpdates,
             containers: [
               ...(current.containers || []),
               ...plan.added.map(c => ({ ...c, id: newId('container') }))
             ],
-            _revision: (current._revision || 0) + (plan.added.length ? 1 : 0)
+            _revision: (current._revision || 0) + (hasContainerChanges || hasFieldChanges ? 1 : 0)
           };
-          if (plan.added.length) {
+          if (hasContainerChanges || hasFieldChanges) {
             tx.update(bookingRef, {
+              ...fieldUpdates,
               containers: booking.containers,
               _revision: booking._revision
             });
@@ -117,8 +229,8 @@ export function createBookingRepository({ listBookings, reference, newId, transa
           createdAt: timestamp, actor: actor ? { id: actor.id || '', name: actor.name || '' } : null, sourceName,
           added: plan.added.map(c => c.containerNumber), addedIds: booking.containers.slice(current?.containers?.length || 0).map(c => c.id),
           existing: plan.preserved.map(c => normalizeContainerNumber(c.containerNumber)), repeated: plan.repeated,
-          conflicts: plan.conflicts, before: current?.containers?.length || 0, after: booking.containers.length });
-        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, operationId };
+          conflicts: plan.conflicts, updatedFields: Object.keys(fieldUpdates), before: current?.containers?.length || 0, after: booking.containers.length });
+        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, updatedFields: Object.keys(fieldUpdates), operationId };
       });
     },
 

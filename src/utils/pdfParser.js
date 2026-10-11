@@ -630,7 +630,15 @@ export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais
     }
   }
 
-  const totalBagsNum = parseBrazilianOrStandardFloat(bagsQuantity);
+  let totalBagsNum = parseBrazilianOrStandardFloat(bagsQuantity);
+  if ((!totalBagsNum || totalBagsNum === 0) && parsedContainers.length > 0) {
+    const sumContainers = parsedContainers.reduce((acc, c) => acc + (parseInt(c.bagsQuantity, 10) || 0), 0);
+    if (sumContainers > 0) {
+      bagsQuantity = String(sumContainers);
+      totalBagsNum = sumContainers;
+    }
+  }
+
   if (totalBagsNum > 0 && parsedContainers.length > 0) {
     const perContainerBags = Math.round(totalBagsNum / parsedContainers.length);
     parsedContainers.forEach(c => {
