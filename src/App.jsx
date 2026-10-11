@@ -198,12 +198,16 @@ export default function App() {
   const handleCreateBooking = async (e) => {
     e.preventDefault();
     if (importSavingRef.current || isParsingPdf) return;
+    if (existingImportBooking) {
+      alert(`Este Booking (${existingImportBooking.bookingNumber}) já foi inserido no sistema. Para atualizar este romaneio, abra a reserva na tela principal e clique no botão "Inserir atualização de romaneio".`);
+      return;
+    }
     if (importError || importPlan.invalid.length) {
       alert(importError || 'Corrija os containers inválidos antes de confirmar.');
       return;
     }
-    if (!newBookingData.bookingNumber || (!existingImportBooking && (!newBookingData.exporterId || !newBookingData.locationId))) {
-      alert('Preencha os campos obrigatórios.');
+    if (!newBookingData.bookingNumber || !newBookingData.exporterId || !newBookingData.locationId) {
+      alert('Preencha os campos obrigatórios (Número do Booking, Exportador e Local da Operação).');
       return;
     }
     importSavingRef.current = true;
@@ -548,6 +552,9 @@ export default function App() {
             <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{user.name}</span>
             <span className={`badge ${user.role === 'ADM' ? 'badge-progress' : 'badge-success'}`} style={{ padding: '3px 8px', fontSize: '9px' }}>
               {user.role === 'ADM' ? 'MASTER' : 'INSPETOR'}
+            </span>
+            <span style={{ fontSize: '10px', backgroundColor: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', color: 'var(--color-brand)', fontWeight: '700' }} title="Versão do Sistema">
+              v2.1.0
             </span>
           </div>
 
@@ -1518,12 +1525,15 @@ export default function App() {
                   onChange={e => setNewBookingData({ ...newBookingData, bookingNumber: e.target.value })}
                   placeholder="BK-XXXXXX"
                   required
-                  style={existingImportBooking ? { borderColor: '#10b981' } : {}}
+                  style={existingImportBooking ? { borderColor: '#ef4444' } : {}}
                 />
                 {existingImportBooking && (
-                  <p style={{ color: '#10b981', fontSize: '12px', marginTop: '4px', fontWeight: '600' }}>
-                    Booking encontrado. Serão acrescentados somente os containers novos.
-                  </p>
+                  <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid #ef4444', borderRadius: '6px', padding: '10px 12px', marginTop: '6px', color: '#ef4444', fontSize: '12px' }}>
+                    ⚠️ <strong>Este Booking / Romaneio já foi inserido no sistema</strong> ({existingImportBooking.bookingNumber} — Certificado: {existingImportBooking.certificateNumber}).
+                    <div style={{ marginTop: '4px', color: 'var(--text-secondary)' }}>
+                      O cadastro de reservas duplicadas está bloqueado. Para atualizar ou adicionar containers a este Booking, abra a reserva na tela principal e clique no botão <strong>"Inserir atualização de romaneio"</strong>.
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -1807,11 +1817,21 @@ export default function App() {
             </section>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '14px', marginTop: '6px' }}>
-              <button type="button" disabled={isSavingImport || isParsingPdf} onClick={handleDiscardBookingCreation} className="btn btn-danger">
+              <button type="button" disabled={isSavingImport || isParsingPdf} onClick={handleDiscardBookingCreation} className="btn btn-secondary">
                 Cancelar
               </button>
-              <button type="submit" disabled={isSavingImport || isParsingPdf || Boolean(importError) || importPlan.invalid.length > 0 || (Boolean(existingImportBooking) && !newBookingData.containers?.length)} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff' }}>
-                {isSavingImport ? 'Salvando...' : existingImportBooking ? 'Confirmar atualização' : 'Confirmar cadastro'}
+              <button
+                type="submit"
+                disabled={isSavingImport || isParsingPdf || Boolean(importError) || importPlan.invalid.length > 0 || Boolean(existingImportBooking)}
+                className="btn btn-primary"
+                style={{
+                  backgroundColor: existingImportBooking ? '#6b7280' : '#10b981',
+                  color: '#fff',
+                  cursor: existingImportBooking ? 'not-allowed' : 'pointer',
+                  opacity: existingImportBooking ? 0.6 : 1
+                }}
+              >
+                {isSavingImport ? 'Salvando...' : existingImportBooking ? 'Booking já cadastrado (bloqueado)' : 'Confirmar cadastro'}
               </button>
             </div>
             </fieldset>

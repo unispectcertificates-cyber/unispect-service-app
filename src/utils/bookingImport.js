@@ -89,43 +89,20 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
         let booking;
         if (current) {
-          const updatePayload = {
-            containers: [...(current.containers || []), ...plan.added.map(c => ({ ...c, id: newId('container') }))],
+          booking = {
+            ...current,
+            containers: [
+              ...(current.containers || []),
+              ...plan.added.map(c => ({ ...c, id: newId('container') }))
+            ],
             _revision: (current._revision || 0) + (plan.added.length ? 1 : 0)
           };
-          if (incoming.bagsQuantity !== undefined && incoming.bagsQuantity !== null && incoming.bagsQuantity !== '') {
-            updatePayload.bagsQuantity = incoming.bagsQuantity;
+          if (plan.added.length) {
+            tx.update(bookingRef, {
+              containers: booking.containers,
+              _revision: booking._revision
+            });
           }
-          if (incoming.vesselVoyage && incoming.vesselVoyage !== current.vesselVoyage) {
-            updatePayload.vesselVoyage = incoming.vesselVoyage;
-          }
-          if (incoming.vesselName && incoming.vesselName !== current.vesselName) {
-            updatePayload.vesselName = incoming.vesselName;
-          }
-          if (incoming.vesselVoyageNum && incoming.vesselVoyageNum !== current.vesselVoyageNum) {
-            updatePayload.vesselVoyageNum = incoming.vesselVoyageNum;
-          }
-          if (incoming.portoDestino && incoming.portoDestino !== current.portoDestino) {
-            updatePayload.portoDestino = incoming.portoDestino;
-          }
-          if (incoming.armador && incoming.armador !== current.armador) {
-            updatePayload.armador = incoming.armador;
-          }
-          if (incoming.embalagem && incoming.embalagem !== current.embalagem) {
-            updatePayload.embalagem = incoming.embalagem;
-          }
-          if (incoming.importador && incoming.importador !== current.importador) {
-            updatePayload.importador = incoming.importador;
-          }
-          if (incoming.mercadoria && incoming.mercadoria !== current.mercadoria) {
-            updatePayload.mercadoria = incoming.mercadoria;
-          }
-          const hasChanges = plan.added.length > 0 || Object.keys(updatePayload).length > 2;
-          if (hasChanges && !plan.added.length) {
-            updatePayload._revision = (current._revision || 0) + 1;
-          }
-          booking = { ...current, ...updatePayload };
-          if (hasChanges) tx.update(bookingRef, updatePayload);
         } else {
           if (!incoming.exporterId || !incoming.locationId) throw new Error('Selecione o exportador e o recinto.');
           booking = { ...incoming, id: bookingId, bookingNumber: String(incoming.bookingNumber).trim().toUpperCase(),

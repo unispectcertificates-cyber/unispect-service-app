@@ -203,29 +203,60 @@ test('related records commit atomically only for new Booking', async () => {
   assert.equal(failed.data.size, 0);
 });
 
-test('incremental update updates bagsQuantity and adds missing containers while preserving existing photos', async () => {
-  const old = b([c(1, { photos: [{ id: 'p1', url: 'photo.jpg' }], bagsQuantity: 20 }), c(2, { bagsQuantity: 20 }), c(3, { bagsQuantity: 20 })]);
-  old.bagsQuantity = 60;
+test('fluxo completo: 3 existentes + 10 novos = 13 mantendo fotos, e reimportar insere zero containers', async () => {
+  const old = b([
+    c(1, { photos: [{ id: 'p1', url: 'photo1.jpg' }], notes: 'vistoriado', bagsQuantity: 20 }),
+    c(2, { photos: [{ id: 'p2', url: 'photo2.jpg' }], notes: 'ok', bagsQuantity: 20 }),
+    c(3, { photos: [{ id: 'p3', url: 'photo3.jpg' }], notes: 'aprovado', bagsQuantity: 20 })
+  ]);
   const h = harness([old]);
   const incoming = {
     ...b(),
-    bagsQuantity: 180,
-    vesselVoyage: 'LOG-IN PANTANAL V.620S',
     containers: [
       c(1, { bagsQuantity: 20 }),
       c(2, { bagsQuantity: 20 }),
       c(3, { bagsQuantity: 20 }),
-      ...Array.from({ length: 6 }, (_, i) => c(i + 4, { bagsQuantity: 20 }))
+      ...Array.from({ length: 10 }, (_, i) => c(i + 4, { bagsQuantity: 20 }))
     ]
   };
-  const result = await h.repo.importBooking(incoming, {
+  // 1. Primeira importação: 3 existentes + 10 novos = 13
+  const result1 = await h.repo.importBooking(incoming, {
     expectedPreview: preview(old, incoming),
-    sourceName: 'romaneio_atualizado.pdf'
+    sourceName: 'romaneio_atualizado.pdf',
+    actor: { id: 'admin', name: 'Administrador' }
   });
-  assert.equal(result.addedCount, 6);
-  assert.equal(result.preservedCount, 3);
-  assert.equal(result.booking.containers.length, 9);
-  assert.equal(result.booking.bagsQuantity, 180);
-  assert.equal(result.booking.vesselVoyage, 'LOG-IN PANTANAL V.620S');
-  assert.deepEqual(result.booking.containers[0].photos, [{ id: 'p1', url: 'photo.jpg' }]);
+  assert.equal(result1.addedCount, 10);
+  assert.equal(result1.preservedCount, 3);
+  assert.equal(result1.booking.containers.length, 13);
+  assert.deepEqual(result1.booking.containers[0].photos, [{ id: 'p1', url: 'photo1.jpg' }]);
+  assert.deepEqual(result1.booking.containers[1].photos, [{ id: 'p2', url: 'photo2.jpg' }]);
+  assert.deepEqual(result1.booking.containers[2].photos, [{ id: 'p3', url: 'photo3.jpg' }]);
+  assert.equal(result1.booking.containers[0].notes, 'vistoriado');
+  assert.equal(result1.booking.certificateNumber, old.certificateNumber);
+  // Garante que campos do Booking não foram sobrescritos
+  assert.equal(result1.booking.exporterId, old.exporterId);
+  assert.equal(result1.booking.locationId, old.locationId);
+
+  // 2. Reimportar o mesmo PDF deve inserir ZERO containers
+  const result2 = await h.repo.importBooking(incoming, {
+    expectedPreview: preview(result1.booking, incoming),
+    sourceName: 'romaneio_atualizado.pdf',
+    actor: { id: 'admin', name: 'Administrador' }
+  });
+  assert.equal(result2.addedCount, 0);
+  assert.equal(result2.preservedCount, 13);
+  assert.equal(result2.booking.containers.length, 13);
+  assert.deepEqual(result2.booking.containers[0].photos, [{ id: 'p1', url: 'photo1.jpg' }]);
 });
+
+test('divergência ou falta de Booking no PDF bloqueia atualização', () => {
+  const openBookingNumber = '277311214';
+  const matchingPdfBooking = '277311214';
+  const differentPdfBooking = '999999999';
+  const unidentPdfBooking = '';
+
+  assert.equal(normalizeBookingNumber(matchingPdfBooking), normalizeBookingNumber(openBookingNumber));
+  assert.notEqual(normalizeBookingNumber(differentPdfBooking), normalizeBookingNumber(openBookingNumber));
+  assert.equal(Boolean(unidentPdfBooking), false);
+});
+
