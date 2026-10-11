@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Plus, Search, Calendar, MapPin, Eye, Trash2 } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores } from '../db';
+import { Plus, Search, Calendar, MapPin, Eye, Trash2, X } from 'lucide-react';
+import { db, useBookings, useLocais, useExportadores, matchesBooking, getMatchedContainers } from '../db';
 import PullToRefresh from './PullToRefresh';
 
 export default function BookingManager({ user, onSelectBooking, onCreateBookingClick, onDataChange }) {
@@ -19,21 +19,9 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
     }
   };
 
-  const filtered = bookings.filter(b => {
-    const term = searchQuery.toLowerCase();
-    if (!term) return true;
-    
-    const exp = exportadores.find(e => e.id === b.exporterId);
-    const loc = locais.find(l => l.id === b.locationId);
-    
-    return (
-      b.certificateNumber.toLowerCase().includes(term) ||
-      b.bookingNumber.toLowerCase().includes(term) ||
-      b.vesselVoyage.toLowerCase().includes(term) ||
-      (exp && exp.name.toLowerCase().includes(term)) ||
-      (loc && loc.name.toLowerCase().includes(term))
-    );
-  });
+  const filtered = bookings.filter(b => 
+    matchesBooking(b, searchQuery, { exportadores, locais })
+  );
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
@@ -62,10 +50,10 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
           border: '1px solid var(--border-color)',
           boxShadow: 'var(--shadow-sm)'
         }}>
-          <Search size={18} style={{ color: 'var(--text-muted)' }} />
+          <Search size={18} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
           <input 
             type="text" 
-            placeholder="Filtrar por certificado, navio, exportador ou local..." 
+            placeholder="Buscar por container (MSDU-882129-7, MSDU8821297), booking, exportador..." 
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             style={{ 
@@ -74,9 +62,28 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
               fontSize: '14px', 
               backgroundColor: 'transparent',
               boxShadow: 'none',
-              width: '100%'
+              width: '100%',
+              outline: 'none'
             }}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '4px'
+              }}
+              title="Limpar busca"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {/* Tabela Desktop / Cards Mobile */}
@@ -123,7 +130,25 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
                       onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       <td style={{ padding: '18px 24px', fontWeight: '800', color: 'var(--color-brand)' }}>{b.certificateNumber}</td>
-                      <td style={{ padding: '18px 24px', fontWeight: '600' }}>{b.bookingNumber}</td>
+                      <td style={{ padding: '18px 24px', fontWeight: '600' }}>
+                        <div>{b.bookingNumber}</div>
+                        {searchQuery.trim() && getMatchedContainers(b, searchQuery).length > 0 && (
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {getMatchedContainers(b, searchQuery).map(mc => (
+                              <span key={mc.id || mc.containerNumber} style={{
+                                fontSize: '10px',
+                                fontWeight: '700',
+                                color: 'var(--color-brand)',
+                                backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                                padding: '1px 5px',
+                                borderRadius: '3px'
+                              }}>
+                                📦 {mc.containerNumber}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '18px 24px', fontWeight: '500' }}>{exp ? exp.name : 'N/A'}</td>
                       <td style={{ padding: '18px 24px', color: 'var(--text-secondary)' }}>{b.launchDate || b.startDate}</td>
                       <td style={{ padding: '18px 24px', color: 'var(--text-secondary)' }}>{b.startDate}</td>
@@ -197,6 +222,22 @@ export default function BookingManager({ user, onSelectBooking, onCreateBookingC
                     <div style={{ gridColumn: '1 / -1' }}><MapPin size={12} style={{ marginRight: '4px' }} /> {loc ? loc.name : 'N/A'}</div>
                     <div style={{ gridColumn: '1 / -1' }}><strong>Navio:</strong> {b.vesselVoyage}</div>
                     <div style={{ gridColumn: '1 / -1' }}><strong>Containers:</strong> {b.containers?.length || 0} | <strong>Sacas:</strong> {b.bagsQuantity}</div>
+                    {searchQuery.trim() && getMatchedContainers(b, searchQuery).length > 0 && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                        {getMatchedContainers(b, searchQuery).map(mc => (
+                          <span key={mc.id || mc.containerNumber} style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            color: 'var(--color-brand)',
+                            backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                            padding: '2px 6px',
+                            borderRadius: '4px'
+                          }}>
+                            📦 {mc.containerNumber}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {user.role === 'ADM' && (

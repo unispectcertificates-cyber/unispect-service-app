@@ -2,9 +2,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Search, Camera, Image, Trash2, ArrowLeft, X,
   CheckCircle2, Package, ClipboardList, Settings,
-  ChevronRight, Loader2, User, LogOut
+  ChevronRight, Loader2, User, LogOut, RefreshCw
 } from 'lucide-react';
-import { db, useBookings, useExportadores, useLocais, getSealText } from '../db';
+import { db, useBookings, useExportadores, useLocais, getSealText, matchesBooking, getMatchedContainers } from '../db';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
@@ -181,7 +181,7 @@ function BottomNav({ activeTab, onTabChange, hasContainer }) {
 // ────────────────────────────────────────────────────────────────────────────
 // Painel de Ajustes
 // ────────────────────────────────────────────────────────────────────────────
-function AjustesPanel({ user, onLogout }) {
+function AjustesPanel({ user, onLogout, onRefresh, isRefreshing }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)' }}>
@@ -217,6 +217,31 @@ function AjustesPanel({ user, onLogout }) {
           )}
         </div>
       </div>
+
+      {/* Botão de Atualizar e Sincronizar Sistema */}
+      <button
+        onClick={onRefresh}
+        disabled={isRefreshing}
+        style={{
+          padding: '14px 16px',
+          borderRadius: '14px',
+          border: '1px solid var(--border-color)',
+          backgroundColor: 'var(--bg-secondary)',
+          color: 'var(--text-primary)',
+          fontWeight: '800',
+          fontSize: '14px',
+          cursor: isRefreshing ? 'wait' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '10px',
+          boxShadow: 'var(--shadow-sm)',
+          transition: 'all 0.2s ease'
+        }}
+      >
+        <RefreshCw size={18} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+        <span>{isRefreshing ? 'Atualizando Sistema...' : '🔄 Atualizar e Sincronizar Dados'}</span>
+      </button>
 
       {/* Info do app */}
       <div style={S.card}>
@@ -271,7 +296,7 @@ function AjustesPanel({ user, onLogout }) {
 // ────────────────────────────────────────────────────────────────────────────
 // Componente Principal
 // ────────────────────────────────────────────────────────────────────────────
-export default function MobileAppView({ user, onLogout, hideHeader = false }) {
+export default function MobileAppView({ user, onLogout, hideHeader = false, onRefresh, isRefreshing: parentRefreshing = false }) {
   const bookings     = useBookings();
   const exportadores = useExportadores();
   const locais       = useLocais();
@@ -293,6 +318,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   // ── Upload de fotos
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
+  // ── Atualização Manual / Refresh
+  const [localRefreshing, setLocalRefreshing] = useState(false);
+  const isRefreshing = parentRefreshing || localRefreshing;
+
   // ── Toast de erro (não-bloqueante, substitui alert())
   const [toastError, setToastError] = useState('');
   const toastTimerRef = useRef(null);
@@ -301,6 +330,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToastError(''), 5000);
   }, []);
+
+  const handleManualRefresh = useCallback(async () => {
+    setLocalRefreshing(true);
+    try {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const reg of registrations) {
+            await reg.update();
+          }
+        } catch (e) {
+          console.warn('SW update warning:', e);
+        }
+      }
+      await db.init().catch(e => console.warn('DB init refresh:', e));
+      if (onRefresh) {
+        await onRefresh();
+      }
+      showToast('✓ Dados e sistema sincronizados com sucesso!');
+    } catch (err) {
+      console.error('Refresh error:', err);
+      showToast('Erro ao atualizar: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      if (isMountedRef.current) setLocalRefreshing(false);
+    }
+  }, [onRefresh, showToast]);
 
   // ── Preview de foto
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
@@ -353,6 +408,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
       if (!isMountedRef.current) return;
 
       setSelectedBooking(updatedBooking);
+      selectedBookingRef.current = updatedBooking;
       setSaveStatus('saved');
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
@@ -361,9 +417,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     } catch (err) {
       if (!isMountedRef.current) return;
       setSaveStatus('idle');
+      showToast((err.message || 'Erro ao salvar.') + ' Reabra o Booking para carregar os dados atuais; esta edição não foi salva.');
       console.error('Auto-save error:', err);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showToast]);
 
   // ── Auto-save com debounce (para campos de texto)
   const debouncedSave = useCallback((booking, container) => {
@@ -393,19 +450,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
     });
   }, [debouncedSave, selectedContainer]);
 
-  // ── Filtro de bookings
-  const filteredBookings = bookings.filter(b => {
-    const term = searchQuery.toLowerCase().trim();
-    if (!term) return true; // mostra todos
-    const expName = (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase();
-    return (
-      (b.bookingNumber || '').toLowerCase().includes(term) ||
-      (b.certificateNumber || '').toLowerCase().includes(term) ||
-      (b.stuffingReportNumber || '').toLowerCase().includes(term) ||
-      expName.includes(term) ||
-      (b.containers || []).some(c => (c.containerNumber || '').toLowerCase().includes(term))
-    );
-  });
+  // ── Filtro de bookings com busca universal e inteligente
+  const filteredBookings = bookings.filter(b => 
+    matchesBooking(b, searchQuery, { exportadores, locais })
+  );
 
   // ── Navegação: abrir Booking
   const openBooking = useCallback(b => {
@@ -563,9 +611,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
   // ─────────────────────────────────────────────────────────────────────────
   const renderList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>
-        📋 Bookings
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>
+          📋 Bookings
+        </h2>
+        <button
+          onClick={handleManualRefresh}
+          disabled={isRefreshing}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            padding: '8px 14px',
+            color: 'var(--text-primary)',
+            fontSize: '12px',
+            fontWeight: '700',
+            cursor: isRefreshing ? 'wait' : 'pointer',
+            boxShadow: 'var(--shadow-sm)'
+          }}
+        >
+          <RefreshCw size={14} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+          <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
+        </button>
+      </div>
 
       {/* Campo de busca */}
       <div style={{
@@ -579,10 +650,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
         <Search size={18} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
         <input
           type="text"
-          placeholder="Buscar booking, container, exportador..."
+          placeholder="Buscar container (MSDU-882129-7, MSDU8821297), booking, exportador..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', width: '100%', outline: 'none', fontSize: '14px' }}
+          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', width: '100%', outline: 'none', fontSize: '13px' }}
         />
         {searchQuery && (
           <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}>
@@ -609,6 +680,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
         const sc  = statusColor(b.status);
         const contCount = (b.containers || []).length;
         const finished  = isFinished(b);
+        const matchedConts = searchQuery.trim() ? getMatchedContainers(b, searchQuery) : [];
         return (
           <div
             key={b.id}
@@ -646,6 +718,23 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
               <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
                 🗃 {contCount} container{contCount !== 1 ? 's' : ''}
               </div>
+              {matchedConts.length > 0 && (
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '6px' }}>
+                  {matchedConts.map(mc => (
+                    <span key={mc.id || mc.containerNumber} style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      color: 'var(--color-brand)',
+                      backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                      border: '1px solid rgba(197, 168, 128, 0.3)',
+                      padding: '2px 6px',
+                      borderRadius: '4px'
+                    }}>
+                      📦 {mc.containerNumber}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <ChevronRight size={20} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
           </div>
@@ -1068,38 +1157,62 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
       fontFamily: "'Outfit', sans-serif"
     }}>
       {/* Header fixo */}
-      <header style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '12px 20px',
-        backgroundColor: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border-color)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            background: 'var(--color-brand-gradient)',
-            color: '#fff',
-            fontWeight: '800',
-            fontSize: '13px',
-            width: '30px',
-            height: '30px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>US</div>
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
-            <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
+      {!hideHeader && (
+        <header style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 20px',
+          backgroundColor: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border-color)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              background: 'var(--color-brand-gradient)',
+              color: '#fff',
+              fontWeight: '800',
+              fontSize: '13px',
+              width: '30px',
+              height: '30px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>US</div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
+              <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
+            </div>
           </div>
-        </div>
-        {/* Indicador de save no header quando em container */}
-        {screen === 'container' && <SaveIndicator status={saveStatus} />}
-      </header>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Indicador de save no header quando em container */}
+            {screen === 'container' && <SaveIndicator status={saveStatus} />}
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              style={{
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '6px 10px',
+                color: 'var(--text-primary)',
+                fontSize: '11px',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                cursor: isRefreshing ? 'wait' : 'pointer'
+              }}
+            >
+              <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+              <span>{isRefreshing ? '...' : 'Atualizar'}</span>
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Conteúdo principal com padding para nav inferior */}
       <main style={{
@@ -1110,7 +1223,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false }) {
         {screen === 'list'      && renderList()}
         {screen === 'booking'   && renderBooking()}
         {screen === 'container' && renderContainer()}
-        {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} />}
+        {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} />}
       </main>
 
       {/* Bottom Navigation */}

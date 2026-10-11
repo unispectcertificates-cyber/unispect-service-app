@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, Plus, FileText, X } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate } from '../db';
+import { ChevronLeft, Plus, FileText, X, Search } from 'lucide-react';
+import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery } from '../db';
 import ContainerDetail from './ContainerDetail';
 import BottomDrawer from './BottomDrawer';
 
@@ -11,6 +11,7 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
   const locations = useLocais();
   const [prevBookingId, setPrevBookingId] = useState(bookingId);
   const [booking, setBooking] = useState(() => bookings.find(b => b.id === bookingId));
+  const [containerSearch, setContainerSearch] = useState('');
 
   useEffect(() => {
     const bk = bookings.find(b => b.id === bookingId);
@@ -554,17 +555,62 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
 
       {/* Containers */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: '700' }}>Containers do Booking</h2>
-          {canAddContainer && (
-            <button onClick={() => setShowAddContainerModal(true)} className="btn btn-primary" style={{ padding: '8px 16px' }}>
-              <Plus size={16} /> Adicionar Container
-            </button>
-          )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: '700', margin: 0 }}>Containers do Booking ({booking.containers?.length || 0})</h2>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {(booking.containers || []).length > 2 && (
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', minWidth: '240px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Filtrar (MSDU-882129-7, MSDU8821297)..."
+                  value={containerSearch}
+                  onChange={e => setContainerSearch(e.target.value)}
+                  style={{
+                    paddingLeft: '30px',
+                    paddingRight: containerSearch ? '28px' : '10px',
+                    paddingTop: '6px',
+                    paddingBottom: '6px',
+                    fontSize: '12px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    width: '100%'
+                  }}
+                />
+                {containerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setContainerSearch('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {canAddContainer && (
+              <button onClick={() => setShowAddContainerModal(true)} className="btn btn-primary" style={{ padding: '8px 16px' }}>
+                <Plus size={16} /> Adicionar Container
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {(booking.containers || []).map(cont => (
+          {(booking.containers || [])
+            .filter(c => matchesContainerQuery(c, containerSearch))
+            .map(cont => (
             <ContainerDetail 
               key={cont.id}
               container={cont}
@@ -579,6 +625,12 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
             <div className="glass-panel" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
               Nenhum container cadastrado neste Booking.
               {canAddContainer && <p style={{ fontSize: '13px', marginTop: '6px' }}>Clique em "Adicionar Container" para cadastrar o primeiro.</p>}
+            </div>
+          )}
+
+          {booking.containers && booking.containers.length > 0 && (booking.containers || []).filter(c => matchesContainerQuery(c, containerSearch)).length === 0 && (
+            <div className="glass-panel" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px' }}>
+              Nenhum container encontrado para a busca "{containerSearch}".
             </div>
           )}
         </div>

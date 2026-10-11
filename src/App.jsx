@@ -1,7 +1,9 @@
+import { findBooking, planImport, previewToken, normalizeContainerNumber, importFieldLabels } from './utils/bookingImport';
+import { parseRomaneioPdf } from './utils/pdfParser';
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores, isBookingNumberDuplicate, getSealText } from './db';
+import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -99,6 +101,17 @@ export default function App() {
     containers: []
   });
 
+  const [isSavingImport, setIsSavingImport] = useState(false);
+  const importSavingRef = useRef(false);
+  const [importSourceName, setImportSourceName] = useState('');
+  const [importReferences, setImportReferences] = useState([]);
+  let existingImportBooking = null;
+  let importError = '';
+  try { existingImportBooking = findBooking(bookings, newBookingData.bookingNumber); }
+  catch (error) { importError = error.message; }
+  const importPlan = planImport(existingImportBooking, newBookingData.containers || []);
+  const importPreviewToken = previewToken(existingImportBooking, importPlan);
+
   // PDF parsing state
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [pdfParseStatus, setPdfParseStatus] = useState(null); // 'success' | 'error' | null
@@ -130,26 +143,51 @@ export default function App() {
     };
   }, []);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshFeedback, setRefreshFeedback] = useState('');
+
   const handleRefreshData = () => { };
+
+  const handleSystemRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // 1. Atualiza Service Workers registrados
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const reg of registrations) {
+            await reg.update();
+          }
+        } catch (swErr) {
+          console.warn('SW update warning:', swErr);
+        }
+      }
+
+      // 2. Re-inicializa coleções se necessário
+      await db.init().catch(e => console.warn('DB init refresh:', e));
+
+      // 3. Feedback visual
+      handleRefreshData();
+      setRefreshFeedback('Sistema e dados atualizados com sucesso!');
+      setTimeout(() => setRefreshFeedback(''), 3500);
+    } catch (err) {
+      console.error('Erro ao atualizar sistema:', err);
+      setRefreshFeedback('Erro ao atualizar. Tente recarregar a página.');
+      setTimeout(() => setRefreshFeedback(''), 4000);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 600);
+    }
+  };
 
   // Estatísticas operacionais dos Bookings
   const countPendentes = bookings.filter(b => b.status === 'Pendente').length;
   const countAndamento = bookings.filter(b => b.status === 'Em andamento').length;
   const countFinalizados = bookings.filter(b => b.status === 'Finalizado').length;
 
-  // Filtragem dos Bookings
+  // Filtragem dos Bookings com busca inteligente universal
   const filteredBookings = bookings.filter(b => {
-    const term = searchQuery.toLowerCase().trim();
-    const matchesSearch = term === '' ||
-      b.certificateNumber.toLowerCase().includes(term) ||
-      b.bookingNumber.toLowerCase().includes(term) ||
-      (b.vesselVoyage || '').toLowerCase().includes(term) ||
-      (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase().includes(term) ||
-      (locais.find(l => l.id === b.locationId)?.name || '').toLowerCase().includes(term) ||
-      (b.containers || []).some(c => c.containerNumber.toLowerCase().includes(term));
-
+    const matchesSearch = matchesBooking(b, searchQuery, { exportadores, locais });
     const matchesStatus = statusFilter === 'Todos' || b.status === statusFilter;
-
     return matchesSearch && matchesStatus;
   });
 
@@ -159,37 +197,47 @@ export default function App() {
   // Criar booking (Salvar)
   const handleCreateBooking = async (e) => {
     e.preventDefault();
-    if (!newBookingData.bookingNumber || !newBookingData.exporterId || !newBookingData.locationId) {
+    if (importSavingRef.current || isParsingPdf) return;
+    if (importError || importPlan.invalid.length) {
+      alert(importError || 'Corrija os containers inválidos antes de confirmar.');
+      return;
+    }
+    if (!newBookingData.bookingNumber || (!existingImportBooking && (!newBookingData.exporterId || !newBookingData.locationId))) {
       alert('Preencha os campos obrigatórios.');
       return;
     }
-
-    if (isBookingNumberDuplicate(bookings, newBookingData.bookingNumber)) {
-      alert(`Este romaneio já foi inserido no sistema. (Booking: ${newBookingData.bookingNumber.trim()})`);
-      return;
-    }
-
-    const navioVoy = `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`;
-
+    importSavingRef.current = true;
+    setIsSavingImport(true);
     try {
-      // saveBookingWithValidation: valida duplicatas apenas na criação
-      const created = await db.saveBookingWithValidation({
+      const result = await db.importBooking({
         ...newBookingData,
-        vesselVoyage: navioVoy,
+        vesselVoyage: `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`,
         bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
         containers: newBookingData.containers || []
-      }, bookings);
-
+      }, {
+        expectedPreview: importPreviewToken,
+        sourceName: importSourceName || 'Cadastro manual',
+        actor: user,
+        relatedRecords: importReferences.filter(record =>
+          record.data.id === newBookingData.exporterId || record.data.id === newBookingData.locationId)
+      });
       handleClearForm();
       setShowCreateModal(false);
       handleRefreshData();
-      setSelectedBookingId(created.id);
+      setSelectedBookingId(result.booking.id);
+      setRefreshFeedback(`${result.addedCount} container(s) novo(s) inserido(s). ${result.preservedCount} já existente(s) preservado(s).`);
+      setTimeout(() => setRefreshFeedback(''), 6000);
     } catch (err) {
-      alert(err.message || 'Erro ao criar booking.');
+      alert(err.message || 'Erro ao importar o romaneio. Nenhuma alteração foi confirmada.');
+    } finally {
+      importSavingRef.current = false;
+      setIsSavingImport(false);
     }
   };
 
   const handleClearForm = () => {
+    setImportSourceName('');
+    setImportReferences([]);
     setNewBookingData({
       bookingNumber: '',
       exporterId: '',
@@ -220,6 +268,7 @@ export default function App() {
   };
 
   const handleDiscardBookingCreation = () => {
+    if (importSavingRef.current || isParsingPdf) return;
     handleClearForm();
     setShowCreateModal(false);
   };
@@ -234,686 +283,61 @@ export default function App() {
   };
 
   const handlePdfUpload = async (file) => {
-    if (!file) return;
+    if (!file || isParsingPdf || importSavingRef.current) return;
     if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
       setPdfParseStatus('error');
       setPdfParseMessage('Por favor, envie apenas arquivos PDF.');
       return;
     }
 
-    // Helper to parse numbers formatting (supporting Brazilian comma decimals and dot thousands)
-    const parseBrazilianOrStandardFloat = (str) => {
-      if (!str) return 0;
-      let clean = str.trim();
-      if (clean.includes(',')) {
-        // Has a comma, so it's Brazilian decimal. Remove dots, replace comma with dot.
-        clean = clean.replace(/\./g, '').replace(/,/g, '.');
-      } else if (/\.\d{3}$/.test(clean)) {
-        // No comma, but ends with a dot followed by exactly 3 digits (e.g. "1.080", "3.700").
-        // This is a thousands separator in Brazilian format. Remove the dot.
-        clean = clean.replace(/\./g, '');
-      }
-      return parseFloat(clean) || 0;
-    };
-
+    setImportSourceName('');
+    setNewBookingData(prev => ({ ...prev, containers: [] }));
+    setImportReferences([]);
     setIsParsingPdf(true);
     setPdfParseStatus(null);
     setPdfParseMessage('Lendo arquivo PDF...');
 
     try {
-      const reader = new FileReader();
+      const parsed = await parseRomaneioPdf(file, { exportadores, locais });
 
-      const readAsArrayBuffer = (f) => new Promise((resolve, reject) => {
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsArrayBuffer(f);
-      });
-
-      const arrayBuffer = await readAsArrayBuffer(file);
-
-      const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
-
-      let fullText = '';
-      const allPageRows = [];
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const items = (textContent.items || []).filter(item => item && item.str && item.str.trim());
-        
-        if (items.length > 0 && items[0].transform) {
-          const rows = [];
-          items.forEach(item => {
-            const x = item.transform[4];
-            const y = item.transform[5];
-            let row = rows.find(r => Math.abs(r.y - y) <= 4);
-            if (!row) {
-              row = { y, items: [] };
-              rows.push(row);
-            }
-            row.items.push({ x, str: item.str });
-          });
-
-          rows.sort((a, b) => b.y - a.y);
-          rows.forEach(r => r.items.sort((a, b) => a.x - b.x));
-          allPageRows.push(...rows);
-
-          const pageText = rows.map(r => r.items.map(it => it.str).join(' ')).join('\n');
-          fullText += pageText + '\n';
-        } else {
-          fullText += textContent.items.map(item => item.str).join(' ') + '\n';
-        }
-      }
-
-      // Normalize container types that might be split across spaces/slashes (e.g. 20" / DV, 40" / HC)
-      fullText = fullText.replace(/\b(20|40)\s*["']?\s*[\s|]*\/\s*(DV|HC|Dry|Reefer|GP|HR)\b/gi, (match, p1, p2) => p1 + '"/' + p2);
-
-      console.log('PDF Extracted Text:', fullText);
-
-      // Stop keywords list to prevent multi-column and dotted header text bleeding
-      const stopKeywords = [
-        /\bquantidade\b/i, /\bembalagem\b/i, /\bmercadoria\b/i, /\bmarca\b/i, 
-        /\barmador\b/i, /\bagente\b/i, /\brecinto\b/i, /\breferencia\b/i, 
-        /\bref\b/i, /\bimportador\b/i, /\bexportador\b/i, /\bdestino\b/i, 
-        /\bcnpj\b/i, /\bconteiner\b/i, /\bcontainer\b/i, /\blacres\b/i,
-        /\btara\b/i, /\bpeso\b/i, /\bn[oº°ª]\b/i
-      ];
-
-      // Robust field extractor with stop keywords and boundary cleanups
-      const extractFieldWithStops = (text, labelRegex, stopKeywordsList) => {
-        const match = text.match(labelRegex);
-        if (!match || !match[1]) return '';
-        let val = match[1].split('\n')[0].trim();
-        for (const kw of stopKeywordsList) {
-          const idx = val.search(kw);
-          if (idx !== -1) {
-            val = val.substring(0, idx).trim();
-          }
-        }
-        return val.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').replace(/\s+/g, ' ').trim();
-      };
-
-      // 1. Booking Number / Reserva
-      let bookingNumber = extractFieldWithStops(
-        fullText,
-        /(?:booking(?:\s*[\/|]\s*reserva)?|reserva(?:\s*[\/|]\s*booking)?|reserva\s*n[oºª.]?|booking\s*number|n[oºª.]\s*booking)[.\s:]*([A-Z0-9\/-]+)/i,
-        stopKeywords
-      );
-      if (bookingNumber) {
-        const bMatch = bookingNumber.match(/([A-Z0-9]{5,25})/i);
-        if (bMatch) bookingNumber = bMatch[1].toUpperCase();
-      }
-
-      if (bookingNumber && isBookingNumberDuplicate(bookings, bookingNumber)) {
-        setPdfParseStatus('error');
-        setPdfParseMessage(`Este romaneio já foi inserido no sistema. (Booking: ${bookingNumber})`);
-        setNewBookingData(prev => ({
-          ...prev,
-          bookingNumber: bookingNumber
-        }));
-        setIsParsingPdf(false);
-        return;
-      }
-
-      // 2. Vessel Name & Voyage / Navio / Viagem
-      let vesselName = extractFieldWithStops(
-        fullText,
-        /(?:navio(?:\s*[\/|]\s*viagem)?|vessel(?:\s*[\/|]\s*voyage)?|nome\s*do\s*navio)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-
-      // Clean any trailing stop keywords from vessel name
-      if (vesselName) {
-        for (const kw of stopKeywords) {
-          const idx = vesselName.search(kw);
-          if (idx !== -1) {
-            vesselName = vesselName.substring(0, idx).trim();
-          }
-        }
-        vesselName = vesselName.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').trim();
-      }
-
-      let vesselVoyageNum = '';
-      if (vesselName && vesselName.includes('/')) {
-        const parts = vesselName.split('/');
-        vesselName = parts[0].trim();
-        if (parts[1]) {
-          const vm2 = parts[1].trim().match(/([A-Z0-9]{2,10})/i);
-          if (vm2) vesselVoyageNum = vm2[1].toUpperCase();
-        }
-      }
-
-      if (!vesselVoyageNum) {
-        let rawVoyage = extractFieldWithStops(
-          fullText,
-          /(?:^|[\n\r]|[^a-z0-9])(?:viagem(?:\s*do\s*navio)?|voyage|voy|v\.)[.\s:]*([A-Z0-9\/-]+)/i,
-          stopKeywords
-        );
-        if (rawVoyage) {
-          const vm = rawVoyage.match(/([A-Z0-9]{2,10})/i);
-          if (vm) vesselVoyageNum = vm[1].toUpperCase();
-        }
-      }
-
-      let vesselVoyage = '';
-      if (vesselName && vesselVoyageNum) {
-        vesselVoyage = `${vesselName} V.${vesselVoyageNum}`;
-      } else if (vesselName) {
-        vesselVoyage = vesselName;
-      } else if (vesselVoyageNum) {
-        vesselVoyage = vesselVoyageNum;
-      }
-
-      // 3. Importador
-      let importadorExtracted = extractFieldWithStops(
-        fullText,
-        /(?:importador|importer|consignat[áa]rio|consignee)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-
-      // 4. Exporter & CNPJ Exportador
-      let cnpjExtracted = '';
-      const cnpjMatch = fullText.match(/(?:cnpj\s*exportador|cnpj)[^0-9]*(\d{2}[.\s]?\d{3}[.\s]?\d{3}\/?\d{4}[-.\s]?\d{2}|\d{14})/i);
-      if (cnpjMatch) cnpjExtracted = cnpjMatch[1].replace(/\D/g, '');
-
-      let exporterNameExtracted = extractFieldWithStops(
-        fullText,
-        /(?:exportador|exporter|shipper|empresa\s*exportadora)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-
-      let exporterId = '';
-      const cleanCnpjDigits = (cnpjExtracted || '').replace(/\D/g, '');
-
-      if (cleanCnpjDigits && cleanCnpjDigits.length >= 11) {
-        const foundByCnpj = exportadores.find(exp => (exp.cnpj || '').replace(/\D/g, '') === cleanCnpjDigits);
-        if (foundByCnpj) exporterId = foundByCnpj.id;
-      }
-
-      if (!exporterId && exporterNameExtracted) {
-        const exactMatch = exportadores.find(exp => exp.name.toLowerCase() === exporterNameExtracted.toLowerCase());
-        if (exactMatch) {
-          exporterId = exactMatch.id;
-        } else {
-          const commonWords = [
-            'exportadora', 'companhia', 'comércio', 'comercio', 'exterior', 'ltda', 'ltda.', 's.a.', 
-            'logistica', 'exportacao', 'importacao', 'agroindustrial', 'industria', 'indústria', 
-            'trading', 'cafe', 'café', 'coffee', 'cooperativa', 'coop', 'sa', 'limitada', 'group', 
-            'grupo', 'brasil', 'brazil', 'alimentos', 'comercial', 'eireli'
-          ];
-          const partialMatch = exportadores.find(exp => {
-            const expWords = exp.name.split(' ')
-              .map(w => w.toLowerCase().replace(/[^a-z0-9à-ú]/gi, '').trim())
-              .filter(w => w.length > 3 && !commonWords.includes(w));
-            
-            if (expWords.length === 0) return false;
-            
-            const normalizedExtracted = exporterNameExtracted.toLowerCase().replace(/[^a-z0-9à-ú]/gi, ' ');
-            const extractedWords = normalizedExtracted.split(/\s+/).filter(Boolean);
-            
-            return expWords.some(w => extractedWords.includes(w));
-          });
-          if (partialMatch) {
-            exporterId = partialMatch.id;
-          } else {
-            const newId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-            const newExp = {
-              id: newId,
-              name: exporterNameExtracted,
-              cnpj: cnpjExtracted || '',
-              email: '',
-              phone: ''
-            };
-            db.saveExportador(newExp).catch(e => console.error("Erro background saveExportador:", e));
-            exporterId = newId;
-          }
-        }
-      }
-
-      // 5. Default Container Type
-      let defaultContainerType = "40' HC";
-      let rawType = extractFieldWithStops(
-        fullText,
-        /(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type|tipo)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      if (rawType) {
-        const typeStr = rawType.toUpperCase();
-        if (typeStr.includes('20') && (typeStr.includes('DRY') || typeStr.includes('DV'))) {
-          defaultContainerType = "20' Dry";
-        } else if (typeStr.includes('20')) {
-          defaultContainerType = "20' Dry";
-        } else if (typeStr.includes('40') && typeStr.includes('DRY')) {
-          defaultContainerType = "40' Dry";
-        } else if (typeStr.includes('40') && (typeStr.includes('HC') || typeStr.includes('HIGH') || typeStr.includes('45G1'))) {
-          defaultContainerType = "40' HC";
-        } else if (typeStr.includes('REEFER')) {
-          defaultContainerType = "40' Reefer";
-        }
-      }
-
-      // 6. Recinto / Location of Operation
-      let rawLocation = extractFieldWithStops(
-        fullText,
-        /(?:recinto|recinto\s*alfandegado|local\s*de\s*operaç[õo]es|local\s*de\s*operacoes|terminal|local)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      if (/^(tipo|peso|container|lacre|marca|quant|totais)/i.test(rawLocation)) {
-        rawLocation = '';
-      }
-
-      let locationId = '';
-      if (rawLocation) {
-        const cleanRawLoc = rawLocation.toLowerCase();
-        const foundLoc = locais.find(loc => cleanRawLoc.includes(loc.name.toLowerCase()) || loc.name.toLowerCase().includes(cleanRawLoc));
-        if (foundLoc) {
-          locationId = foundLoc.id;
-        }
-      }
-
-      if (!locationId) {
-        for (const loc of locais) {
-          if (fullText.toLowerCase().includes(loc.name.toLowerCase())) {
-            locationId = loc.id;
-            break;
-          }
-        }
-      }
-
-      if (!locationId && rawLocation && rawLocation.length > 2) {
-        const newId = 'loc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-        const newLoc = { id: newId, name: rawLocation };
-        db.saveLocal(newLoc).catch(e => console.error("Erro background saveLocal:", e));
-        locationId = newId;
-      }
-
-      // 7. Commodity / Mercadoria
-      let rawMercadoria = extractFieldWithStops(
-        fullText,
-        /(?:mercadoria|produto|commodity|descriç[ãa]o\s*da\s*carga)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      let mercadoria = 'café';
-      if (rawMercadoria) {
-        const cleanMerc = rawMercadoria.replace(/^[:\s\-.]+/, '').trim();
-        const lowerMerc = cleanMerc.toLowerCase();
-        if (lowerMerc.includes('pimenta')) {
-          if (lowerMerc.includes('vermelha')) mercadoria = 'Pimenta Vermelha';
-          else if (lowerMerc.includes('branca')) mercadoria = 'Pimenta Branca';
-          else mercadoria = 'Pimenta Preta';
-        } else if (lowerMerc.includes('cravo') || lowerMerc.includes('clove')) {
-          mercadoria = 'Cravo';
-        } else if (lowerMerc.includes('café') || lowerMerc.includes('cafe') || lowerMerc.includes('coffee')) {
-          mercadoria = 'café';
-        } else {
-          mercadoria = cleanMerc;
-        }
-      }
-
-      // 8. Bags Quantity Total / Quantidade
-      let bagsQuantityStr = extractFieldWithStops(
-        fullText,
-        /(?:quantidade|quant\.?\s*total|quantidade\s*de\s*sacas|total\s*de\s*sacas|qtd\s*sacas)[.\s:]*([0-9.,]+)/i,
-        stopKeywords
-      );
-      let bagsQuantity = '';
-      if (bagsQuantityStr) {
-        const matchNum = bagsQuantityStr.match(/([0-9.,]+)/);
-        if (matchNum) {
-          bagsQuantity = matchNum[1].replace(/\./g, '').replace(/,/g, '').trim();
-        }
-      }
-      if (!bagsQuantity) {
-        const totalBagsMatch = fullText.match(/(?:quant\.?\s*total\s*em\s*sacas|quantidade\s*total\s*em\s*sacas|quantidade|total\s*de\s*sacas)[^0-9]*([0-9.,]+)/i);
-        if (totalBagsMatch && totalBagsMatch[1]) {
-          bagsQuantity = totalBagsMatch[1].replace(/[.\s,]/g, '').trim();
-        }
-      }
-      if (!bagsQuantity) {
-        const qtyRegexes = [
-          /\b(\d+)\s*(?:bags|sacas|volumes|sacaria|bag|bags\s*qty)\b/i,
-          /(?:quantidade|quantity|quant|qty|qtd|bags\s*qty)[^a-zA-Z0-9]*([0-9.,]+)/i
-        ];
-        for (const rx of qtyRegexes) {
-          const match = fullText.match(rx);
-          if (match && match[1]) {
-            const cleanNum = match[1].replace(/[.\s,]/g, '').trim();
-            if (cleanNum && !isNaN(cleanNum)) {
-              bagsQuantity = cleanNum;
-              break;
-            }
-          }
-        }
-      }
-
-      // 9. Port of Destination / Destino
-      let portoDestino = extractFieldWithStops(
-        fullText,
-        /(?:destino|destination|porto\s*de\s*destino|porto\s*destino|port\s*of\s*discharge|pod)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      if (/^(n[oº°ª]|container|conteiner|tipo|peso|quant|lacres|marca|totais)/i.test(portoDestino)) {
-        portoDestino = '';
-      }
-
-      // 10. Carrier / Armador
-      let armador = extractFieldWithStops(
-        fullText,
-        /(?:armador|carrier|linha|shipping\s*line)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      if (!armador || armador.toLowerCase().includes('fumigação') || armador.toLowerCase().includes('fumigacao')) {
-        armador = '';
-        const carriers = ['Maersk', 'MSC', 'CMA CGM', 'Hapag-Lloyd', 'Hapag', 'HMM', 'Cosco', 'ONE', 'Ocean Network Express', 'Zim', 'Log-In', 'Login', 'Evergreen'];
-        for (const carrier of carriers) {
-          if (fullText.toLowerCase().includes(carrier.toLowerCase())) {
-            armador = carrier === 'Hapag' ? 'Hapag-Lloyd' : (carrier === 'Login' ? 'Log-In' : carrier);
-            break;
-          }
-        }
-      }
-
-      // 11. Packaging / Embalagem
-      let rawEmbalagem = extractFieldWithStops(
-        fullText,
-        /(?:embalagem|tipo\s*de\s*embalagem|packaging)[.\s:]*([^\n\r]+)/i,
-        stopKeywords
-      );
-      let embalagem = 'sacaria';
-      if (rawEmbalagem) {
-        const lowerEmb = rawEmbalagem.toLowerCase();
-        if (lowerEmb.includes('big') || lowerEmb.includes('bag')) embalagem = 'Big bags';
-        else if (lowerEmb.includes('bulk') || lowerEmb.includes('granel')) embalagem = 'Bulk Line';
-        else if (lowerEmb.includes('caixa') || lowerEmb.includes('box')) embalagem = 'Caixa';
-        else embalagem = 'sacaria';
-      } else {
-        const lowercaseText = fullText.toLowerCase();
-        if (lowercaseText.includes('big bag') || lowercaseText.includes('bigbag') || lowercaseText.includes('bag 1000') || lowercaseText.includes('bag 1.000')) {
-          embalagem = 'Big bags';
-        } else if (lowercaseText.includes('bulk') || lowercaseText.includes('granel')) {
-          embalagem = 'Bulk Line';
-        } else if (lowercaseText.includes('box') || lowercaseText.includes('caixa')) {
-          embalagem = 'Caixa';
-        } else {
-          embalagem = 'sacaria';
-        }
-      }
-
-      // 12. Parse Containers, Seals, Weights (Net & Gross), Tara, and Brand
-      const containerRegexLine = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
-      const lines = fullText.split('\n');
-      const lineContainers = [];
-
-      for (const line of lines) {
-        let cMatch;
-        containerRegexLine.lastIndex = 0;
-        while ((cMatch = containerRegexLine.exec(line)) !== null) {
-          const rawNum = cMatch[1].trim().toUpperCase().replace(/[-\s]/g, '');
-          if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
-
-          const containerIdx = line.indexOf(cMatch[0]);
-          let subAfter = line.substring(containerIdx + cMatch[0].length).trim();
-
-          // 1. Definite Seal
-          let definiteSeal = '';
-          const sealMatch = subAfter.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
-          if (sealMatch) {
-            const candidate = sealMatch[1].trim();
-            if (!/^(20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|45G1|22G1|42G1)$/i.test(candidate)) {
-              definiteSeal = candidate;
-              subAfter = subAfter.replace(sealMatch[0], ' ');
-            }
-          }
-
-          // 2. Brand / Lote (e.g. 002/1500/1339 or MAC.323/2026 or 0056)
-          let brand = '';
-          const oicMatch = subAfter.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
-          if (oicMatch) {
-            brand = oicMatch[1].trim();
-            subAfter = subAfter.replace(oicMatch[0], ' ');
-          } else {
-            const codeMatch = subAfter.match(/^\s*(0\d{3})\b/);
-            if (codeMatch) {
-              brand = codeMatch[1];
-              subAfter = subAfter.replace(codeMatch[0], ' ');
-            }
-          }
-
-          // 3. Container Type
-          let containerType = defaultContainerType;
-          const typeMatch = subAfter.match(/(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:45G1|22G1|42G1)\b/i);
-          if (typeMatch) {
-            const rawT = typeMatch[0].toUpperCase();
-            if (rawT.includes('20') || rawT.includes('22G1') || rawT.includes('DV')) containerType = "20' Dry";
-            else if (rawT.includes('45G1') || rawT.includes('HC')) containerType = "40' HC";
-            else if (rawT.includes('REEFER')) containerType = "40' Reefer";
-            else if (rawT.includes('40')) containerType = "40' Dry";
-            subAfter = subAfter.replace(typeMatch[0], ' ');
-          }
-
-          // 4. Extract all numeric tokens (weights and quantities)
-          const rawNumTokens = subAfter.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
-          
-          const parseVal = (str) => {
-            if (!str) return 0;
-            let s = str.trim();
-            if (s.includes(',')) {
-              s = s.replace(/\./g, '').replace(/,/g, '.');
-            } else if (/\.\d{3}$/.test(s)) {
-              s = s.replace(/\./g, '');
-            }
-            return parseFloat(s) || 0;
-          };
-
-          let rowBags = 0;
-          let netWeight = '';
-          let tara = '';
-          let grossWeight = '';
-
-          if (rawNumTokens.length >= 4) {
-            // 4 columns: Quant, Net Weight (Peso Carga), Tara, Gross Weight (Peso Bruto)
-            rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
-            netWeight = rawNumTokens[1];
-            tara = rawNumTokens[2].replace(/[.,]/g, '');
-            grossWeight = rawNumTokens[3];
-          } else if (rawNumTokens.length === 3) {
-            const v0 = parseVal(rawNumTokens[0]);
-            const v1 = parseVal(rawNumTokens[1]);
-            const v2 = parseVal(rawNumTokens[2]);
-            if (v1 >= 1800 && v1 <= 4900 && v2 > v0) {
-              netWeight = rawNumTokens[0];
-              tara = rawNumTokens[1].replace(/[.,]/g, '');
-              grossWeight = rawNumTokens[2];
-            } else {
-              rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
-              netWeight = rawNumTokens[1];
-              grossWeight = rawNumTokens[2];
-            }
-          } else if (rawNumTokens.length === 2) {
-            netWeight = rawNumTokens[0];
-            grossWeight = rawNumTokens[1];
-          } else if (rawNumTokens.length === 1) {
-            const v0 = parseVal(rawNumTokens[0]);
-            if (v0 >= 1800 && v0 <= 4900) {
-              tara = rawNumTokens[0].replace(/[.,]/g, '');
-            } else if (v0 > 5000) {
-              netWeight = rawNumTokens[0];
-            } else {
-              rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
-            }
-          }
-
-          if (!tara) {
-            const taraCand = rawNumTokens.find(t => {
-              const v = parseVal(t);
-              return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
-            });
-            if (taraCand) tara = taraCand.replace(/[.,]/g, '');
-          }
-
-          lineContainers.push({
-            id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-            containerNumber: rawNum,
-            containerType: containerType,
-            provisionalSeals: [], // Array of strings only
-            definiteSeal: definiteSeal || '',
-            fumigationDate: '',
-            fitoDate: '',
-            definiteSealDate: '',
-            notes: '',
-            photos: [],
-            bagsQuantity: rowBags,
-            netWeight: netWeight || '',
-            tara: tara || '',
-            grossWeight: grossWeight || '',
-            brand: brand || ''
-          });
-        }
-      }
-
-      let parsedContainers = [];
-
-      if (lineContainers.length > 0) {
-        // Remove duplicates by containerNumber
-        const seen = new Set();
-        parsedContainers = lineContainers.filter(c => {
-          if (seen.has(c.containerNumber)) return false;
-          seen.add(c.containerNumber);
-          return true;
-        });
-      } else {
-        const containerRegexGlobal = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
-        const containerMatches = [];
-        let match;
-        while ((match = containerRegexGlobal.exec(fullText)) !== null) {
-          const rawNum = match[1].trim().toUpperCase().replace(/[-\s]/g, '');
-          if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
-
-          containerMatches.push({
-            number: rawNum,
-            index: match.index,
-            length: match[0].length
-          });
-        }
-
-        for (let i = 0; i < containerMatches.length; i++) {
-          const currentMatch = containerMatches[i];
-          const nextMatch = containerMatches[i + 1];
-
-          const startIndex = currentMatch.index;
-          const endIndex = nextMatch ? nextMatch.index : fullText.length;
-          const segment = fullText.substring(startIndex, endIndex);
-
-          const containerNumber = currentMatch.number;
-
-          let definiteSeal = '';
-          const sealMatch = segment.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
-          if (sealMatch && sealMatch[1] !== containerNumber) {
-            definiteSeal = sealMatch[1].trim();
-          }
-
-          let brand = '';
-          const oicMatch = segment.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
-          if (oicMatch) brand = oicMatch[1].trim();
-
-          const rawNumTokens = segment.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
-          const parseVal = (str) => {
-            if (!str) return 0;
-            let s = str.trim();
-            if (s.includes(',')) {
-              s = s.replace(/\./g, '').replace(/,/g, '.');
-            } else if (/\.\d{3}$/.test(s)) {
-              s = s.replace(/\./g, '');
-            }
-            return parseFloat(s) || 0;
-          };
-
-          let rowBags = 0;
-          let netWeight = '';
-          let tara = '';
-          let grossWeight = '';
-
-          const weightTokens = rawNumTokens.filter(t => t !== containerNumber && !containerNumber.includes(t));
-          if (weightTokens.length >= 4) {
-            rowBags = parseInt(weightTokens[0].replace(/[.,]/g, ''), 10) || 0;
-            netWeight = weightTokens[1];
-            tara = weightTokens[2].replace(/[.,]/g, '');
-            grossWeight = weightTokens[3];
-          } else if (weightTokens.length >= 2) {
-            netWeight = weightTokens[0];
-            grossWeight = weightTokens[weightTokens.length - 1];
-            const taraCand = weightTokens.find(t => {
-              const v = parseVal(t);
-              return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
-            });
-            if (taraCand) tara = taraCand.replace(/[.,]/g, '');
-          }
-
-          parsedContainers.push({
-            id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-            containerNumber,
-            containerType: defaultContainerType,
-            provisionalSeals: [],
-            definiteSeal: definiteSeal || '',
-            fumigationDate: '',
-            fitoDate: '',
-            definiteSealDate: '',
-            notes: '',
-            photos: [],
-            bagsQuantity: rowBags,
-            netWeight: netWeight || '',
-            tara: tara || '',
-            grossWeight: grossWeight || '',
-            brand: brand || ''
-          });
-        }
-      }
-
-      const totalBagsNum = parseBrazilianOrStandardFloat(bagsQuantity);
-      if (totalBagsNum > 0 && parsedContainers.length > 0) {
-        const perContainerBags = Math.round(totalBagsNum / parsedContainers.length);
-        parsedContainers.forEach(c => {
-          if (!c.bagsQuantity) c.bagsQuantity = perContainerBags;
-        });
-      }
-
+      setImportSourceName(file.name);
+      setImportReferences(parsed.pendingReferences || []);
       // Pre-fill fields
       setNewBookingData(prev => ({
         ...prev,
-        bookingNumber: bookingNumber || prev.bookingNumber,
-        vesselName: vesselName || prev.vesselName,
-        vesselVoyageNum: vesselVoyageNum || prev.vesselVoyageNum,
-        vesselVoyage: vesselVoyage || prev.vesselVoyage,
-        exporterId: exporterId || prev.exporterId,
-        locationId: locationId || prev.locationId,
-        mercadoria: mercadoria || prev.mercadoria,
-        bagsQuantity: bagsQuantity || prev.bagsQuantity,
-        portoDestino: portoDestino || prev.portoDestino,
-        importador: importadorExtracted || prev.importador,
-        armador: armador || prev.armador,
-        embalagem: embalagem || prev.embalagem,
-        containers: parsedContainers
+        bookingNumber: parsed.bookingNumber,
+        vesselName: parsed.vesselName || prev.vesselName,
+        vesselVoyageNum: parsed.vesselVoyageNum || prev.vesselVoyageNum,
+        vesselVoyage: parsed.vesselVoyage || prev.vesselVoyage,
+        exporterId: parsed.exporterId || prev.exporterId,
+        locationId: parsed.locationId || prev.locationId,
+        mercadoria: parsed.mercadoria || prev.mercadoria,
+        bagsQuantity: parsed.bagsQuantity || prev.bagsQuantity,
+        portoDestino: parsed.portoDestino || prev.portoDestino,
+        importador: parsed.importador || prev.importador,
+        armador: parsed.armador || prev.armador,
+        embalagem: parsed.embalagem || prev.embalagem,
+        containers: parsed.containers || []
       }));
 
       setPdfParseStatus('success');
 
       let fieldsFound = [];
-      if (bookingNumber) fieldsFound.push('Booking');
-      if (vesselName) fieldsFound.push('Navio');
-      if (vesselVoyageNum) fieldsFound.push('Viagem');
-      if (exporterId) fieldsFound.push('Exportador');
-      if (importadorExtracted) fieldsFound.push('Importador');
-      if (bagsQuantity) fieldsFound.push('Qtd Sacas');
-      if (portoDestino) fieldsFound.push('Destino');
-      if (armador) fieldsFound.push('Armador');
-      if (locationId) fieldsFound.push('Recinto');
-      if (mercadoria) fieldsFound.push('Mercadoria');
+      if (parsed.bookingNumber) fieldsFound.push('Booking');
+      if (parsed.vesselName) fieldsFound.push('Navio');
+      if (parsed.vesselVoyageNum) fieldsFound.push('Viagem');
+      if (parsed.exporterId) fieldsFound.push('Exportador');
+      if (parsed.importador) fieldsFound.push('Importador');
+      if (parsed.bagsQuantity) fieldsFound.push('Qtd Sacas');
+      if (parsed.portoDestino) fieldsFound.push('Destino');
+      if (parsed.armador) fieldsFound.push('Armador');
+      if (parsed.locationId) fieldsFound.push('Recinto');
+      if (parsed.mercadoria) fieldsFound.push('Mercadoria');
 
       if (fieldsFound.length > 0) {
         let msg = `Sucesso! Preenchido: ${fieldsFound.join(', ')}.`;
-        if (parsedContainers.length > 0) {
-          msg += ` Encontrado(s) ${parsedContainers.length} container(s).`;
+        if (parsed.containers?.length > 0) {
+          msg += ` Encontrado(s) ${parsed.containers.length} container(s).`;
         }
         setPdfParseMessage(msg);
       } else {
@@ -924,6 +348,8 @@ export default function App() {
     } catch (err) {
       console.error('Error parsing PDF:', err);
       setPdfParseStatus('error');
+      setImportSourceName('');
+      setNewBookingData(prev => ({ ...prev, containers: [] }));
       setPdfParseMessage('Erro ao processar o PDF. Verifique se o arquivo está corrompido.');
     } finally {
       setIsParsingPdf(false);
@@ -1035,27 +461,24 @@ export default function App() {
               backgroundColor: isOnline ? '#10b981' : '#ef4444'
             }} />
             <button
-              onClick={async () => {
-                await db.syncPull();
-                await db.syncPush();
-                handleRefreshData();
-              }}
+              onClick={handleSystemRefresh}
+              disabled={isRefreshing}
               style={{
                 background: 'rgba(255,255,255,0.05)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: '6px',
-                padding: '4px 8px',
+                padding: '4px 10px',
                 color: '#fff',
                 fontSize: '11px',
                 fontWeight: '700',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
+                gap: '5px',
                 cursor: 'pointer'
               }}
             >
-              <RefreshCw size={10} />
-              <span>Sincronizar</span>
+              <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+              <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
             </button>
           </div>
         </header>
@@ -1127,6 +550,29 @@ export default function App() {
               {user.role === 'ADM' ? 'MASTER' : 'INSPETOR'}
             </span>
           </div>
+
+          {/* Botão de Atualizar Sistema no Topo */}
+          <button
+            onClick={handleSystemRefresh}
+            disabled={isRefreshing}
+            className="btn btn-secondary"
+            title="Recarregar e sincronizar dados do sistema"
+            style={{
+              padding: '8px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '12px',
+              fontWeight: '700',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              cursor: isRefreshing ? 'wait' : 'pointer'
+            }}
+          >
+            <RefreshCw size={13} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+            <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
+          </button>
 
           <button
             onClick={handleLogout}
@@ -1332,22 +778,46 @@ export default function App() {
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Bem-vindo, {user.username}</p>
               </div>
 
-              {currentTab !== 'bookings' && currentTab !== 'field-portal' && currentTab !== 'settings' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <button
-                  onClick={() => {
-                    const isMobile = window.innerWidth <= 1024;
-                    if (isMobile && (currentTab === 'locais' || currentTab === 'inspectors')) {
-                      setCurrentTab('settings');
-                    } else {
-                      setCurrentTab('bookings');
-                    }
-                  }}
+                  onClick={handleSystemRefresh}
+                  disabled={isRefreshing}
                   className="btn btn-secondary"
-                  style={{ padding: '8px 14px' }}
+                  title="Atualizar dados e sincronizar o sistema"
+                  style={{
+                    padding: '8px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    cursor: isRefreshing ? 'wait' : 'pointer'
+                  }}
                 >
-                  ← Voltar
+                  <RefreshCw size={15} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+                  <span>{isRefreshing ? 'Atualizando...' : 'Atualizar Sistema'}</span>
                 </button>
-              )}
+
+                {currentTab !== 'bookings' && currentTab !== 'field-portal' && currentTab !== 'settings' && (
+                  <button
+                    onClick={() => {
+                      const isMobile = window.innerWidth <= 1024;
+                      if (isMobile && (currentTab === 'locais' || currentTab === 'inspectors')) {
+                        setCurrentTab('settings');
+                      } else {
+                        setCurrentTab('bookings');
+                      }
+                    }}
+                    className="btn btn-secondary"
+                    style={{ padding: '8px 14px' }}
+                  >
+                    ← Voltar
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* CARDS DE STATUS */}
@@ -1392,16 +862,36 @@ export default function App() {
                   <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
                     <div className="filters-grid">
                       <div>
-                        <label>Busca por Booking ou Certificado</label>
+                        <label>Pesquisa Universal (Container, Booking, Exportador, Navio...)</label>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <Search size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
                           <input
                             type="text"
-                            placeholder="Buscar..."
+                            placeholder="Buscar container (MSDU-882129-7, MSDU8821297), booking, exportador..."
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
-                            style={{ paddingLeft: '36px' }}
+                            style={{ paddingLeft: '36px', paddingRight: searchQuery ? '36px' : '12px' }}
                           />
+                          {searchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setSearchQuery('')}
+                              style={{
+                                position: 'absolute',
+                                right: '10px',
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                padding: '4px'
+                              }}
+                              title="Limpar busca"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1457,7 +947,27 @@ export default function App() {
                           return (
                             <tr key={b.id}>
                               <td style={{ fontWeight: '700', color: 'var(--color-brand)' }}>{b.certificateNumber}</td>
-                              <td style={{ fontWeight: '600' }}>{b.bookingNumber}</td>
+                              <td style={{ fontWeight: '600' }}>
+                                <div>{b.bookingNumber}</div>
+                                {searchQuery.trim() && (
+                                  getMatchedContainers(b, searchQuery).map(mc => (
+                                    <div key={mc.id || mc.containerNumber} style={{
+                                      fontSize: '11px',
+                                      color: 'var(--color-brand)',
+                                      fontWeight: '700',
+                                      marginTop: '3px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px'
+                                    }}>
+                                      📦 {mc.containerNumber}
+                                    </div>
+                                  ))
+                                )}
+                              </td>
                               <td>{exp}</td>
                               <td>{b.vesselVoyage}</td>
                               <td>{loc}</td>
@@ -1547,7 +1057,27 @@ export default function App() {
                           return (
                             <tr key={b.id}>
                               <td style={{ fontWeight: '700', color: 'var(--color-brand)' }}>{b.certificateNumber}</td>
-                              <td style={{ fontWeight: '600' }}>{b.bookingNumber}</td>
+                              <td style={{ fontWeight: '600' }}>
+                                <div>{b.bookingNumber}</div>
+                                {searchQuery.trim() && (
+                                  getMatchedContainers(b, searchQuery).map(mc => (
+                                    <div key={mc.id || mc.containerNumber} style={{
+                                      fontSize: '11px',
+                                      color: 'var(--color-brand)',
+                                      fontWeight: '700',
+                                      marginTop: '3px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px'
+                                    }}>
+                                      📦 {mc.containerNumber}
+                                    </div>
+                                  ))
+                                )}
+                              </td>
                               <td>{exp}</td>
                               <td>{b.vesselVoyage}</td>
                               <td>{loc}</td>
@@ -1771,7 +1301,7 @@ export default function App() {
 
               {(currentTab === 'field-portal' || (isMobile && user.role !== 'Exportador')) && (
                 <motion.div key="tab-field-portal" {...pageTransition}>
-                  <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} />
+                  <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} onRefresh={handleSystemRefresh} isRefreshing={isRefreshing} />
                 </motion.div>
               )}
 
@@ -1923,12 +1453,13 @@ export default function App() {
         }}>
           <form onSubmit={handleCreateBooking} className="glass-panel create-modal-form" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
-              <h2 style={{ fontSize: '18px', fontFamily: 'var(--font-display)', color: 'var(--color-brand)' }}>Cadastrar Novo Booking / Certificado</h2>
-              <button type="button" onClick={handleDiscardBookingCreation} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              <h2 style={{ fontSize: '18px', fontFamily: 'var(--font-display)', color: 'var(--color-brand)' }}>Importar Romaneio / Cadastrar Booking</h2>
+              <button type="button" disabled={isSavingImport || isParsingPdf} onClick={handleDiscardBookingCreation} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
 
+            <fieldset disabled={isSavingImport || isParsingPdf} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             {/* Campo Drag & Drop PDF */}
             <div
               className={`pdf-drag-drop-zone ${isDragOver ? 'dragover' : ''} ${pdfParseStatus || ''}`}
@@ -1987,11 +1518,11 @@ export default function App() {
                   onChange={e => setNewBookingData({ ...newBookingData, bookingNumber: e.target.value })}
                   placeholder="BK-XXXXXX"
                   required
-                  style={isBookingNumberDuplicate(bookings, newBookingData.bookingNumber) ? { borderColor: '#ef4444' } : {}}
+                  style={existingImportBooking ? { borderColor: '#10b981' } : {}}
                 />
-                {isBookingNumberDuplicate(bookings, newBookingData.bookingNumber) && (
-                  <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', fontWeight: '600' }}>
-                    ⚠️ Este romaneio já foi inserido no sistema.
+                {existingImportBooking && (
+                  <p style={{ color: '#10b981', fontSize: '12px', marginTop: '4px', fontWeight: '600' }}>
+                    Booking encontrado. Serão acrescentados somente os containers novos.
                   </p>
                 )}
               </div>
@@ -2002,7 +1533,7 @@ export default function App() {
                   type="date"
                   value={newBookingData.launchDate}
                   onChange={e => setNewBookingData({ ...newBookingData, launchDate: e.target.value })}
-                  required
+                  required={!existingImportBooking}
                 />
               </div>
 
@@ -2045,7 +1576,7 @@ export default function App() {
                       stuffingReportNumber: newType === 'Redex Operation Report' ? '' : newBookingData.stuffingReportNumber
                     });
                   }}
-                  required
+                  required={!existingImportBooking}
                 >
                   <option value="Redex Operation Report">Redex Operation Report</option>
                   <option value="Container Stuffing Report">Container Stuffing Report</option>
@@ -2060,7 +1591,7 @@ export default function App() {
                     value={newBookingData.stuffingReportNumber}
                     onChange={e => setNewBookingData({ ...newBookingData, stuffingReportNumber: e.target.value })}
                     placeholder="Ex: SR-XXXXXX"
-                    required
+                    required={!existingImportBooking}
                   />
                 </div>
               )}
@@ -2086,7 +1617,7 @@ export default function App() {
                 <select
                   value={newBookingData.mercadoria}
                   onChange={e => setNewBookingData({ ...newBookingData, mercadoria: e.target.value })}
-                  required
+                  required={!existingImportBooking}
                 >
                   <option value="café">Café</option>
                   <option value="Cravo">Cravo</option>
@@ -2103,7 +1634,7 @@ export default function App() {
                   value={newBookingData.portoDestino}
                   onChange={e => setNewBookingData({ ...newBookingData, portoDestino: e.target.value })}
                   placeholder="Ex: Porto de Roterdã"
-                  required
+                  required={!existingImportBooking}
                 />
               </div>
 
@@ -2124,7 +1655,7 @@ export default function App() {
                   value={newBookingData.vesselName}
                   onChange={e => setNewBookingData({ ...newBookingData, vesselName: e.target.value })}
                   placeholder="Ex: MSC INGRID"
-                  required
+                  required={!existingImportBooking}
                 />
               </div>
 
@@ -2135,7 +1666,7 @@ export default function App() {
                   value={newBookingData.vesselVoyageNum}
                   onChange={e => setNewBookingData({ ...newBookingData, vesselVoyageNum: e.target.value })}
                   placeholder="Ex: 26A"
-                  required
+                  required={!existingImportBooking}
                 />
               </div>
 
@@ -2154,7 +1685,7 @@ export default function App() {
                 <select
                   value={newBookingData.embalagem}
                   onChange={e => setNewBookingData({ ...newBookingData, embalagem: e.target.value })}
-                  required
+                  required={!existingImportBooking}
                 >
                   <option value="sacaria">sacaria</option>
                   <option value="Big bags">Big bags</option>
@@ -2168,10 +1699,10 @@ export default function App() {
                 <select
                   value={newBookingData.exporterId}
                   onChange={e => setNewBookingData({ ...newBookingData, exporterId: e.target.value })}
-                  required
+                  required={!existingImportBooking}
                 >
                   <option value="">Selecione...</option>
-                  {exportadores.map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
+                  {[...exportadores, ...importReferences.filter(r => r.collection === 'exportadores').map(r => r.data)].map(exp => <option key={exp.id} value={exp.id}>{exp.name}</option>)}
                 </select>
               </div>
 
@@ -2180,10 +1711,10 @@ export default function App() {
                 <select
                   value={newBookingData.locationId}
                   onChange={e => setNewBookingData({ ...newBookingData, locationId: e.target.value })}
-                  required
+                  required={!existingImportBooking}
                 >
                   <option value="">Selecione...</option>
-                  {locais.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                  {[...locais, ...importReferences.filter(r => r.collection === 'locais').map(r => r.data)].map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                 </select>
               </div>
 
@@ -2194,7 +1725,7 @@ export default function App() {
                   value={newBookingData.bagsQuantity}
                   onChange={e => setNewBookingData({ ...newBookingData, bagsQuantity: e.target.value })}
                   placeholder="Qtd Sacas"
-                  required
+                  required={!existingImportBooking}
                 />
               </div>
 
@@ -2229,7 +1760,7 @@ export default function App() {
                       gap: '2px'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                        <span>{c.containerNumber}</span>
+                        <span>{c.containerNumber} — {importPlan.preserved.some(old => normalizeContainerNumber(old.containerNumber) === normalizeContainerNumber(c.containerNumber)) ? 'Já cadastrado' : 'Novo'}</span>
                         <span style={{ color: 'var(--text-secondary)' }}>{c.containerType}</span>
                       </div>
                       {getSealText(c.definiteSeal) && (
@@ -2263,14 +1794,27 @@ export default function App() {
               </div>
             )}
 
+            <section aria-live="polite" style={{ marginTop: '16px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+              <strong>Prévia da importação — {newBookingData.bookingNumber || 'informe o Booking'}</strong>
+              <p>{importPlan.added.length} novo(s), {importPlan.preserved.length} já cadastrado(s), {importPlan.repeated.length} repetição(ões). Total após confirmar: {importPlan.total}.</p>
+              {existingImportBooking && <p>{existingImportBooking.containers?.length || 0} container(s) do cadastro atual serão mantidos, inclusive os ausentes neste arquivo.</p>}
+              {existingImportBooking && <p>Fotos, inspeções e dados do Booking serão preservados. Nenhum container será excluído. Os outros campos deste formulário não substituem os dados existentes.</p>}
+              {importError && <p role="alert">{importError}</p>}
+              {importPlan.invalid.map(item => <p key={item.row} role="alert">Linha {item.row}: container inválido — {item.number}</p>)}
+              {importPlan.conflicts.map(item => <p key={item.number}>Divergência em {item.number}: {item.fields.map(field => importFieldLabels[field]).join(', ')}. Os dados já cadastrados serão mantidos.</p>)}
+              {importReferences.length > 0 && !existingImportBooking && <p>Novos cadastros de exportador/recinto selecionados serão gravados junto com o Booking.</p>}
+              {importSourceName && !newBookingData.containers?.length && <p>Não foram identificados containers. Confira o PDF antes de confirmar.</p>}
+            </section>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '14px', marginTop: '6px' }}>
-              <button type="button" onClick={handleDiscardBookingCreation} className="btn btn-danger">
-                Excluir
+              <button type="button" disabled={isSavingImport || isParsingPdf} onClick={handleDiscardBookingCreation} className="btn btn-danger">
+                Cancelar
               </button>
-              <button type="submit" className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff' }}>
-                Salvar
+              <button type="submit" disabled={isSavingImport || isParsingPdf || Boolean(importError) || importPlan.invalid.length > 0 || (Boolean(existingImportBooking) && !newBookingData.containers?.length)} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff' }}>
+                {isSavingImport ? 'Salvando...' : existingImportBooking ? 'Confirmar atualização' : 'Confirmar cadastro'}
               </button>
             </div>
+            </fieldset>
           </form>
         </div>
       )}
@@ -2324,6 +1868,30 @@ export default function App() {
         >
           <Plus size={24} />
         </button>
+      )}
+
+      {/* Toast Feedback */}
+      {refreshFeedback && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          backgroundColor: 'var(--bg-secondary)',
+          border: '1px solid var(--color-brand)',
+          color: 'var(--text-primary)',
+          padding: '12px 20px',
+          borderRadius: '12px',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          zIndex: 9999,
+          fontSize: '13px',
+          fontWeight: '700'
+        }}>
+          <CheckCircle2 size={18} style={{ color: '#10b981' }} />
+          <span>{refreshFeedback}</span>
+        </div>
       )}
     </div>
   );

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Search, Plus, Clipboard, Loader2, PlayCircle, CheckCircle, ArrowRight } from 'lucide-react';
-import { db, useBookings, useExportadores } from '../db';
+import { Search, Plus, Clipboard, Loader2, PlayCircle, CheckCircle, ArrowRight, X } from 'lucide-react';
+import { db, useBookings, useExportadores, useLocais, matchesBooking, getMatchedContainers } from '../db';
 import PullToRefresh from './PullToRefresh';
 
 export default function Dashboard({ user, onSelectBooking, onCreateBookingClick }) {
   const bookings = useBookings();
   const exportadores = useExportadores();
+  const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
   
   // Recarrega dados com simulação de rede (Pull-to-refresh)
@@ -16,20 +17,10 @@ export default function Dashboard({ user, onSelectBooking, onCreateBookingClick 
   const andamento = bookings.filter(b => b.status === 'Em andamento').length;
   const finalizados = bookings.filter(b => b.status === 'Finalizado').length;
 
-  // Busca por Booking ou Container
-  const filteredBookings = bookings.filter(b => {
-    const term = searchQuery.toLowerCase();
-    if (!term) return true;
-
-    const matchBooking = b.bookingNumber.toLowerCase().includes(term) || 
-                         b.certificateNumber.toLowerCase().includes(term);
-                         
-    const matchContainer = b.containers?.some(c => 
-      c.containerNumber.toLowerCase().includes(term)
-    );
-
-    return matchBooking || matchContainer;
-  });
+  // Busca Inteligente por Booking, Container, Exportador, Navio, etc.
+  const filteredBookings = bookings.filter(b => 
+    matchesBooking(b, searchQuery, { exportadores, locais })
+  );
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
@@ -77,21 +68,40 @@ export default function Dashboard({ user, onSelectBooking, onCreateBookingClick 
           border: '1px solid var(--border-color)',
           boxShadow: 'var(--shadow-sm)'
         }}>
-          <Search size={20} style={{ color: 'var(--text-muted)' }} />
+          <Search size={20} style={{ color: 'var(--color-brand)', flexShrink: 0 }} />
           <input 
             type="text" 
-            placeholder="Buscar por Booking, Certificado ou número do Container..." 
+            placeholder="Buscar por container (MSDU-882129-7, MSDU8821297), booking, exportador..." 
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             style={{ 
               border: 'none', 
               padding: '4px 0', 
-              fontSize: '15px', 
+              fontSize: '14px', 
               backgroundColor: 'transparent',
               boxShadow: 'none',
-              width: '100%'
+              width: '100%',
+              outline: 'none'
             }}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '4px'
+              }}
+              title="Limpar busca"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {/* Status dos Bookings - Visual Premium */}
@@ -242,6 +252,27 @@ export default function Dashboard({ user, onSelectBooking, onCreateBookingClick 
                       <span>Containers: <strong style={{ color: 'var(--text-secondary)' }}>{b.containers?.length || 0}</strong></span>
                       <span>Sacas: <strong style={{ color: 'var(--text-secondary)' }}>{b.bagsQuantity}</strong></span>
                     </div>
+
+                    {searchQuery.trim() && getMatchedContainers(b, searchQuery).length > 0 && (
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                        {getMatchedContainers(b, searchQuery).map(mc => (
+                          <span
+                            key={mc.id || mc.containerNumber}
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: 'var(--color-brand)',
+                              backgroundColor: 'rgba(197, 168, 128, 0.15)',
+                              border: '1px solid rgba(197, 168, 128, 0.3)',
+                              padding: '2px 8px',
+                              borderRadius: '4px'
+                            }}
+                          >
+                            📦 {mc.containerNumber}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ 

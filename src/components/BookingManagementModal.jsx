@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight } from 'lucide-react';
-import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate } from '../db';
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight, Search, UploadCloud, CheckCircle2 } from 'lucide-react';
+import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery } from '../db';
+import { planImport, previewToken, normalizeContainerNumber, importFieldLabels } from '../utils/bookingImport';
+import { parseRomaneioPdf } from '../utils/pdfParser';
 import ContainerDetail from './ContainerDetail';
+import BookingImportHistory from './BookingImportHistory';
 
 export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport }) {
   
@@ -12,6 +14,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const locais = useLocais();
   const [prevBookingId, setPrevBookingId] = useState(bookingId);
   const [booking, setBooking] = useState(() => bookings.find(b => b.id === bookingId));
+  const [containerSearch, setContainerSearch] = useState('');
   const [selectedInspectorId, setSelectedInspectorId] = useState(() => {
     const bk = bookings.find(b => b.id === bookingId);
     return bk?.inspectorId || '';
@@ -42,6 +45,20 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const [loadingPhotosId, setLoadingPhotosId] = useState(null);  // ID do container carregando fotos
   const [selectedContainerToManage, setSelectedContainerToManage] = useState(null);
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
+
+  // Modal de Atualização Incremental via Romaneio PDF
+  const [showIncrementalImportModal, setShowIncrementalImportModal] = useState(false);
+  const [importPdfFile, setImportPdfFile] = useState(null);
+  const [isParsingRomaneio, setIsParsingRomaneio] = useState(false);
+  const [romaneioParseError, setRomaneioParseError] = useState('');
+  const [parsedRomaneio, setParsedRomaneio] = useState(null);
+  const [romaneioPlan, setRomaneioPlan] = useState(null);
+  const [isSavingIncremental, setIsSavingIncremental] = useState(false);
+  const [updateBagsQty, setUpdateBagsQty] = useState(true);
+  const [updateVesselInfo, setUpdateVesselInfo] = useState(true);
+  const [updateDestinoInfo, setUpdateDestinoInfo] = useState(true);
+  const [updateArmadorInfo, setUpdateArmadorInfo] = useState(true);
+  const [modalFeedback, setModalFeedback] = useState('');
   
   // Form de Novo Container
   const [newContainer, setNewContainer] = useState({
@@ -91,6 +108,90 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     }
   };
 
+  const handleRomaneioFileSelect = async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setRomaneioParseError('Por favor, selecione um arquivo no formato PDF.');
+      return;
+    }
+    setImportPdfFile(file);
+    setIsParsingRomaneio(true);
+    setRomaneioParseError('');
+    setParsedRomaneio(null);
+    setRomaneioPlan(null);
+
+    try {
+      const parsed = await parseRomaneioPdf(file, { exportadores, locais });
+      const plan = planImport(booking, parsed.containers || []);
+      setParsedRomaneio(parsed);
+      setRomaneioPlan(plan);
+    } catch (err) {
+      console.error('Erro ao ler romaneio:', err);
+      setRomaneioParseError(err.message || 'Falha ao processar o arquivo PDF do romaneio.');
+    } finally {
+      setIsParsingRomaneio(false);
+    }
+  };
+
+  const handleConfirmIncrementalUpdate = async () => {
+    if (!parsedRomaneio || !romaneioPlan) return;
+    if (romaneioPlan.invalid.length > 0) {
+      alert('Corrija os containers inválidos antes de continuar.');
+      return;
+    }
+
+    setIsSavingIncremental(true);
+    try {
+      const token = previewToken(booking, romaneioPlan);
+      const incomingData = {
+        ...booking,
+        bookingNumber: booking.bookingNumber,
+        containers: parsedRomaneio.containers || []
+      };
+
+      if (updateBagsQty && parsedRomaneio.bagsQuantity) {
+        incomingData.bagsQuantity = parseInt(parsedRomaneio.bagsQuantity, 10) || parsedRomaneio.bagsQuantity;
+      }
+      if (updateVesselInfo && parsedRomaneio.vesselVoyage) {
+        incomingData.vesselVoyage = parsedRomaneio.vesselVoyage;
+        if (parsedRomaneio.vesselName) incomingData.vesselName = parsedRomaneio.vesselName;
+        if (parsedRomaneio.vesselVoyageNum) incomingData.vesselVoyageNum = parsedRomaneio.vesselVoyageNum;
+      }
+      if (updateDestinoInfo && parsedRomaneio.portoDestino) {
+        incomingData.portoDestino = parsedRomaneio.portoDestino;
+      }
+      if (updateArmadorInfo && parsedRomaneio.armador) {
+        incomingData.armador = parsedRomaneio.armador;
+      }
+      if (parsedRomaneio.embalagem) {
+        incomingData.embalagem = parsedRomaneio.embalagem;
+      }
+      if (parsedRomaneio.mercadoria) {
+        incomingData.mercadoria = parsedRomaneio.mercadoria;
+      }
+      if (parsedRomaneio.importador) {
+        incomingData.importador = parsedRomaneio.importador;
+      }
+
+      const result = await db.importBooking(incomingData, {
+        expectedPreview: token,
+        sourceName: importPdfFile?.name || 'Romaneio Atualizado',
+        actor: user
+      });
+
+      setBooking(result.booking);
+      if (onDataChange) onDataChange();
+      setShowIncrementalImportModal(false);
+      setModalFeedback(`✅ Romaneio atualizado! ${result.addedCount} novos containers foram inseridos e ${result.preservedCount} existentes preservados com fotos e inspeções.`);
+      setTimeout(() => setModalFeedback(''), 8000);
+    } catch (err) {
+      console.error('Erro na atualização incremental:', err);
+      alert(err.message || 'Erro ao atualizar o Booking.');
+    } finally {
+      setIsSavingIncremental(false);
+    }
+  };
+
   const handleSaveContainer = async (e) => {
     e.preventDefault();
     if (!newContainer.containerNumber.trim()) return;
@@ -123,9 +224,14 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const updatedContainers = [...(booking.containers || []), containerObj];
     const updatedBooking = { ...booking, containers: updatedContainers };
     
-    setBooking(updatedBooking);
-    db.saveBooking(updatedBooking).catch(err => console.error(err));
-    if (onDataChange) onDataChange();
+    try {
+      const saved = await db.saveBooking(updatedBooking);
+      setBooking(saved);
+      if (onDataChange) onDataChange();
+    } catch (error) {
+      alert(error.message || 'Erro ao inserir o container.');
+      return;
+    }
 
     // Reset Form
     setNewContainer({
@@ -272,10 +378,65 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               Perfil atual: {user.role === 'ADM' ? '✅ Administrador (Edição Liberada)' : '✅ Inspetor (Edição Liberada)'}
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-            <X size={22} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImportPdfFile(null);
+                  setParsedRomaneio(null);
+                  setRomaneioPlan(null);
+                  setRomaneioParseError('');
+                  setShowIncrementalImportModal(true);
+                }}
+                className="btn btn-primary"
+                style={{
+                  backgroundColor: '#10b981',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                }}
+              >
+                <UploadCloud size={15} />
+                📥 Add Romaneio Atualizado
+              </button>
+            )}
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              <X size={22} />
+            </button>
+          </div>
         </div>
+
+        {/* Banner de Feedback de Atualização */}
+        {modalFeedback && (
+          <div style={{
+            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+            border: '1px solid #10b981',
+            borderRadius: '6px',
+            padding: '10px 14px',
+            color: '#10b981',
+            fontSize: '13px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            margin: '10px 0 0 0'
+          }}>
+            <span>{modalFeedback}</span>
+            <button onClick={() => setModalFeedback('')} style={{ background: 'none', border: 'none', color: '#10b981', cursor: 'pointer' }}>
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Corpo do Modal - Rolável */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', paddingRight: '4px', paddingBottom: '8px' }} className="modal-scrollable-body">
@@ -869,8 +1030,24 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           </select>
         </div>
 
-        {/* Três botões de Ações Principais (Screenshot 2) */}
+        {/* Quatro botões de Ações Principais (Screenshot 2) */}
         <div className="actions-grid">
+          <button 
+            disabled={!canEdit}
+            onClick={() => {
+              setImportPdfFile(null);
+              setParsedRomaneio(null);
+              setRomaneioPlan(null);
+              setRomaneioParseError('');
+              setShowIncrementalImportModal(true);
+            }}
+            className="btn btn-primary"
+            style={{ backgroundColor: '#10b981', color: '#fff', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            <UploadCloud size={16} />
+            📥 Atualizar com Romaneio (PDF)
+          </button>
+
           <button 
             disabled={!canEdit}
             onClick={() => setShowAddContainer(true)}
@@ -883,7 +1060,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           <button 
             onClick={() => onOpenReport(booking.id, 'operational')}
             className="btn btn-success"
-            style={{ backgroundColor: '#10b981', color: '#fff', fontSize: '13px', fontWeight: '700' }}
+            style={{ backgroundColor: '#0284c7', color: '#fff', fontSize: '13px', fontWeight: '700' }}
           >
             📄 Exportar PDF Consolidado
           </button>
@@ -899,12 +1076,86 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
 
         {/* Seção de Lista de Containers (Reserva) */}
         <div>
-          <h3 style={{ fontSize: '16px', color: 'var(--color-brand)', marginBottom: '14px', fontFamily: 'var(--font-display)' }}>
-            Containers da Reserva ({booking.containers?.length || 0})
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h3 style={{ fontSize: '16px', color: 'var(--color-brand)', margin: 0, fontFamily: 'var(--font-display)' }}>
+                Containers da Reserva ({booking.containers?.length || 0})
+              </h3>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportPdfFile(null);
+                    setParsedRomaneio(null);
+                    setRomaneioPlan(null);
+                    setRomaneioParseError('');
+                    setShowIncrementalImportModal(true);
+                  }}
+                  style={{
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10b981',
+                    border: '1px solid #10b981',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <UploadCloud size={13} />
+                  + Add Romaneio Atualizado
+                </button>
+              )}
+            </div>
+
+            {(booking.containers || []).length > 2 && (
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', minWidth: '240px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Filtrar (MSDU-882129-7, MSDU8821297)..."
+                  value={containerSearch}
+                  onChange={e => setContainerSearch(e.target.value)}
+                  style={{
+                    paddingLeft: '30px',
+                    paddingRight: containerSearch ? '28px' : '10px',
+                    paddingTop: '6px',
+                    paddingBottom: '6px',
+                    fontSize: '12px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    width: '100%'
+                  }}
+                />
+                {containerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setContainerSearch('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {(booking.containers || []).map(cont => {
+            {(booking.containers || [])
+              .filter(c => matchesContainerQuery(c, containerSearch))
+              .map(cont => {
               const statusColors = {
                 'Pendente': 'badge-pending',
                 'Em Carregamento': 'badge-progress',
@@ -961,6 +1212,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           </div>
         </div>
 
+        <BookingImportHistory key={booking.id} bookingId={booking.id} />
         {/* Fim do Corpo do Modal - Rolável */}
         </div>
 
@@ -1324,6 +1576,326 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
             >
               ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-MODAL: ATUALIZAÇÃO INCREMENTAL DE ROMANEIO (PDF) */}
+      {showIncrementalImportModal && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(5, 7, 15, 0.88)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2200,
+          padding: '20px'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '750px',
+            width: '100%',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            backgroundColor: 'var(--bg-secondary)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            overflow: 'hidden'
+          }}>
+            {/* Cabeçalho */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--color-brand)', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <UploadCloud size={20} color="#10b981" />
+                  Atualizar com Romaneio (PDF)
+                </h3>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Booking: <strong>{booking.bookingNumber}</strong> | Certificado: <strong>{booking.certificateNumber}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIncrementalImportModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Corpo do Modal */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }} className="modal-scrollable-body">
+              
+              {/* Área de Seleção do PDF (Drag & Drop) */}
+              <div
+                onClick={() => document.getElementById('incrementalRomaneioPdfInput').click()}
+                style={{
+                  border: '2px dashed var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '24px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  transition: 'border-color 0.2s',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleRomaneioFileSelect(e.dataTransfer.files[0]);
+                  }
+                }}
+              >
+                <input
+                  id="incrementalRomaneioPdfInput"
+                  type="file"
+                  accept=".pdf"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleRomaneioFileSelect(e.target.files[0]);
+                    }
+                  }}
+                />
+                <UploadCloud size={32} color="#10b981" />
+                <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                  {importPdfFile ? importPdfFile.name : 'Clique para selecionar ou arraste o Romaneio atualizado (PDF)'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  O sistema reconhecerá automaticamente os containers faltantes e atualizará a reserva sem apagar fotos existentes.
+                </div>
+              </div>
+
+              {isParsingRomaneio && (
+                <div style={{ textAlign: 'center', padding: '16px', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <div className="spinner" style={{ width: '16px', height: '16px', border: '2px solid #10b981', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                  <span>Processando arquivo PDF do romaneio...</span>
+                </div>
+              )}
+
+              {romaneioParseError && (
+                <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '6px', padding: '12px', color: '#ef4444', fontSize: '13px' }}>
+                  ⚠️ {romaneioParseError}
+                </div>
+              )}
+
+              {parsedRomaneio && romaneioPlan && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  
+                  {/* Validação de Correspondência do Booking */}
+                  {parsedRomaneio.bookingNumber && parsedRomaneio.bookingNumber !== booking.bookingNumber ? (
+                    <div style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', border: '1px solid #f59e0b', borderRadius: '6px', padding: '10px 14px', color: '#f59e0b', fontSize: '12px' }}>
+                      ⚠️ <strong>Atenção:</strong> O romaneio lido indica Booking <strong>{parsedRomaneio.bookingNumber}</strong>, diferente deste Booking <strong>{booking.bookingNumber}</strong>. Os containers serão incorporados nesta reserva.
+                    </div>
+                  ) : (
+                    <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '6px', padding: '10px 14px', color: '#10b981', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={16} />
+                      <span>Romaneio do Booking <strong>{booking.bookingNumber}</strong> verificado com sucesso.</span>
+                    </div>
+                  )}
+
+                  {/* Cards de Resumo */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                    
+                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #10b981' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>CONTAINERS FALTANTES</div>
+                      <div style={{ fontSize: '22px', fontWeight: '800', color: '#10b981', marginTop: '4px' }}>
+                        +{romaneioPlan.added.length} novos
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>serão inseridos</div>
+                    </div>
+
+                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #3b82f6' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>JÁ CADASTRADOS</div>
+                      <div style={{ fontSize: '22px', fontWeight: '800', color: '#3b82f6', marginTop: '4px' }}>
+                        {romaneioPlan.preserved.length} mantidos
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>fotos e laudos 100% seguros</div>
+                    </div>
+
+                    <div style={{ backgroundColor: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', borderLeft: '4px solid #c5a880' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>TOTAL DE SACAS</div>
+                      <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)', marginTop: '8px' }}>
+                        {booking.bagsQuantity || 0} ➔ <span style={{ color: '#10b981' }}>{parsedRomaneio.bagsQuantity || booking.bagsQuantity}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>atualização da carga</div>
+                    </div>
+
+                  </div>
+
+                  {/* Opções de Atualização dos Dados Gerais */}
+                  <div style={{ backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px', padding: '14px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--color-brand)', marginBottom: '8px' }}>
+                      Campos que serão atualizados no Booking:
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {parsedRomaneio.bagsQuantity && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={updateBagsQty}
+                            onChange={e => setUpdateBagsQty(e.target.checked)}
+                          />
+                          <span>Atualizar total de sacas de <strong>{booking.bagsQuantity || 0}</strong> para <strong>{parsedRomaneio.bagsQuantity}</strong> {parsedRomaneio.embalagem || booking.embalagem || 'sacas'}</span>
+                        </label>
+                      )}
+
+                      {parsedRomaneio.vesselVoyage && parsedRomaneio.vesselVoyage !== booking.vesselVoyage && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={updateVesselInfo}
+                            onChange={e => setUpdateVesselInfo(e.target.checked)}
+                          />
+                          <span>Atualizar Navio / Viagem para: <strong>{parsedRomaneio.vesselVoyage}</strong></span>
+                        </label>
+                      )}
+
+                      {parsedRomaneio.portoDestino && parsedRomaneio.portoDestino !== booking.portoDestino && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={updateDestinoInfo}
+                            onChange={e => setUpdateDestinoInfo(e.target.checked)}
+                          />
+                          <span>Atualizar Porto de Destino para: <strong>{parsedRomaneio.portoDestino}</strong></span>
+                        </label>
+                      )}
+
+                      {parsedRomaneio.armador && parsedRomaneio.armador !== booking.armador && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={updateArmadorInfo}
+                            onChange={e => setUpdateArmadorInfo(e.target.checked)}
+                          />
+                          <span>Atualizar Armador para: <strong>{parsedRomaneio.armador}</strong></span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Lista detalhada dos Novos Containers */}
+                  {romaneioPlan.added.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#10b981', marginBottom: '8px' }}>
+                        Containers Faltantes que serão Adicionados ({romaneioPlan.added.length}):
+                      </div>
+                      <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                        <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)' }}>
+                              <th style={{ padding: '6px 10px' }}>Container</th>
+                              <th style={{ padding: '6px 10px' }}>Tipo</th>
+                              <th style={{ padding: '6px 10px' }}>Lacre Def.</th>
+                              <th style={{ padding: '6px 10px' }}>Lacre Provisório</th>
+                              <th style={{ padding: '6px 10px' }}>Sacas</th>
+                              <th style={{ padding: '6px 10px' }}>Tara</th>
+                              <th style={{ padding: '6px 10px' }}>Bruto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {romaneioPlan.added.map((cont, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '6px 10px', fontWeight: '700', color: 'var(--text-primary)' }}>{cont.containerNumber}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.containerType}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.definiteSeal || '-'}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.provisionalSeals?.map(s => s.sealNumber).join(', ') || '-'}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.bagsQuantity || '-'}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.tara || '-'}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.grossWeight || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Containers Preservados */}
+                  {romaneioPlan.preserved.length > 0 && (
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', backgroundColor: 'rgba(59, 130, 246, 0.1)', padding: '10px 14px', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                      🛡️ <strong>Containers já existentes preservados ({romaneioPlan.preserved.length}):</strong>{' '}
+                      {romaneioPlan.preserved.map(c => `${c.containerNumber} (${c.photos?.length || 0} fotos)`).join(', ')}.
+                      <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Suas vistorias, laudos e fotos já registradas permanecem 100% preservadas e intocadas.
+                      </div>
+                    </div>
+                  )}
+
+                  {romaneioPlan.added.length === 0 && (
+                    <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', padding: '12px', color: '#3b82f6', fontSize: '13px' }}>
+                      ℹ️ Todos os {parsedRomaneio.containers?.length || 0} containers deste romaneio já estão cadastrados na reserva. Nenhuma duplicidade será criada.
+                    </div>
+                  )}
+
+                </div>
+              )}
+
+            </div>
+
+            {/* Rodapé do Sub-Modal */}
+            <div style={{
+              padding: '14px 20px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              flexShrink: 0
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowIncrementalImportModal(false)}
+                className="btn btn-secondary"
+                style={{ padding: '8px 16px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={!parsedRomaneio || !romaneioPlan || isSavingIncremental || romaneioPlan.invalid.length > 0}
+                onClick={handleConfirmIncrementalUpdate}
+                className="btn btn-success"
+                style={{
+                  padding: '8px 22px',
+                  fontWeight: '700',
+                  backgroundColor: '#10b981',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  opacity: (!parsedRomaneio || !romaneioPlan || isSavingIncremental) ? 0.6 : 1
+                }}
+              >
+                {isSavingIncremental ? (
+                  <>
+                    <div className="spinner" style={{ width: '14px', height: '14px', border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    Salvando...
+                  </>
+                ) : (
+                  `Confirmar Atualização (+${romaneioPlan?.added?.length || 0} containers)`
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

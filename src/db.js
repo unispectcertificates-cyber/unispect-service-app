@@ -1,6 +1,7 @@
+import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
 import { useState, useEffect } from 'react';
 import { dbFirestore, storage } from './firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // Coleções
@@ -80,6 +81,17 @@ function compressImageToDataUrl(file) {
   });
 }
 
+const bookingRepository = createBookingRepository({
+  listBookings: async () => {
+    const snap = await getDocs(collection(dbFirestore, BOOKINGS_COL));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  },
+  reference: (col, id) => doc(dbFirestore, col, id),
+  newId: prefix => prefix + '_' + doc(collection(dbFirestore, BOOKINGS_COL)).id,
+  transaction: callback => runTransaction(dbFirestore, callback),
+  now: () => Date.now()
+});
+
 export const db = {
   async init() {
     await initializeCollectionIfEmpty(LOCALS_COL, defaultLocais);
@@ -139,48 +151,24 @@ export const db = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  /**
-   * saveBooking — upsert puro, seguro para auto-save.
-   * NÃO valida duplicatas (use saveBookingWithValidation para criação).
-   */
+  // All Booking writers share uniqueness and optimistic revision protection.
   async saveBooking(booking) {
-    const id = booking.id || 'bk_' + Date.now();
-    booking.id = id;
-
-    if (!booking.certificateNumber) {
-      booking.certificateNumber = await this.generateNextCertificateNumber();
-    }
-    if (!booking.containers) booking.containers = [];
-
-    await setDoc(doc(dbFirestore, BOOKINGS_COL, id), booking);
-    return booking;
+    const saved = await bookingRepository.saveBooking(booking);
+    Object.assign(booking, { id: saved.id, _revision: saved._revision, certificateNumber: saved.certificateNumber });
+    return saved;
   },
-
-  /**
-   * saveBookingWithValidation — usar APENAS na criação de novos bookings.
-   * Valida duplicatas de bookingNumber antes de salvar.
-   */
-  async saveBookingWithValidation(booking, allBookings = null) {
-    const id = booking.id || 'bk_' + Date.now();
-    booking.id = id;
-
-    if (booking.bookingNumber && booking.bookingNumber.trim()) {
-      const list = allBookings || await this.getBookings();
-      const cleanNum = booking.bookingNumber.trim().toLowerCase();
-      const duplicate = list.find(
-        b => b.id !== id && (b.bookingNumber || '').trim().toLowerCase() === cleanNum
-      );
-      if (duplicate) {
-        throw new Error(
-          `Este romaneio já foi inserido no sistema. (Booking: ${booking.bookingNumber.trim()})`
-        );
-      }
-    }
-
-    return this.saveBooking(booking);
+  async saveBookingWithValidation(booking) {
+    return bookingRepository.saveBooking(booking);
+  },
+  async importBooking(booking, options) {
+    return bookingRepository.importBooking(booking, options);
+  },
+  async getBookingImportHistory(bookingId) {
+    const snap = await getDocs(query(collection(dbFirestore, 'bookingImports'), where('bookingId', '==', bookingId)));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => b.createdAt - a.createdAt);
   },
   async deleteBooking(id) {
-    await deleteDoc(doc(dbFirestore, BOOKINGS_COL, id));
+    return bookingRepository.deleteBooking(id);
   },
   async generateNextCertificateNumber() {
     const list = await this.getBookings();
@@ -346,16 +334,13 @@ export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); 
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
 export function useUsers() { return useCollectionRealtime(USERS_COL); }
 
-export function isBookingNumberDuplicate(bookings, bookingNumber, currentBookingId = null) {
-  if (!bookingNumber || typeof bookingNumber !== 'string') return false;
-  const cleanNumber = bookingNumber.trim().toLowerCase();
-  if (!cleanNumber) return false;
+import { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers } from './utils/searchUtils';
 
-  return (bookings || []).some(b => {
-    if (!b || !b.bookingNumber) return false;
-    if (currentBookingId && b.id === currentBookingId) return false;
-    return (b.bookingNumber || '').trim().toLowerCase() === cleanNumber;
-  });
+export { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers };
+
+export function isBookingNumberDuplicate(bookings, bookingNumber, currentBookingId = null) {
+  const key = normalizeBookingNumber(bookingNumber);
+  return Boolean(key) && (bookings || []).some(b => b.id !== currentBookingId && normalizeBookingNumber(b.bookingNumber) === key);
 }
 
 /**
