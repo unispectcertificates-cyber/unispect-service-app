@@ -2,8 +2,9 @@ import { findBooking, planImport, previewToken, normalizeContainerNumber, import
 import { parseRomaneioPdf } from './utils/pdfParser';
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
+import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, PackagePlus } from 'lucide-react';
 import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
+import { subscribePendingFieldContainers } from './utils/fieldService';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -71,6 +72,15 @@ export default function App() {
   const locais = useLocais();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
+  const [pendingFieldCount, setPendingFieldCount] = useState(0);
+
+  useEffect(() => {
+    const unsub = subscribePendingFieldContainers(
+      records => setPendingFieldCount(records.length),
+      () => setPendingFieldCount(0)
+    );
+    return () => unsub();
+  }, []);
 
   // Modais e Menu Dropdown
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -414,6 +424,9 @@ export default function App() {
       case 'dashboard':
         setCurrentTab('bookings');
         break;
+      case 'containers-sem-booking':
+        setCurrentTab('containers-sem-booking');
+        break;
       default:
         break;
     }
@@ -633,6 +646,43 @@ export default function App() {
                   onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   📊 Ver Painel / Dashboard
+                </button>
+
+                <button
+                  onClick={() => handleMenuOptionClick('containers-sem-booking')}
+                  style={{
+                    padding: '12px 20px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: currentTab === 'containers-sem-booking' ? 'var(--color-brand)' : 'var(--text-primary)',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderTop: '1px solid var(--border-color)',
+                    transition: 'var(--transition-fast)'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    📦 Consultar Containers sem booking
+                  </span>
+                  {pendingFieldCount > 0 && (
+                    <span style={{
+                      backgroundColor: '#10b981',
+                      color: '#fff',
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      padding: '2px 7px',
+                      borderRadius: '10px'
+                    }}>
+                      {pendingFieldCount}
+                    </span>
+                  )}
                 </button>
 
                 {user.role === 'ADM' && (
