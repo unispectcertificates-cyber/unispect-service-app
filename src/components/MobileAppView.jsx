@@ -11,6 +11,8 @@ import { startFieldSynchronization } from '../utils/fieldService';
 import { recognizeContainerPhoto, validateIso6346CheckDigit, formatContainerNumber } from '../utils/containerOcr';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
 import { fieldQueue } from '../utils/fieldQueue';
+import PhotoDownloadButton from './PhotoDownloadButton';
+import PhotoEnlargedModal from './PhotoEnlargedModal';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
@@ -368,7 +370,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   }, [onRefresh, showToast]);
 
   // ── Preview de foto
-  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(null);
+  const [previewContainer, setPreviewContainer] = useState(null);
 
   // ── Input de lacre provisório
   const [newSealInput, setNewSealInput] = useState('');
@@ -1185,16 +1188,16 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
           {/* Grid de fotos */}
           {(c.photos || []).length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {(c.photos || []).map(photo => {
+              {(c.photos || []).map((photo, idx) => {
                 // URL direta do Firebase Storage (ou fallback para base64 legado)
-                const photoSrc = photo.url || null;
+                const photoSrc = photo.url || photo.dataUrl || null;
                 return (
-                  <div key={photo.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1', backgroundColor: 'var(--bg-tertiary)' }}>
+                  <div key={photo.id || idx} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1', backgroundColor: 'var(--bg-tertiary)' }}>
                     {photoSrc ? (
                       <img
                         src={photoSrc}
                         alt=""
-                        onClick={() => setPreviewPhotoUrl(photoSrc)}
+                        onClick={() => { setPreviewPhotoIndex(idx); setPreviewContainer(c); }}
                         style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
                       />
                     ) : (
@@ -1202,6 +1205,14 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                         <Loader2 size={20} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
                       </div>
                     )}
+                    <PhotoDownloadButton
+                      photo={photo}
+                      containerNumber={c.containerNumber || c.number}
+                      index={idx}
+                      date={c.date || selectedBooking?.date}
+                      variant="thumbnail"
+                      style={{ top: '4px', left: '4px' }}
+                    />
                     <button
                       onClick={() => handleDeletePhoto(photo.id)}
                       style={{
@@ -1209,7 +1220,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                         background: 'rgba(239,68,68,0.85)', border: 'none',
                         borderRadius: '50%', width: '22px', height: '22px',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer', color: '#fff'
+                        cursor: 'pointer', color: '#fff', zIndex: 6
                       }}
                     >
                       <Trash2 size={12} />
@@ -1513,35 +1524,17 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         </div>
       )}
 
-      {/* Preview de foto em tela cheia */}
-      {previewPhotoUrl && (
-        <div
-          onClick={() => setPreviewPhotoUrl(null)}
-          style={{
-            position: 'fixed', inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.96)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 10000, cursor: 'zoom-out', padding: '16px'
-          }}
-        >
-          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh' }} onClick={e => e.stopPropagation()}>
-            <img
-              src={previewPhotoUrl}
-              alt="Visualização"
-              style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '10px' }}
-            />
-            <button
-              onClick={() => setPreviewPhotoUrl(null)}
-              style={{
-                position: 'absolute', top: '-36px', right: '0',
-                background: 'rgba(255,255,255,0.15)', border: 'none',
-                borderRadius: '50%', width: '32px', height: '32px',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', color: '#fff', fontSize: '16px', fontWeight: 'bold'
-              }}
-            >✕</button>
-          </div>
-        </div>
+      {/* Preview de foto em tela cheia (Google Fotos) */}
+      {previewPhotoIndex !== null && previewContainer?.photos?.[previewPhotoIndex] && (
+        <PhotoEnlargedModal
+          photo={previewContainer.photos[previewPhotoIndex]}
+          photos={previewContainer.photos}
+          currentIndex={previewPhotoIndex}
+          containerNumber={previewContainer.containerNumber || previewContainer.number || previewContainer.id}
+          date={previewContainer.date || selectedBooking?.date}
+          onClose={() => { setPreviewPhotoIndex(null); setPreviewContainer(null); }}
+          onNavigate={(newIdx) => setPreviewPhotoIndex(newIdx)}
+        />
       )}
 
       {/* Modal de Conferência de Identificação do Container via Foto */}

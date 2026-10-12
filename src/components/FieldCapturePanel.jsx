@@ -4,12 +4,13 @@ import { fieldQueue } from '../utils/fieldQueue';
 import { fieldSyncState, subscribePendingFieldContainers, syncFieldNow, deleteFieldContainer } from '../utils/fieldService';
 import { findFieldTarget, mergePhotos, validateFieldCapture } from '../utils/fieldContainers';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
+import PhotoDownloadButton from './PhotoDownloadButton';
 
 const sealText = seal => typeof seal === 'string' ? seal : (seal?.sealNumber || seal?.seal || seal?.number || '');
 const inputStyle = { width: '100%', minHeight: '48px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-primary)', background: 'var(--bg-secondary)' };
 const buttonStyle = { minHeight: '48px', justifyContent: 'center', padding: '12px 16px' };
 
-function SavedPhoto({ photo }) {
+function SavedPhoto({ photo, containerNumber = '', index = 0 }) {
   const [localUrl, setLocalUrl] = useState('');
   useEffect(() => {
     if (photo.url) return;
@@ -22,7 +23,24 @@ function SavedPhoto({ photo }) {
     return () => { active = false; if (url) URL.revokeObjectURL(url); };
   }, [photo.id, photo.url]);
   const url = photo.url || localUrl;
-  return url ? <img src={url} alt="Foto já cadastrada do container" loading="lazy" style={{ width: '100%', height: '90px', objectFit: 'cover', borderRadius: '6px' }} /> : <span>Foto salva</span>;
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '90px' }}>
+      {url ? (
+        <img src={url} alt="Foto já cadastrada do container" loading="lazy" style={{ width: '100%', height: '90px', objectFit: 'cover', borderRadius: '6px' }} />
+      ) : (
+        <div style={{ width: '100%', height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-tertiary)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+          Foto salva
+        </div>
+      )}
+      <PhotoDownloadButton
+        photo={photo}
+        containerNumber={containerNumber}
+        index={index}
+        variant="thumbnail"
+        style={{ top: '2px', right: '2px' }}
+      />
+    </div>
+  );
 }
 
 const checkIsDevice = () => {
@@ -306,7 +324,7 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
           <label>Tara do container (kg) *<input style={inputStyle} value={tara} onChange={event => setTara(event.target.value)} inputMode="decimal" readOnly={context?.exists && context.lockedTara} required /></label>
           <label>Tipo de lacre *<select style={inputStyle} value={sealType} onChange={event => setSealType(event.target.value)} disabled={context?.exists && context.lockedSeal}><option value="definitive">Definitivo</option><option value="provisional">Provisório</option></select></label>
           <label>Número do lacre *<input style={inputStyle} value={sealNumber} onChange={event => setSealNumber(event.target.value)} readOnly={context?.exists && context.lockedSeal} autoCapitalize="characters" required /></label>
-          {context?.photos.length > 0 && <div><strong>Fotos já cadastradas ({context.photos.length})</strong><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px', marginTop: '8px' }}>{context.photos.map(photo => <SavedPhoto key={photo.id} photo={photo} />)}</div></div>}
+          {context?.photos.length > 0 && <div><strong>Fotos já cadastradas ({context.photos.length})</strong><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px', marginTop: '8px' }}>{context.photos.map((photo, idx) => <SavedPhoto key={photo.id || idx} photo={photo} containerNumber={number} index={idx} />)}</div></div>}
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" style={buttonStyle} disabled={!context} onClick={() => camera.current.click()}><Camera /> Tirar foto</button>
             <button type="button" className="btn btn-secondary" style={buttonStyle} disabled={!context} onClick={() => gallery.current.click()}><Image /> Galeria</button>

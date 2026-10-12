@@ -5,6 +5,8 @@ import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNum
 import { parseRomaneioPdf } from '../utils/pdfParser';
 import ContainerDetail from './ContainerDetail';
 import BookingImportHistory from './BookingImportHistory';
+import PhotoDownloadButton from './PhotoDownloadButton';
+import PhotoEnlargedModal from './PhotoEnlargedModal';
 
 export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport, initialOpenUpdateRomaneio = false }) {
   
@@ -44,7 +46,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const [showPhotoManager, setShowPhotoManager] = useState(null); // Container object
   const [loadingPhotosId, setLoadingPhotosId] = useState(null);  // ID do container carregando fotos
   const [selectedContainerToManage, setSelectedContainerToManage] = useState(null);
-  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(null);
 
   // Modal de Atualização Incremental via Romaneio PDF
   const [showIncrementalImportModal, setShowIncrementalImportModal] = useState(initialOpenUpdateRomaneio);
@@ -1488,7 +1490,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                 }}>
                   {/* Moldura 3:4 */}
                   <div 
-                    onClick={() => setPreviewPhotoUrl(photo.url)}
+                    onClick={() => setPreviewPhotoIndex(index)}
                     style={{
                       width: '120px',
                       height: '160px',
@@ -1497,11 +1499,19 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                       alignItems: 'center',
                       justifyContent: 'center',
                       overflow: 'hidden',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      position: 'relative'
                     }}
                     title="Clique para ampliar"
                   >
                     <img src={photo.url} alt={photo.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    <PhotoDownloadButton
+                      photo={photo}
+                      containerNumber={showPhotoManager?.number || showPhotoManager?.id}
+                      index={index}
+                      date={showPhotoManager?.date || booking?.date}
+                      variant="thumbnail"
+                    />
                   </div>
 
                   {/* Photo captions removed as per user request */}
@@ -1601,52 +1611,17 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         </div>
       )}
 
-      {/* Visualizador de Foto em Tamanho Maior */}
-      {previewPhotoUrl && (
-        <div 
-          onClick={() => setPreviewPhotoUrl(null)} 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            cursor: 'zoom-out',
-            padding: '16px'
-          }}
-          className="no-print"
-        >
-          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh', display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-            <img src={previewPhotoUrl} alt="Visualização" style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} />
-            <button 
-              onClick={() => setPreviewPhotoUrl(null)}
-              style={{
-                position: 'absolute',
-                top: '-40px',
-                right: '0px',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: 'bold'
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        </div>
+      {/* Visualizador de Foto Ampliada (Google Fotos) */}
+      {previewPhotoIndex !== null && showPhotoManager?.photos?.[previewPhotoIndex] && (
+        <PhotoEnlargedModal
+          photo={showPhotoManager.photos[previewPhotoIndex]}
+          photos={showPhotoManager.photos}
+          currentIndex={previewPhotoIndex}
+          containerNumber={showPhotoManager.number || showPhotoManager.id}
+          date={showPhotoManager.date || booking?.date}
+          onClose={() => setPreviewPhotoIndex(null)}
+          onNavigate={(newIdx) => setPreviewPhotoIndex(newIdx)}
+        />
       )}
 
       {/* SUB-MODAL: ATUALIZAÇÃO INCREMENTAL DE ROMANEIO (PDF) */}

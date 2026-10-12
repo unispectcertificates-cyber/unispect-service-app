@@ -2,13 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { Trash2, ArrowLeft, ArrowRight, CheckCircle2, RefreshCw, Plus, Camera, Image } from 'lucide-react';
 import { db, getSealText } from '../db';
 import FieldCaptureNotice from './FieldCaptureNotice';
+import PhotoDownloadButton from './PhotoDownloadButton';
+import PhotoEnlargedModal from './PhotoEnlargedModal';
 
 export default function ContainerDetail({ container, user, onUpdateContainer, onDeleteContainer }) {
   const [localContainer, setLocalContainer] = useState(container);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [newSealInput, setNewSealInput] = useState('');
-  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(null);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -461,7 +463,7 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
             >
               {/* Moldura 3:4 */}
               <div 
-                onClick={() => setPreviewPhotoUrl(photo.url)}
+                onClick={() => setPreviewPhotoIndex(index)}
                 style={{
                   width: '120px',
                   height: '160px',
@@ -471,7 +473,8 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
                   justifyContent: 'center',
                   overflow: 'hidden',
                   borderRadius: '4px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  position: 'relative'
                 }}
                 title="Clique para ampliar"
               >
@@ -483,6 +486,13 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
                     height: '100%',
                     objectFit: 'contain'
                   }}
+                />
+                <PhotoDownloadButton
+                  photo={photo}
+                  containerNumber={localContainer.number || localContainer.id}
+                  index={index}
+                  date={localContainer.date || localContainer.inspectionDate}
+                  variant="thumbnail"
                 />
               </div>
 
@@ -536,52 +546,17 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
         </div>
       </div>
       
-      {/* Visualizador de Foto em Tamanho Maior */}
-      {previewPhotoUrl && (
-        <div 
-          onClick={() => setPreviewPhotoUrl(null)} 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            cursor: 'zoom-out',
-            padding: '16px'
-          }}
-          className="no-print"
-        >
-          <div style={{ position: 'relative', maxWidth: '95vw', maxHeight: '95vh', display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-            <img src={previewPhotoUrl} alt="Visualização" style={{ maxWidth: '100vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} />
-            <button 
-              onClick={() => setPreviewPhotoUrl(null)}
-              style={{
-                position: 'absolute',
-                top: '-40px',
-                right: '0px',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: 'bold'
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        </div>
+      {/* Visualizador de Foto Ampliada (Google Fotos) */}
+      {previewPhotoIndex !== null && localContainer.photos?.[previewPhotoIndex] && (
+        <PhotoEnlargedModal
+          photo={localContainer.photos[previewPhotoIndex]}
+          photos={localContainer.photos}
+          currentIndex={previewPhotoIndex}
+          containerNumber={localContainer.number || localContainer.id}
+          date={localContainer.date || localContainer.inspectionDate}
+          onClose={() => setPreviewPhotoIndex(null)}
+          onNavigate={(newIdx) => setPreviewPhotoIndex(newIdx)}
+        />
       )}
 
     </div>

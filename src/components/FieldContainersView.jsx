@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { PackagePlus, Search, Trash2, Eye, X, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw, CheckCircle, Clock, ShieldAlert } from 'lucide-react';
 import { subscribePendingFieldContainers, deleteFieldContainer } from '../utils/fieldService';
 import { getSealText } from '../db';
+import PhotoDownloadButton from './PhotoDownloadButton';
+import { canSharePhotoFile } from '../utils/photoDownload';
 
 export default function FieldContainersView({ user }) {
   const [containers, setContainers] = useState([]);
@@ -385,6 +387,16 @@ export default function FieldContainersView({ user }) {
                                 Foto salva
                               </div>
                             )}
+                            {!(pIdx === 3 && photos.length > 4) && (
+                              <PhotoDownloadButton
+                                photo={p}
+                                containerNumber={num}
+                                index={pIdx}
+                                date={item.date || item.createdAt}
+                                variant="thumbnail"
+                                style={{ top: '2px', right: '2px' }}
+                              />
+                            )}
                             {pIdx === 3 && photos.length > 4 && (
                               <div style={{
                                 position: 'absolute',
@@ -474,15 +486,35 @@ export default function FieldContainersView({ user }) {
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setLightboxContainer(null)}
-              className="btn btn-secondary"
-              style={{ padding: '8px', color: '#fff', backgroundColor: 'rgba(255,255,255,0.15)', border: 'none' }}
-              title="Fechar (Esc)"
-            >
-              <X size={20} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <PhotoDownloadButton
+                photo={lightboxContainer.container?.photos?.[activePhotoIdx]}
+                containerNumber={lightboxContainer.id || lightboxContainer.normalizedNumber}
+                index={activePhotoIdx}
+                date={lightboxContainer.date || lightboxContainer.createdAt}
+                variant="button"
+                label="Baixar foto"
+              />
+              {canSharePhotoFile() && (
+                <PhotoDownloadButton
+                  photo={lightboxContainer.container?.photos?.[activePhotoIdx]}
+                  containerNumber={lightboxContainer.id || lightboxContainer.normalizedNumber}
+                  index={activePhotoIdx}
+                  date={lightboxContainer.date || lightboxContainer.createdAt}
+                  variant="share"
+                  label="Compartilhar"
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setLightboxContainer(null)}
+                className="btn btn-secondary"
+                style={{ padding: '8px', color: '#fff', backgroundColor: 'rgba(255,255,255,0.15)', border: 'none' }}
+                title="Fechar (Esc)"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
           {/* Imagem Central em Destaque */}
