@@ -286,6 +286,19 @@ export function getPeriodRange(preset, customFrom = '', customTo = '', reference
       comparisonLabel = `vs. período anterior de 3 meses (${formatDateBR(previousStart)} a ${formatDateBR(previousEnd)})`;
       break;
     }
+    case 'last_6_months': {
+      // Últimos 6 meses
+      const startCandidate = new Date(refYear, refMonth - 5, 1, 0, 0, 0, 0);
+      start = startCandidate;
+      end = new Date(refYear, refMonth, refDay, 23, 59, 59, 999);
+
+      const durationMs = end.getTime() - start.getTime();
+      previousEnd = new Date(start.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - durationMs);
+
+      comparisonLabel = `vs. 6 meses anteriores (${formatDateBR(previousStart)} a ${formatDateBR(previousEnd)})`;
+      break;
+    }
     case 'last_12_months': {
       // Últimos 12 meses
       const startCandidate = new Date(refYear, refMonth - 11, 1, 0, 0, 0, 0);
@@ -297,6 +310,19 @@ export function getPeriodRange(preset, customFrom = '', customTo = '', reference
       previousStart = new Date(previousEnd.getTime() - durationMs);
 
       comparisonLabel = `vs. 12 meses anteriores (${formatDateBR(previousStart)} a ${formatDateBR(previousEnd)})`;
+      break;
+    }
+    case 'last_24_months': {
+      // Últimos 24 meses
+      const startCandidate = new Date(refYear, refMonth - 23, 1, 0, 0, 0, 0);
+      start = startCandidate;
+      end = new Date(refYear, refMonth, refDay, 23, 59, 59, 999);
+
+      const durationMs = end.getTime() - start.getTime();
+      previousEnd = new Date(start.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - durationMs);
+
+      comparisonLabel = `vs. 24 meses anteriores (${formatDateBR(previousStart)} a ${formatDateBR(previousEnd)})`;
       break;
     }
     case 'custom':
@@ -442,6 +468,25 @@ export function formatMonthLabel(monthKey) {
   return `${months[m - 1]}/${y}`;
 }
 
+// Decomposição estruturada do mês e ano em português para eixos e tooltips
+export function getMonthParts(monthKey) {
+  if (!monthKey || !monthKey.includes('-')) {
+    return { monthShort: monthKey || '', year: '', fullLabel: monthKey || '' };
+  }
+  const [y, m] = monthKey.split('-').map(Number);
+  const monthsShort = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const monthsFull = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  const mIdx = Math.max(0, Math.min(11, (m || 1) - 1));
+  return {
+    monthShort: monthsShort[mIdx] || '',
+    year: String(y || ''),
+    fullLabel: `${monthsFull[mIdx] || ''} de ${y}`
+  };
+}
+
 // Agrupamento mensal para os 4 gráficos
 export function computeMonthlySeries({
   bookings = [],
@@ -453,9 +498,13 @@ export function computeMonthlySeries({
   const map = new Map();
 
   for (const k of monthKeys) {
+    const parts = getMonthParts(k);
     map.set(k, {
       monthKey: k,
       label: formatMonthLabel(k),
+      monthShort: parts.monthShort,
+      year: parts.year,
+      fullLabel: parts.fullLabel,
       containersCount: 0,
       bookingsRegisteredCount: 0,
       bookingsFinalizedCount: 0,

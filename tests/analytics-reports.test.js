@@ -15,7 +15,8 @@ import {
   getPeriodRange,
   computeMonthlySeries,
   computeAnalyticsDashboard,
-  generateAnalyticsCsv
+  generateAnalyticsCsv,
+  getMonthParts
 } from '../src/utils/analyticsService.js';
 
 test('1. Contagem correta de containers incorporados e sem duplicação em reimportações/novas fotos', () => {
@@ -305,3 +306,42 @@ test('10. Geração de CSV estruturado com BOM UTF-8 e delimitador brasileiro', 
   assert.ok(csv.includes('"Containers incorporados";"120";"100";"+20.0%"'));
   assert.ok(csv.includes('UNISPECT SERVICE'));
 });
+
+test('11. getMonthParts formata mês e ano em português para duas linhas (ex: Nov / 2025)', () => {
+  const p1 = getMonthParts('2025-11');
+  assert.equal(p1.monthShort, 'Nov');
+  assert.equal(p1.year, '2025');
+  assert.equal(p1.fullLabel, 'Novembro de 2025');
+
+  const p2 = getMonthParts('2026-01');
+  assert.equal(p2.monthShort, 'Jan');
+  assert.equal(p2.year, '2026');
+  assert.equal(p2.fullLabel, 'Janeiro de 2026');
+});
+
+test('12. Suporte a períodos de 3, 6, 12 e 24 meses em getPeriodRange com geração completa de séries', () => {
+  const refDate = new Date(2026, 9, 12, 12, 0, 0); // 12/10/2026
+
+  const r3 = getPeriodRange('last_3_months', '', '', refDate);
+  const s3 = computeMonthlySeries({ bookings: [], startDate: r3.start, endDate: r3.end });
+  assert.equal(s3.length, 3, 'Últimos 3 meses deve ter 3 itens');
+
+  const r6 = getPeriodRange('last_6_months', '', '', refDate);
+  const s6 = computeMonthlySeries({ bookings: [], startDate: r6.start, endDate: r6.end });
+  assert.equal(s6.length, 6, 'Últimos 6 meses deve ter 6 itens');
+
+  const r12 = getPeriodRange('last_12_months', '', '', refDate);
+  const s12 = computeMonthlySeries({ bookings: [], startDate: r12.start, endDate: r12.end });
+  assert.equal(s12.length, 12, 'Últimos 12 meses deve ter 12 itens');
+
+  const r24 = getPeriodRange('last_24_months', '', '', refDate);
+  const s24 = computeMonthlySeries({ bookings: [], startDate: r24.start, endDate: r24.end });
+  assert.equal(s24.length, 24, 'Últimos 24 meses deve ter 24 itens');
+
+  // Cada mês possui monthShort e year estruturados
+  assert.equal(s24[0].monthShort, 'Nov');
+  assert.equal(s24[0].year, '2024');
+  assert.equal(s24[23].monthShort, 'Out');
+  assert.equal(s24[23].year, '2026');
+});
+

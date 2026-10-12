@@ -2407,8 +2407,14 @@ td {
 /* Painéis de Gráficos */
 .analytics-charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+@media (max-width: 1180px) {
+  .analytics-charts-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .analytics-chart-panel {
@@ -2420,6 +2426,7 @@ td {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .chart-panel-header {
@@ -2480,13 +2487,35 @@ td {
 .chart-render-box {
   position: relative;
   width: 100%;
-  height: 220px;
+  height: 230px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.chart-render-box::-webkit-scrollbar {
+  height: 6px;
+}
+
+.chart-render-box::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+.chart-render-box::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.chart-render-box::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .analytics-svg-chart {
-  width: 100%;
   height: 100%;
   overflow: visible;
+  display: block;
 }
 
 .chart-empty-state {
@@ -2529,19 +2558,31 @@ td {
 }
 
 .chart-val-text {
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 800;
   fill: var(--text-primary);
 }
 
 .chart-label-text {
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
   fill: var(--text-muted);
 }
 
+.chart-label-month {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--text-secondary);
+}
+
+.chart-label-year {
+  font-size: 9.5px;
+  font-weight: 600;
+  fill: var(--text-muted);
+}
+
 .chart-axis-text {
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 700;
   fill: #94a3b8;
 }

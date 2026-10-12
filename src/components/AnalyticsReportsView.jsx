@@ -279,10 +279,24 @@ export default function AnalyticsReportsView({
             </button>
             <button
               type="button"
+              className={`preset-btn ${preset === 'last_6_months' ? 'active' : ''}`}
+              onClick={() => setPreset('last_6_months')}
+            >
+              Últimos 6 meses
+            </button>
+            <button
+              type="button"
               className={`preset-btn ${preset === 'last_12_months' ? 'active' : ''}`}
               onClick={() => setPreset('last_12_months')}
             >
               Últimos 12 meses
+            </button>
+            <button
+              type="button"
+              className={`preset-btn ${preset === 'last_24_months' ? 'active' : ''}`}
+              onClick={() => setPreset('last_24_months')}
+            >
+              Últimos 24 meses
             </button>
             <button
               type="button"
@@ -556,25 +570,44 @@ export default function AnalyticsReportsView({
           <div className="chart-render-box">
             {dashboard.monthlySeries.length === 0 ? (
               <div className="chart-empty-state">Nenhum registro para o período</div>
-            ) : (
-              <svg className="analytics-svg-chart" viewBox="0 0 540 220" preserveAspectRatio="none">
-                {/* Linhas de grade de fundo */}
-                <line x1="40" y1="30" x2="520" y2="30" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="90" x2="520" y2="90" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="150" x2="520" y2="150" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="180" x2="520" y2="180" stroke="#cbd5e1" strokeWidth="1.5" />
+            ) : (() => {
+              const count = dashboard.monthlySeries.length;
+              const minColWidth = 58;
+              const chartWidth = Math.max(540, count * minColWidth + 70);
+              const chartHeight = 230;
+              const paddingLeft = 45;
+              const paddingRight = 20;
+              const availableWidth = chartWidth - paddingLeft - paddingRight;
+              const colWidth = availableWidth / count;
+              const barWidth = Math.min(34, colWidth * 0.55);
 
-                {(() => {
-                  const maxVal = Math.max(...dashboard.monthlySeries.map(s => s.containersCount), 1);
-                  const count = dashboard.monthlySeries.length;
-                  const availableWidth = 460;
-                  const colWidth = availableWidth / count;
-                  const barWidth = Math.min(36, colWidth * 0.55);
+              const maxVal = Math.max(...dashboard.monthlySeries.map(s => s.containersCount), 1);
+              const baselineY = 175;
+              const maxBarHeight = 135;
+              const step = colWidth < 46 ? 2 : 1;
 
-                  return dashboard.monthlySeries.map((s, idx) => {
-                    const barHeight = (s.containersCount / maxVal) * 140;
-                    const x = 50 + idx * colWidth + (colWidth - barWidth) / 2;
-                    const y = 180 - barHeight;
+              return (
+                <svg
+                  className="analytics-svg-chart"
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  style={{ minWidth: `${chartWidth}px` }}
+                >
+                  {/* Linhas de grade horizontais com valores de referência */}
+                  <line x1={paddingLeft} y1="40" x2={chartWidth - paddingRight} y2="40" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="95" x2={chartWidth - paddingRight} y2="95" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="140" x2={chartWidth - paddingRight} y2="140" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1={baselineY} x2={chartWidth - paddingRight} y2={baselineY} stroke="#cbd5e1" strokeWidth="1.5" />
+
+                  <text x={paddingLeft - 8} y="44" textAnchor="end" className="chart-axis-text">{maxVal}</text>
+                  <text x={paddingLeft - 8} y="99" textAnchor="end" className="chart-axis-text">{Math.round(maxVal / 2)}</text>
+                  <text x={paddingLeft - 8} y={baselineY + 3} textAnchor="end" className="chart-axis-text">0</text>
+
+                  {dashboard.monthlySeries.map((s, idx) => {
+                    const barHeight = (s.containersCount / maxVal) * maxBarHeight;
+                    const centerX = paddingLeft + idx * colWidth + colWidth / 2;
+                    const x = centerX - barWidth / 2;
+                    const y = baselineY - barHeight;
+                    const showAxisLabel = idx % step === 0 || idx === count - 1;
 
                     return (
                       <g
@@ -582,7 +615,7 @@ export default function AnalyticsReportsView({
                         className="chart-bar-group"
                         onClick={() =>
                           setBreakdownModal({
-                            title: `Containers Incorporados em ${s.label} (${s.containersCount})`,
+                            title: `Containers Incorporados em ${s.fullLabel || s.label} (${s.containersCount})`,
                             type: 'containers',
                             items: s.containersList
                           })
@@ -594,8 +627,8 @@ export default function AnalyticsReportsView({
                             y: rect.top - 10,
                             content: (
                               <div>
-                                <strong>{s.label}</strong>
-                                <div>Containers: {s.containersCount}</div>
+                                <strong>{s.fullLabel || s.label}</strong>
+                                <div>Containers: <strong>{s.containersCount}</strong></div>
                                 {s.containerGrowth && (
                                   <div>Variação: {s.containerGrowth.formatted}</div>
                                 )}
@@ -605,26 +638,41 @@ export default function AnalyticsReportsView({
                         }}
                         onMouseLeave={() => setChartTooltip(null)}
                       >
+                        {/* Barra de Container */}
                         <rect
                           x={x}
-                          y={y}
+                          y={s.containersCount > 0 ? y : baselineY - 2}
                           width={barWidth}
-                          height={Math.max(barHeight, 2)}
-                          rx="4"
+                          height={s.containersCount > 0 ? Math.max(barHeight, 3) : 2}
+                          rx="3"
                           className="chart-bar bar-blue"
+                          style={{ opacity: s.containersCount > 0 ? 1 : 0.25 }}
                         />
-                        <text x={x + barWidth / 2} y={y - 6} textAnchor="middle" className="chart-val-text">
-                          {s.containersCount}
-                        </text>
-                        <text x={x + barWidth / 2} y="198" textAnchor="middle" className="chart-label-text">
-                          {s.label}
-                        </text>
+
+                        {/* Valor sobre a barra: omitido se 0 para evitar poluição visual */}
+                        {s.containersCount > 0 && (
+                          <text x={centerX} y={y - 5} textAnchor="middle" className="chart-val-text">
+                            {s.containersCount}
+                          </text>
+                        )}
+
+                        {/* Mês e Ano em duas linhas com alinhamento central */}
+                        {showAxisLabel && (
+                          <text x={centerX} textAnchor="middle">
+                            <tspan x={centerX} y="196" className="chart-label-month">
+                              {s.monthShort || s.label}
+                            </tspan>
+                            <tspan x={centerX} y="210" className="chart-label-year">
+                              {s.year || ''}
+                            </tspan>
+                          </text>
+                        )}
                       </g>
                     );
-                  });
-                })()}
-              </svg>
-            )}
+                  })}
+                </svg>
+              );
+            })()}
           </div>
         </div>
 
@@ -641,31 +689,49 @@ export default function AnalyticsReportsView({
           <div className="chart-render-box">
             {dashboard.monthlySeries.length === 0 ? (
               <div className="chart-empty-state">Nenhum registro para o período</div>
-            ) : (
-              <svg className="analytics-svg-chart" viewBox="0 0 540 220" preserveAspectRatio="none">
-                <line x1="40" y1="30" x2="520" y2="30" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="90" x2="520" y2="90" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="150" x2="520" y2="150" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="180" x2="520" y2="180" stroke="#cbd5e1" strokeWidth="1.5" />
+            ) : (() => {
+              const count = dashboard.monthlySeries.length;
+              const minColWidth = 62;
+              const chartWidth = Math.max(540, count * minColWidth + 70);
+              const chartHeight = 230;
+              const paddingLeft = 45;
+              const paddingRight = 20;
+              const availableWidth = chartWidth - paddingLeft - paddingRight;
+              const colWidth = availableWidth / count;
+              const subBarWidth = Math.min(18, colWidth * 0.32);
 
-                {(() => {
-                  const maxVal = Math.max(
-                    ...dashboard.monthlySeries.map(s => Math.max(s.bookingsRegisteredCount, s.bookingsFinalizedCount)),
-                    1
-                  );
-                  const count = dashboard.monthlySeries.length;
-                  const availableWidth = 460;
-                  const colWidth = availableWidth / count;
-                  const subBarWidth = Math.min(22, colWidth * 0.35);
+              const maxVal = Math.max(
+                ...dashboard.monthlySeries.map(s => Math.max(s.bookingsRegisteredCount, s.bookingsFinalizedCount)),
+                1
+              );
+              const baselineY = 175;
+              const maxBarHeight = 135;
+              const step = colWidth < 48 ? 2 : 1;
 
-                  return dashboard.monthlySeries.map((s, idx) => {
-                    const h1 = (s.bookingsRegisteredCount / maxVal) * 140;
-                    const h2 = (s.bookingsFinalizedCount / maxVal) * 140;
-                    const centerX = 50 + idx * colWidth + colWidth / 2;
+              return (
+                <svg
+                  className="analytics-svg-chart"
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  style={{ minWidth: `${chartWidth}px` }}
+                >
+                  <line x1={paddingLeft} y1="40" x2={chartWidth - paddingRight} y2="40" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="95" x2={chartWidth - paddingRight} y2="95" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="140" x2={chartWidth - paddingRight} y2="140" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1={baselineY} x2={chartWidth - paddingRight} y2={baselineY} stroke="#cbd5e1" strokeWidth="1.5" />
+
+                  <text x={paddingLeft - 8} y="44" textAnchor="end" className="chart-axis-text">{maxVal}</text>
+                  <text x={paddingLeft - 8} y="99" textAnchor="end" className="chart-axis-text">{Math.round(maxVal / 2)}</text>
+                  <text x={paddingLeft - 8} y={baselineY + 3} textAnchor="end" className="chart-axis-text">0</text>
+
+                  {dashboard.monthlySeries.map((s, idx) => {
+                    const h1 = (s.bookingsRegisteredCount / maxVal) * maxBarHeight;
+                    const h2 = (s.bookingsFinalizedCount / maxVal) * maxBarHeight;
+                    const centerX = paddingLeft + idx * colWidth + colWidth / 2;
                     const x1 = centerX - subBarWidth - 2;
                     const x2 = centerX + 2;
-                    const y1 = 180 - h1;
-                    const y2 = 180 - h2;
+                    const y1 = baselineY - h1;
+                    const y2 = baselineY - h2;
+                    const showAxisLabel = idx % step === 0 || idx === count - 1;
 
                     return (
                       <g
@@ -673,7 +739,7 @@ export default function AnalyticsReportsView({
                         className="chart-bar-group"
                         onClick={() =>
                           setBreakdownModal({
-                            title: `Bookings em ${s.label}: ${s.bookingsRegisteredCount} Cadastrados / ${s.bookingsFinalizedCount} Finalizados`,
+                            title: `Bookings em ${s.fullLabel || s.label}: ${s.bookingsRegisteredCount} Cadastrados / ${s.bookingsFinalizedCount} Finalizados`,
                             type: 'bookings',
                             items: [...s.registeredBookings, ...s.finalizedBookings]
                           })
@@ -685,9 +751,9 @@ export default function AnalyticsReportsView({
                             y: rect.top - 10,
                             content: (
                               <div>
-                                <strong>{s.label}</strong>
-                                <div>Cadastrados: {s.bookingsRegisteredCount}</div>
-                                <div>Finalizados: {s.bookingsFinalizedCount}</div>
+                                <strong>{s.fullLabel || s.label}</strong>
+                                <div>Cadastrados: <strong>{s.bookingsRegisteredCount}</strong></div>
+                                <div>Finalizados: <strong>{s.bookingsFinalizedCount}</strong></div>
                               </div>
                             )
                           });
@@ -695,26 +761,54 @@ export default function AnalyticsReportsView({
                         onMouseLeave={() => setChartTooltip(null)}
                       >
                         {/* Barra Cadastrados */}
-                        <rect x={x1} y={y1} width={subBarWidth} height={Math.max(h1, 2)} rx="3" className="chart-bar bar-amber" />
-                        <text x={x1 + subBarWidth / 2} y={y1 - 5} textAnchor="middle" className="chart-val-text">
-                          {s.bookingsRegisteredCount}
-                        </text>
+                        <rect
+                          x={x1}
+                          y={s.bookingsRegisteredCount > 0 ? y1 : baselineY - 2}
+                          width={subBarWidth}
+                          height={s.bookingsRegisteredCount > 0 ? Math.max(h1, 3) : 2}
+                          rx="3"
+                          className="chart-bar bar-amber"
+                          style={{ opacity: s.bookingsRegisteredCount > 0 ? 1 : 0.25 }}
+                        />
+                        {s.bookingsRegisteredCount > 0 && (
+                          <text x={x1 + subBarWidth / 2} y={y1 - 5} textAnchor="middle" className="chart-val-text">
+                            {s.bookingsRegisteredCount}
+                          </text>
+                        )}
 
                         {/* Barra Finalizados */}
-                        <rect x={x2} y={y2} width={subBarWidth} height={Math.max(h2, 2)} rx="3" className="chart-bar bar-green" />
-                        <text x={x2 + subBarWidth / 2} y={y2 - 5} textAnchor="middle" className="chart-val-text">
-                          {s.bookingsFinalizedCount}
-                        </text>
+                        <rect
+                          x={x2}
+                          y={s.bookingsFinalizedCount > 0 ? y2 : baselineY - 2}
+                          width={subBarWidth}
+                          height={s.bookingsFinalizedCount > 0 ? Math.max(h2, 3) : 2}
+                          rx="3"
+                          className="chart-bar bar-green"
+                          style={{ opacity: s.bookingsFinalizedCount > 0 ? 1 : 0.25 }}
+                        />
+                        {s.bookingsFinalizedCount > 0 && (
+                          <text x={x2 + subBarWidth / 2} y={y2 - 5} textAnchor="middle" className="chart-val-text">
+                            {s.bookingsFinalizedCount}
+                          </text>
+                        )}
 
-                        <text x={centerX} y="198" textAnchor="middle" className="chart-label-text">
-                          {s.label}
-                        </text>
+                        {/* Mês e Ano em duas linhas centrado */}
+                        {showAxisLabel && (
+                          <text x={centerX} textAnchor="middle">
+                            <tspan x={centerX} y="196" className="chart-label-month">
+                              {s.monthShort || s.label}
+                            </tspan>
+                            <tspan x={centerX} y="210" className="chart-label-year">
+                              {s.year || ''}
+                            </tspan>
+                          </text>
+                        )}
                       </g>
                     );
-                  });
-                })()}
-              </svg>
-            )}
+                  })}
+                </svg>
+              );
+            })()}
           </div>
         </div>
 
@@ -731,40 +825,67 @@ export default function AnalyticsReportsView({
           <div className="chart-render-box">
             {dashboard.monthlySeries.length === 0 ? (
               <div className="chart-empty-state">Nenhum registro para o período</div>
-            ) : (
-              <svg className="analytics-svg-chart" viewBox="0 0 540 220" preserveAspectRatio="none">
-                {/* Linha zero no centro vertical (y = 110) */}
-                <line x1="40" y1="40" x2="520" y2="40" stroke="#f1f5f9" />
-                <line x1="40" y1="110" x2="520" y2="110" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="2 2" />
-                <line x1="40" y1="180" x2="520" y2="180" stroke="#f1f5f9" />
+            ) : (() => {
+              const count = dashboard.monthlySeries.length;
+              const minColWidth = 62;
+              const chartWidth = Math.max(540, count * minColWidth + 70);
+              const chartHeight = 230;
+              const paddingLeft = 52;
+              const paddingRight = 20;
+              const availableWidth = chartWidth - paddingLeft - paddingRight;
+              const colWidth = availableWidth / count;
+              const subBarWidth = Math.min(18, colWidth * 0.32);
 
-                <text x="35" y="45" textAnchor="end" className="chart-axis-text">+100%</text>
-                <text x="35" y="114" textAnchor="end" className="chart-axis-text">0%</text>
-                <text x="35" y="184" textAnchor="end" className="chart-axis-text">-100%</text>
+              // Escala dinâmica real: sem corte silencioso para valores > 100%
+              const allPercents = dashboard.monthlySeries.flatMap(s => [
+                s.containerGrowth && !s.containerGrowth.noBase && s.containerGrowth.percent !== null ? Math.abs(s.containerGrowth.percent) : 0,
+                s.bookingGrowth && !s.bookingGrowth.noBase && s.bookingGrowth.percent !== null ? Math.abs(s.bookingGrowth.percent) : 0
+              ]);
+              const rawMax = Math.max(100, ...allPercents);
+              const maxScale = Math.ceil(rawMax / 50) * 50;
 
-                {(() => {
-                  const count = dashboard.monthlySeries.length;
-                  const availableWidth = 460;
-                  const colWidth = availableWidth / count;
-                  const subBarWidth = Math.min(18, colWidth * 0.3);
+              const zeroY = 105;
+              const maxHalfHeight = 65;
+              const step = colWidth < 48 ? 2 : 1;
 
-                  return dashboard.monthlySeries.map((s, idx) => {
-                    const centerX = 50 + idx * colWidth + colWidth / 2;
+              return (
+                <svg
+                  className="analytics-svg-chart"
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  style={{ minWidth: `${chartWidth}px` }}
+                >
+                  {/* Linhas de referência dinâmicas */}
+                  <line x1={paddingLeft} y1="40" x2={chartWidth - paddingRight} y2="40" stroke="#f1f5f9" />
+                  <line x1={paddingLeft} y1="72" x2={chartWidth - paddingRight} y2="72" stroke="#f8fafc" strokeDasharray="2 2" />
+                  <line x1={paddingLeft} y1={zeroY} x2={chartWidth - paddingRight} y2={zeroY} stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="138" x2={chartWidth - paddingRight} y2="138" stroke="#f8fafc" strokeDasharray="2 2" />
+                  <line x1={paddingLeft} y1="170" x2={chartWidth - paddingRight} y2="170" stroke="#f1f5f9" />
+
+                  <text x={paddingLeft - 8} y="44" textAnchor="end" className="chart-axis-text">+{maxScale}%</text>
+                  <text x={paddingLeft - 8} y="109" textAnchor="end" className="chart-axis-text">0%</text>
+                  <text x={paddingLeft - 8} y="174" textAnchor="end" className="chart-axis-text">-{maxScale}%</text>
+
+                  {dashboard.monthlySeries.map((s, idx) => {
+                    const centerX = paddingLeft + idx * colWidth + colWidth / 2;
                     const x1 = centerX - subBarWidth - 2;
                     const x2 = centerX + 2;
 
-                    // Clamp percentual entre -100% e +100% para renderizar
-                    const cPercent = s.containerGrowth?.percent !== null ? s.containerGrowth?.percent || 0 : 0;
-                    const bPercent = s.bookingGrowth?.percent !== null ? s.bookingGrowth?.percent || 0 : 0;
+                    const cGrowth = s.containerGrowth;
+                    const bGrowth = s.bookingGrowth;
 
-                    const clampedC = Math.max(-100, Math.min(100, cPercent));
-                    const clampedB = Math.max(-100, Math.min(100, bPercent));
+                    const hasC = cGrowth && !cGrowth.noBase && cGrowth.percent !== null;
+                    const hasB = bGrowth && !bGrowth.noBase && bGrowth.percent !== null;
 
-                    const h1 = Math.abs(clampedC) * 0.7;
-                    const y1 = clampedC >= 0 ? 110 - h1 : 110;
+                    const cPercent = hasC ? cGrowth.percent : null;
+                    const bPercent = hasB ? bGrowth.percent : null;
 
-                    const h2 = Math.abs(clampedB) * 0.7;
-                    const y2 = clampedB >= 0 ? 110 - h2 : 110;
+                    const h1 = cPercent !== null ? (Math.min(Math.abs(cPercent), maxScale) / maxScale) * maxHalfHeight : 0;
+                    const y1 = cPercent !== null ? (cPercent >= 0 ? zeroY - h1 : zeroY) : zeroY;
+
+                    const h2 = bPercent !== null ? (Math.min(Math.abs(bPercent), maxScale) / maxScale) * maxHalfHeight : 0;
+                    const y2 = bPercent !== null ? (bPercent >= 0 ? zeroY - h2 : zeroY) : zeroY;
+
+                    const showAxisLabel = idx % step === 0 || idx === count - 1;
 
                     return (
                       <g
@@ -777,9 +898,19 @@ export default function AnalyticsReportsView({
                             y: rect.top - 10,
                             content: (
                               <div>
-                                <strong>{s.label}</strong>
-                                <div>Containers: {s.containerGrowth?.formatted || 'Base inicial'}</div>
-                                <div>Bookings: {s.bookingGrowth?.formatted || 'Base inicial'}</div>
+                                <strong>{s.fullLabel || s.label}</strong>
+                                <div>
+                                  Containers:{' '}
+                                  <strong>
+                                    {cGrowth?.noBase ? 'Sem base de comparação' : (cGrowth?.formatted || 'Base inicial')}
+                                  </strong>
+                                </div>
+                                <div>
+                                  Bookings:{' '}
+                                  <strong>
+                                    {bGrowth?.noBase ? 'Sem base de comparação' : (bGrowth?.formatted || 'Base inicial')}
+                                  </strong>
+                                </div>
                               </div>
                             )
                           });
@@ -787,19 +918,66 @@ export default function AnalyticsReportsView({
                         onMouseLeave={() => setChartTooltip(null)}
                       >
                         {/* Barra Containers */}
-                        <rect x={x1} y={y1} width={subBarWidth} height={Math.max(h1, 2)} rx="2" className="chart-bar bar-blue" />
-                        {/* Barra Bookings */}
-                        <rect x={x2} y={y2} width={subBarWidth} height={Math.max(h2, 2)} rx="2" className="chart-bar bar-amber" />
+                        {hasC ? (
+                          <rect
+                            x={x1}
+                            y={y1}
+                            width={subBarWidth}
+                            height={Math.max(h1, 3)}
+                            rx="2"
+                            className="chart-bar bar-blue"
+                          />
+                        ) : (
+                          <rect
+                            x={x1}
+                            y={zeroY - 1}
+                            width={subBarWidth}
+                            height="2"
+                            rx="1"
+                            fill="#94a3b8"
+                            opacity="0.3"
+                          />
+                        )}
 
-                        <text x={centerX} y="202" textAnchor="middle" className="chart-label-text">
-                          {s.label}
-                        </text>
+                        {/* Barra Bookings */}
+                        {hasB ? (
+                          <rect
+                            x={x2}
+                            y={y2}
+                            width={subBarWidth}
+                            height={Math.max(h2, 3)}
+                            rx="2"
+                            className="chart-bar bar-amber"
+                          />
+                        ) : (
+                          <rect
+                            x={x2}
+                            y={zeroY - 1}
+                            width={subBarWidth}
+                            height="2"
+                            rx="1"
+                            fill="#94a3b8"
+                            opacity="0.3"
+                          />
+                        )}
+
+                        {/* Rótulo de Mês e Ano em duas linhas centrado */}
+                        {showAxisLabel && (
+                          <text x={centerX} textAnchor="middle">
+                            <tspan x={centerX} y="196" className="chart-label-month">
+                              {s.monthShort || s.label}
+                            </tspan>
+                            <tspan x={centerX} y="210" className="chart-label-year">
+                              {s.year || ''}
+                            </tspan>
+                          </text>
+                        )}
                       </g>
                     );
-                  });
-                })()}
-              </svg>
-            )}
+                  })}
+                </svg>
+              );
+            })()}
           </div>
         </div>
 
@@ -813,25 +991,51 @@ export default function AnalyticsReportsView({
           <div className="chart-render-box">
             {dashboard.monthlySeries.length === 0 ? (
               <div className="chart-empty-state">Nenhum registro para o período</div>
-            ) : (
-              <svg className="analytics-svg-chart" viewBox="0 0 540 220" preserveAspectRatio="none">
-                <line x1="40" y1="30" x2="520" y2="30" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="90" x2="520" y2="90" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="150" x2="520" y2="150" stroke="#e2e8f0" strokeDasharray="3 3" />
-                <line x1="40" y1="180" x2="520" y2="180" stroke="#cbd5e1" strokeWidth="1.5" />
+            ) : (() => {
+              const count = dashboard.monthlySeries.length;
+              const minColWidth = 58;
+              const chartWidth = Math.max(540, count * minColWidth + 70);
+              const chartHeight = 230;
+              const paddingLeft = 45;
+              const paddingRight = 20;
+              const availableWidth = chartWidth - paddingLeft - paddingRight;
+              const colWidth = availableWidth / count;
+              const barWidth = Math.min(32, colWidth * 0.52);
 
-                {(() => {
-                  const maxVal = Math.max(...dashboard.monthlySeries.map(s => s.avgCompletionDays || 0), 1);
-                  const count = dashboard.monthlySeries.length;
-                  const availableWidth = 460;
-                  const colWidth = availableWidth / count;
-                  const barWidth = Math.min(32, colWidth * 0.5);
+              const maxVal = Math.max(...dashboard.monthlySeries.map(s => s.avgCompletionDays || 0), 1);
+              const baselineY = 175;
+              const maxBarHeight = 135;
+              const step = colWidth < 46 ? 2 : 1;
 
-                  return dashboard.monthlySeries.map((s, idx) => {
-                    const days = s.avgCompletionDays || 0;
-                    const barHeight = (days / maxVal) * 140;
-                    const x = 50 + idx * colWidth + (colWidth - barWidth) / 2;
-                    const y = 180 - barHeight;
+              return (
+                <svg
+                  className="analytics-svg-chart"
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  style={{ minWidth: `${chartWidth}px` }}
+                >
+                  <line x1={paddingLeft} y1="40" x2={chartWidth - paddingRight} y2="40" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="95" x2={chartWidth - paddingRight} y2="95" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1="140" x2={chartWidth - paddingRight} y2="140" stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <line x1={paddingLeft} y1={baselineY} x2={chartWidth - paddingRight} y2={baselineY} stroke="#cbd5e1" strokeWidth="1.5" />
+
+                  <text x={paddingLeft - 8} y="44" textAnchor="end" className="chart-axis-text">{maxVal}d</text>
+                  <text x={paddingLeft - 8} y="99" textAnchor="end" className="chart-axis-text">{Math.round(maxVal / 2)}d</text>
+                  <text x={paddingLeft - 8} y={baselineY + 3} textAnchor="end" className="chart-axis-text">0d</text>
+
+                  {dashboard.monthlySeries.map((s, idx) => {
+                    const hasFinalized = s.finalizedBookings && s.finalizedBookings.length > 0;
+                    const days = s.avgCompletionDays;
+                    const isZeroDuration = hasFinalized && (days === 0 || (days !== null && days < 0.5));
+                    const hasData = hasFinalized && days !== null;
+
+                    const barHeight = hasData
+                      ? (isZeroDuration ? 10 : Math.max(10, (days / maxVal) * maxBarHeight))
+                      : 0;
+
+                    const centerX = paddingLeft + idx * colWidth + colWidth / 2;
+                    const x = centerX - barWidth / 2;
+                    const y = baselineY - barHeight;
+                    const showAxisLabel = idx % step === 0 || idx === count - 1;
 
                     return (
                       <g
@@ -839,7 +1043,7 @@ export default function AnalyticsReportsView({
                         className="chart-bar-group"
                         onClick={() =>
                           setBreakdownModal({
-                            title: `Bookings Finalizados em ${s.label} (${s.finalizedBookings.length})`,
+                            title: `Bookings Finalizados em ${s.fullLabel || s.label} (${s.finalizedBookings.length})`,
                             type: 'bookings',
                             items: s.finalizedBookings
                           })
@@ -851,35 +1055,74 @@ export default function AnalyticsReportsView({
                             y: rect.top - 10,
                             content: (
                               <div>
-                                <strong>{s.label}</strong>
-                                <div>Média: {days > 0 ? `${days} dias` : 'Sem finalizações'}</div>
-                                <div>Total finalizados: {s.finalizedBookings.length}</div>
+                                <strong>{s.fullLabel || s.label}</strong>
+                                {!hasFinalized ? (
+                                  <div style={{ color: '#94a3b8' }}>Ausência de dados (sem finalizações)</div>
+                                ) : isZeroDuration ? (
+                                  <>
+                                    <div>Tempo médio: <strong>&lt; 1 dia</strong> (mesmo dia)</div>
+                                    <div>Total finalizados: {s.finalizedBookings.length}</div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div>Tempo médio: <strong>{days} dia{days === 1 ? '' : 's'}</strong></div>
+                                    <div>Total finalizados: {s.finalizedBookings.length}</div>
+                                  </>
+                                )}
                               </div>
                             )
                           });
                         }}
                         onMouseLeave={() => setChartTooltip(null)}
                       >
-                        <rect
-                          x={x}
-                          y={y}
-                          width={barWidth}
-                          height={Math.max(barHeight, 2)}
-                          rx="4"
-                          className="chart-bar bar-purple"
-                        />
-                        <text x={x + barWidth / 2} y={y - 6} textAnchor="middle" className="chart-val-text">
-                          {days > 0 ? `${days}d` : '-'}
-                        </text>
-                        <text x={x + barWidth / 2} y="198" textAnchor="middle" className="chart-label-text">
-                          {s.label}
-                        </text>
+                        {/* Barra do Tempo de Conclusão */}
+                        {hasData ? (
+                          <rect
+                            x={x}
+                            y={y}
+                            width={barWidth}
+                            height={barHeight}
+                            rx="3"
+                            className="chart-bar bar-purple"
+                          />
+                        ) : (
+                          /* Ausência de dados: traço sutil sem barra falsa */
+                          <line
+                            x1={x}
+                            y1={baselineY}
+                            x2={x + barWidth}
+                            y2={baselineY}
+                            stroke="#cbd5e1"
+                            strokeWidth="2"
+                            strokeDasharray="2 2"
+                            opacity="0.5"
+                          />
+                        )}
+
+                        {/* Rótulo de Valor: distingue duração zero de ausência de dados, e não polui barras vazias */}
+                        {hasData && (
+                          <text x={centerX} y={y - 5} textAnchor="middle" className="chart-val-text">
+                            {isZeroDuration ? '< 1d' : `${days}d`}
+                          </text>
+                        )}
+
+                        {/* Mês e Ano em duas linhas centrado */}
+                        {showAxisLabel && (
+                          <text x={centerX} textAnchor="middle">
+                            <tspan x={centerX} y="196" className="chart-label-month">
+                              {s.monthShort || s.label}
+                            </tspan>
+                            <tspan x={centerX} y="210" className="chart-label-year">
+                              {s.year || ''}
+                            </tspan>
+                          </text>
+                        )}
                       </g>
                     );
-                  });
-                })()}
-              </svg>
-            )}
+                  })}
+                </svg>
+              );
+            })()}
           </div>
         </div>
       </div>
