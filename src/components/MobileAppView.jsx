@@ -8,6 +8,9 @@ import { db, useBookings, useExportadores, useLocais, getSealText, matchesBookin
 import FieldCapturePanel from './FieldCapturePanel';
 import FieldCaptureNotice from './FieldCaptureNotice';
 import { startFieldSynchronization } from '../utils/fieldService';
+import { recognizeContainerPhoto, validateIso6346CheckDigit, formatContainerNumber } from '../utils/containerOcr';
+import { normalizeContainerNumber } from '../utils/containerIdentity';
+import { fieldQueue } from '../utils/fieldQueue';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estilos utilitários inline
@@ -373,6 +376,27 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   const cameraInputRef  = useRef(null);
   const galleryInputRef = useRef(null);
 
+  // ── Identificação de Container via Câmera + OCR
+  const searchCameraInputRef = useRef(null);
+  const [capturedPhotoFile, setCapturedPhotoFile] = useState(null);
+  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState(null);
+  const [isOcrScanning, setIsOcrScanning] = useState(false);
+  const [ocrModalOpen, setOcrModalOpen] = useState(false);
+  const [recognizedNumber, setRecognizedNumber] = useState('');
+  const [recognizedTara, setRecognizedTara] = useState('');
+  const [ocrConfidence, setOcrConfidence] = useState(0);
+
+  // ── Desempate quando container existe em múltiplos bookings
+  const [multipleBookingsList, setMultipleBookingsList] = useState([]);
+  const [matchingContainerNum, setMatchingContainerNum] = useState('');
+  const [multipleBookingsModalOpen, setMultipleBookingsModalOpen] = useState(false);
+
+  // ── Destaque de container identificado
+  const [highlightedContainerId, setHighlightedContainerId] = useState(null);
+
+  // ── Inicialização do FieldCapturePanel quando Booking não for encontrado
+  const [fieldCaptureInitial, setFieldCaptureInitial] = useState(null);
+
   // Guard contra setState em componente desmontado (evita crash/fechamento)
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -613,12 +637,167 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     updateContField('provisionalSeals', updated);
   };
 
+  const handleSearchPhotoCaptured = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (capturedPhotoUrl) {
+      URL.revokeObjectURL(capturedPhotoUrl);
+    }
+    const url = URL.createObjectURL(file);
+    setCapturedPhotoFile(file);
+    setCapturedPhotoUrl(url);
+    setIsOcrScanning(true);
+    setRecognizedNumber('');
+    setRecognizedTara('');
+    setOcrConfidence(0);
+    setOcrModalOpen(true);
+
+    try {
+      const res = await recognizeContainerPhoto(file);
+      if (res.containerNumber) {
+        setRecognizedNumber(res.containerNumber);
+      }
+      if (res.tara) {
+        setRecognizedTara(res.tara);
+      }
+      setOcrConfidence(res.confidence || 0);
+    } catch (err) {
+      console.warn('Erro no reconhecimento OCR:', err);
+    } finally {
+      if (isMountedRef.current) {
+        setIsOcrScanning(false);
+      }
+    }
+  };
+
+  const associatePhotoAndOpenBooking = async (targetBooking, targetContainer, photoFile) => {
+    try {
+      showToast('Salvando foto no container...');
+      let photoRef = null;
+
+      if (navigator.onLine) {
+        try {
+          const uploadRes = await db.uploadPhoto(photoFile, targetContainer.id);
+          photoRef = { id: uploadRes.id, name: uploadRes.name || '', url: uploadRes.url };
+        } catch (uploadErr) {
+          console.warn('Falha no upload online da foto, gerando registro local:', uploadErr);
+        }
+      }
+
+      if (!photoRef) {
+        // Modo offline ou fallback: salva foto no armazenamento local seguro (fieldQueue)
+        const photoId = crypto.randomUUID();
+        await fieldQueue.savePhoto(photoId, photoFile);
+        const localUrl = URL.createObjectURL(photoFile);
+        photoRef = { id: photoId, name: 'Foto Identificação', url: localUrl };
+      }
+
+      // Adiciona a foto preservando todas as fotos existentes do container
+      const updatedContainers = (targetBooking.containers || []).map(c => {
+        if (c.id === targetContainer.id) {
+          const currentPhotos = c.photos || [];
+          return {
+            ...c,
+            photos: [...currentPhotos, photoRef]
+          };
+        }
+        return c;
+      });
+
+      const updatedBooking = { ...targetBooking, containers: updatedContainers };
+      await db.saveBooking(updatedBooking);
+
+      // Abre o booking completo e destaca o container fotografado
+      setSelectedBooking(updatedBooking);
+      setHighlightedContainerId(targetContainer.id);
+      setScreen('booking');
+      setActiveTab('booking');
+      showToast(`✓ Foto salva no container ${targetContainer.containerNumber} do Booking ${targetBooking.bookingNumber}!`);
+    } catch (err) {
+      console.error('Erro ao associar foto ao container do booking:', err);
+      showToast('Erro ao salvar foto no booking. Tente novamente.');
+    }
+  };
+
+  const handleConfirmAndSearchBooking = async () => {
+    const cleanNum = normalizeContainerNumber(recognizedNumber);
+    if (!/^[A-Z]{4}\d{7}$/.test(cleanNum)) {
+      showToast('Digite um número de container válido com 4 letras e 7 dígitos (ex: MSDU8821297).');
+      return;
+    }
+
+    setOcrModalOpen(false);
+
+    // 1. Procura em todos os Bookings pelo container normalizado
+    const matches = [];
+    for (const b of bookings) {
+      const cont = (b.containers || []).find(c => 
+        normalizeContainerNumber(c.containerNumber || c.id) === cleanNum
+      );
+      if (cont) {
+        matches.push({ booking: b, container: cont });
+      }
+    }
+
+    // Ordenação por prioridade: Em andamento > Pendente > Finalizado, depois datas mais recentes
+    matches.sort((a, b) => {
+      const statusScore = s => {
+        const lower = String(s || '').toLowerCase();
+        if (lower.includes('andamento')) return 3;
+        if (lower.includes('pendente')) return 2;
+        if (lower.includes('finalizado') || lower.includes('concluido')) return 1;
+        return 0;
+      };
+      const scoreA = statusScore(a.booking.status);
+      const scoreB = statusScore(b.booking.status);
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      const dateA = new Date(a.booking.launchDate || a.booking.startDate || 0).getTime();
+      const dateB = new Date(b.booking.launchDate || b.booking.startDate || 0).getTime();
+      return dateB - dateA;
+    });
+
+    if (matches.length > 1) {
+      // Múltiplos Bookings encontrados: abre modal para o usuário escolher
+      setMatchingContainerNum(cleanNum);
+      setMultipleBookingsList(matches);
+      setMultipleBookingsModalOpen(true);
+      return;
+    }
+
+    if (matches.length === 1) {
+      // 1 Booking encontrado: associa foto e abre diretamente
+      await associatePhotoAndOpenBooking(matches[0].booking, matches[0].container, capturedPhotoFile);
+      return;
+    }
+
+    // 0 Bookings encontrados: abre cadastro de container sem Booking
+    setFieldCaptureInitial({
+      number: cleanNum,
+      tara: recognizedTara,
+      photoFile: capturedPhotoFile,
+      photoUrl: capturedPhotoUrl
+    });
+    showToast(`Container ${cleanNum} não vinculado a nenhum Booking. Abrindo cadastro sem Booking.`);
+  };
+
+  const handleSelectMultipleBooking = async (match) => {
+    setMultipleBookingsModalOpen(false);
+    await associatePhotoAndOpenBooking(match.booking, match.container, capturedPhotoFile);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // TELA: Lista de Bookings
   // ─────────────────────────────────────────────────────────────────────────
   const renderList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <FieldCapturePanel user={user} bookings={bookings} />
+      <FieldCapturePanel
+        user={user}
+        bookings={bookings}
+        initialCapture={fieldCaptureInitial}
+        onClearInitialCapture={() => setFieldCaptureInitial(null)}
+      />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)', margin: 0 }}>
           📋 Bookings
@@ -646,10 +825,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         </button>
       </div>
 
-      {/* Campo de busca */}
+      {/* Campo de busca com Câmera */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: '10px',
-        padding: '12px 16px',
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '10px 14px',
         backgroundColor: 'var(--bg-secondary)',
         border: '1px solid var(--border-color)',
         borderRadius: '14px',
@@ -668,6 +847,36 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
             <X size={14} />
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => searchCameraInputRef.current?.click()}
+          title="Fotografar identificação do container"
+          style={{
+            background: 'var(--color-brand-light)',
+            border: '1px solid var(--color-brand)',
+            borderRadius: '10px',
+            color: 'var(--color-brand)',
+            padding: '8px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '12px',
+            fontWeight: '800',
+            cursor: 'pointer',
+            flexShrink: 0
+          }}
+        >
+          <Camera size={17} />
+          <span>Foto</span>
+        </button>
+        <input
+          ref={searchCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={handleSearchPhotoCaptured}
+        />
       </div>
 
       {/* Contador */}
@@ -815,21 +1024,50 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
               const hasPhotos  = (c.photos || []).length > 0;
               const sealText   = getSealText(c.definiteSeal);
               const hasDefSeal = !!sealText;
+              const isHighlighted = highlightedContainerId && (
+                c.id === highlightedContainerId ||
+                normalizeContainerNumber(c.containerNumber) === normalizeContainerNumber(recognizedNumber)
+              );
+
               return (
                 <div
                   key={c.id}
                   onClick={() => openContainer(c)}
+                  ref={el => {
+                    if (isHighlighted && el) {
+                      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                    }
+                  }}
                   style={{
                     ...S.card,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    borderLeft: `3px solid ${hasDefSeal ? '#10b981' : 'var(--border-color)'}`,
+                    borderLeft: isHighlighted ? '4px solid var(--color-brand)' : `3px solid ${hasDefSeal ? '#10b981' : 'var(--border-color)'}`,
+                    border: isHighlighted ? '2px solid var(--color-brand)' : '1px solid var(--border-color)',
+                    boxShadow: isHighlighted ? '0 0 16px rgba(245, 158, 11, 0.45)' : undefined,
+                    backgroundColor: isHighlighted ? 'rgba(245, 158, 11, 0.08)' : 'var(--bg-secondary)',
                     transition: 'transform 0.1s'
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    {isHighlighted && (
+                      <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '10px',
+                        fontWeight: '800',
+                        color: 'var(--color-brand)',
+                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        marginBottom: '6px'
+                      }}>
+                        ⭐ Container fotografado
+                      </div>
+                    )}
                     <div style={{ fontWeight: '900', fontSize: '16px', letterSpacing: '0.5px' }}>{c.containerNumber}</div>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{c.containerType}</div>
                     <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
@@ -1302,6 +1540,276 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                 cursor: 'pointer', color: '#fff', fontSize: '16px', fontWeight: 'bold'
               }}
             >✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Conferência de Identificação do Container via Foto */}
+      {ocrModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Conferência de Identificação do Container"
+          style={{
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            zIndex: 15000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px', overflowY: 'auto'
+          }}
+        >
+          <div style={{
+            maxWidth: '480px', width: '100%',
+            backgroundColor: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '16px',
+            padding: '20px',
+            display: 'flex', flexDirection: 'column', gap: '14px',
+            boxShadow: 'var(--shadow-xl)',
+            maxHeight: '92vh', overflowY: 'auto'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '32px', height: '32px', borderRadius: '8px',
+                  backgroundColor: 'var(--color-brand-light)', color: 'var(--color-brand)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <Camera size={18} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: 'var(--text-primary)' }}>
+                    Identificação do Container
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Reconhecimento de número e dados da placa
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOcrModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                title="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Foto capturada */}
+            {capturedPhotoUrl && (
+              <div style={{
+                position: 'relative', width: '100%', height: '170px',
+                borderRadius: '10px', overflow: 'hidden',
+                border: '1px solid var(--border-color)', backgroundColor: '#000'
+              }}>
+                <img
+                  src={capturedPhotoUrl}
+                  alt="Identificação fotografada"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+                {isOcrScanning && (
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    gap: '8px', color: '#fff'
+                  }}>
+                    <Loader2 size={30} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-brand)' }} />
+                    <span style={{ fontSize: '13px', fontWeight: '700' }}>Reconhecendo identificação...</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Aviso offline */}
+            {!navigator.onLine && (
+              <div style={{
+                padding: '8px 12px', borderRadius: '8px',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                color: '#f59e0b', fontSize: '12px', fontWeight: '600'
+              }}>
+                📡 Modo Offline: A busca será realizada nos Bookings salvos no aparelho.
+              </div>
+            )}
+
+            {/* Campos de Conferência */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={S.label}>Número do Container *</label>
+                <input
+                  type="text"
+                  placeholder="Ex: MSDU8821297"
+                  value={recognizedNumber}
+                  onChange={e => setRecognizedNumber(e.target.value.toUpperCase())}
+                  autoCapitalize="characters"
+                  style={{ ...S.input, fontWeight: '800', letterSpacing: '0.5px' }}
+                />
+                <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                  {validateIso6346CheckDigit(recognizedNumber) ? (
+                    <span style={{ color: '#10b981', fontWeight: '700' }}>✓ Código ISO 6346 válido (alta precisão)</span>
+                  ) : recognizedNumber.length === 11 ? (
+                    <span style={{ color: '#f59e0b', fontWeight: '600' }}>⚠️ Dígito verificador não confere. Confira a placa.</span>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>Informe 4 letras e 7 dígitos (ex: ABCD1234567)</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label style={S.label}>Tara Reconhecida (kg)</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 3820"
+                  value={recognizedTara}
+                  onChange={e => setRecognizedTara(e.target.value)}
+                  inputMode="numeric"
+                  style={S.input}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Extraída da placa ou preenchida manualmente.
+                </span>
+              </div>
+            </div>
+
+            {/* Rodapé com Ações */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+              <button
+                type="button"
+                onClick={() => searchCameraInputRef.current?.click()}
+                className="btn btn-secondary"
+                style={{ flex: 1, padding: '12px 8px', fontSize: '13px', justifyContent: 'center' }}
+                disabled={isOcrScanning}
+              >
+                Tirar outra foto
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAndSearchBooking}
+                className="btn btn-primary"
+                style={{ flex: 1.5, padding: '12px 14px', fontSize: '13px', fontWeight: '800', justifyContent: 'center', backgroundColor: '#059669' }}
+                disabled={isOcrScanning || !recognizedNumber.trim()}
+              >
+                Continuar e Buscar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Múltiplos Bookings Encontrados */}
+      {multipleBookingsModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Seleção de Booking Correspondente"
+          style={{
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            zIndex: 15500,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px', overflowY: 'auto'
+          }}
+        >
+          <div style={{
+            maxWidth: '500px', width: '100%',
+            backgroundColor: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '16px',
+            padding: '20px',
+            display: 'flex', flexDirection: 'column', gap: '14px',
+            boxShadow: 'var(--shadow-xl)',
+            maxHeight: '92vh', overflowY: 'auto'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--color-brand)', textTransform: 'uppercase' }}>
+                  Desempate de Reserva
+                </span>
+                <h3 style={{ fontSize: '17px', fontWeight: '900', margin: '2px 0 0', color: 'var(--text-primary)' }}>
+                  Container {matchingContainerNum}
+                </h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Encontrado em {multipleBookingsList.length} Bookings. Selecione qual deseja abrir:
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMultipleBookingsModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Lista ordenada de Bookings */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {multipleBookingsList.map(item => {
+                const b = item.booking;
+                const sc = statusColor(b.status);
+                const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
+                const dateStr = b.launchDate || b.startDate || 'Sem data';
+
+                return (
+                  <div
+                    key={b.id}
+                    onClick={() => handleSelectMultipleBooking(item)}
+                    style={{
+                      ...S.card,
+                      cursor: 'pointer',
+                      borderLeft: `4px solid ${sc}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      transition: 'transform 0.15s, background-color 0.15s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ fontSize: '16px', color: 'var(--text-primary)' }}>
+                        {b.bookingNumber}
+                      </strong>
+                      <span style={{
+                        fontSize: '10px', fontWeight: '800', padding: '3px 8px',
+                        borderRadius: '6px', backgroundColor: `${sc}1A`, color: sc
+                      }}>
+                        {b.status || 'Pendente'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      <div>Exportador: <strong>{exp}</strong></div>
+                      <div>Navio/Viagem: <strong>{b.vesselVoyage || '—'}</strong></div>
+                      <div>Data: <strong>{dateStr}</strong></div>
+                    </div>
+
+                    <div style={{
+                      marginTop: '4px',
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      color: 'var(--color-brand)',
+                      fontSize: '12px',
+                      fontWeight: '800'
+                    }}>
+                      Salvar foto e abrir este Booking →
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setMultipleBookingsModalOpen(false)}
+              style={{ padding: '10px', justifyContent: 'center' }}
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       )}

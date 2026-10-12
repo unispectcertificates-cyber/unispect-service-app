@@ -33,7 +33,7 @@ const checkIsDevice = () => {
   return isMobileUA || matchesMedia || isTouchTablet;
 };
 
-export default function FieldCapturePanel({ user, bookings }) {
+export default function FieldCapturePanel({ user, bookings, initialCapture, onClearInitialCapture }) {
   const [isDevice, setIsDevice] = useState(checkIsDevice);
   const [drafts, setDrafts] = useState([]);
   const [operations, setOperations] = useState([]);
@@ -170,11 +170,42 @@ export default function FieldCapturePanel({ user, bookings }) {
       tara: container.tara, sealType: container.definiteSeal ? 'definitive' : 'provisional',
       sealNumber: sealText(container.definiteSeal || container.provisionalSeals?.[0])
     } : {});
-    setTara(fields.tara || ''); setSealType(fields.sealType || 'definitive'); setSealNumber(fields.sealNumber || '');
+    setTara(prev => fields.tara || prev || ''); setSealType(fields.sealType || 'definitive'); setSealNumber(fields.sealNumber || '');
     setContext({ exists: Boolean(local || remote || booked), sourceContainerId: remote?.sourceContainerId || local?.sourceContainerId,
       photos: mergePhotos(container?.photos, local?.photos), status: booked ? 'linked' : 'pending',
       lockedTara: Boolean(fields.tara), lockedSeal: Boolean(fields.sealNumber), booking: booked?.booking });
   };
+
+  useEffect(() => {
+    if (!initialCapture) return;
+    const targetNum = initialCapture.number || '';
+    releasePhotos();
+    setNumber(targetNum);
+    setSealType('definitive');
+    setSealNumber('');
+    setError('');
+
+    if (initialCapture.photoFile) {
+      const url = initialCapture.photoUrl || URL.createObjectURL(initialCapture.photoFile);
+      urls.current.add(url);
+      setNewPhotos([{ id: crypto.randomUUID(), file: initialCapture.photoFile, url }]);
+    } else {
+      setNewPhotos([]);
+    }
+
+    if (targetNum) {
+      lookup(targetNum);
+    }
+    if (initialCapture.tara) {
+      setTara(initialCapture.tara);
+    }
+
+    setOpen(true);
+    if (onClearInitialCapture) {
+      onClearInitialCapture();
+    }
+  }, [initialCapture]);
+
   const openForm = (value = '') => {
     releasePhotos(); setNumber(''); setTara(''); setSealType('definitive'); setSealNumber(''); setContext(null); setError(''); setOpen(true);
     if (value) lookup(value);
