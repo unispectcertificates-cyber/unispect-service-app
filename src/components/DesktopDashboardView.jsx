@@ -24,7 +24,9 @@ import InspectorsList from './InspectorsList';
 import ReportView from './ReportView';
 import UsersList from './UsersList';
 import FieldContainersView from './FieldContainersView';
+import AnalyticsReportsView from './AnalyticsReportsView';
 import MobileAppView from './MobileAppView';
+import { subscribePendingFieldContainers } from '../utils/fieldService';
 
 export default function DesktopDashboardView({
   currentTab,
@@ -72,6 +74,16 @@ export default function DesktopDashboardView({
     };
     document.addEventListener('mousedown', handleCloseActionMenu);
     return () => document.removeEventListener('mousedown', handleCloseActionMenu);
+  }, []);
+
+  // Subscrição de containers sem booking de campo
+  const [fieldPendingContainers, setFieldPendingContainers] = useState([]);
+  useEffect(() => {
+    const unsub = subscribePendingFieldContainers(
+      records => setFieldPendingContainers(records),
+      () => setFieldPendingContainers([])
+    );
+    return () => unsub();
   }, []);
 
   // Ordenação
@@ -193,6 +205,7 @@ export default function DesktopDashboardView({
           <span className="desktop-breadcrumb-current">
             {currentTab === 'bookings' && 'Bookings e operações'}
             {currentTab === 'containers-sem-booking' && 'Containers sem Booking'}
+            {currentTab === 'analytics-reports' && 'Análise e Relatórios'}
             {currentTab === 'exportadores' && 'Exportadores'}
             {currentTab === 'locais' && 'Locais da Operação'}
             {currentTab === 'inspectors' && 'Cadastro de Inspetores'}
@@ -822,6 +835,17 @@ export default function DesktopDashboardView({
           </>
         ) : currentTab === 'containers-sem-booking' ? (
           <FieldContainersView user={user} />
+        ) : currentTab === 'analytics-reports' ? (
+          <AnalyticsReportsView
+            bookings={bookings}
+            fieldPendingContainers={fieldPendingContainers}
+            exportadores={exportadores}
+            locais={locais}
+            user={user}
+            onOpenBooking={id => setSelectedBookingId(id)}
+            onOpenReport={(id, type) => setActiveReport({ id, type: type || 'administrative' })}
+            onBackToBookings={() => setCurrentTab('bookings')}
+          />
         ) : currentTab === 'exportadores' ? (
           <ExportadoresList onDataChange={handleRefreshData} />
         ) : currentTab === 'locais' ? (

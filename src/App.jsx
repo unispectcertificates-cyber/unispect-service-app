@@ -407,10 +407,21 @@ export default function App() {
 
   // Ações da Tabela
   const handleFinalizeBooking = async (id, e) => {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     const bk = bookings.find(b => b.id === id);
     if (bk) {
+      const nowIso = new Date().toISOString();
+      const userName = user?.name || user?.login || 'Usuário';
+      const historyEntry = {
+        action: 'finalized',
+        timestamp: nowIso,
+        user: { id: user?.id || '', name: userName }
+      };
+      const updatedHistory = [...(bk.finalizationHistory || []), historyEntry];
       bk.status = 'Finalizado';
+      bk.finalizedAt = nowIso;
+      bk.finalizedBy = userName;
+      bk.finalizationHistory = updatedHistory;
       await db.saveBooking(bk);
       handleRefreshData();
     }

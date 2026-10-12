@@ -88,11 +88,36 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         return;
       }
 
+      const nowIso = new Date().toISOString();
+      const userName = user?.name || user?.login || 'Usuário';
+      let finalizationHistory = [...(booking.finalizationHistory || [])];
+      let finalizedAt = booking.finalizedAt || null;
+      let finalizedBy = booking.finalizedBy || null;
+
+      if (bookingStatus === 'Finalizado' && booking.status !== 'Finalizado') {
+        finalizedAt = nowIso;
+        finalizedBy = userName;
+        finalizationHistory.push({
+          action: 'finalized',
+          timestamp: nowIso,
+          user: { id: user?.id || '', name: userName }
+        });
+      } else if (booking.status === 'Finalizado' && bookingStatus !== 'Finalizado') {
+        finalizationHistory.push({
+          action: 'reopened',
+          timestamp: nowIso,
+          user: { id: user?.id || '', name: userName }
+        });
+      }
+
       const updated = {
         ...booking,
         inspectorId: selectedInspectorId,
         status: bookingStatus,
-        pendingItem: pendingItem
+        pendingItem: pendingItem,
+        finalizedAt,
+        finalizedBy,
+        finalizationHistory
       };
       setBooking(updated);
       await db.saveBooking(updated);

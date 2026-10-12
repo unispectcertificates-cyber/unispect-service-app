@@ -4,6 +4,7 @@ import {
   PackagePlus,
   Users,
   FileText,
+  TrendingUp,
   Settings,
   Camera,
   LogOut,
@@ -132,21 +133,15 @@ export default function Sidebar({
             </li>
           )}
 
-          {/* 4. Relatórios */}
+          {/* 4. Análise e Relatórios */}
           <li>
             <button
               type="button"
-              onClick={() => {
-                if (onOpenReport) {
-                  onOpenReport();
-                } else {
-                  setCurrentTab('relatorios');
-                }
-              }}
-              className={`sidebar-nav-item ${currentTab === 'relatorios' ? 'active' : ''}`}
+              onClick={() => setCurrentTab('analytics-reports')}
+              className={`sidebar-nav-item ${currentTab === 'analytics-reports' ? 'active' : ''}`}
             >
-              <FileText size={18} className="sidebar-item-icon" />
-              <span className="sidebar-item-text">Relatórios</span>
+              <TrendingUp size={18} className="sidebar-item-icon" />
+              <span className="sidebar-item-text">Análise e Relatórios</span>
             </button>
           </li>
 
