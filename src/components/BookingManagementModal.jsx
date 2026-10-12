@@ -6,7 +6,7 @@ import { parseRomaneioPdf } from '../utils/pdfParser';
 import ContainerDetail from './ContainerDetail';
 import BookingImportHistory from './BookingImportHistory';
 
-export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport }) {
+export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport, initialOpenUpdateRomaneio = false }) {
   
   const bookings = useBookings();
   const inspectors = useInspectors();
@@ -47,7 +47,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
 
   // Modal de Atualização Incremental via Romaneio PDF
-  const [showIncrementalImportModal, setShowIncrementalImportModal] = useState(false);
+  const [showIncrementalImportModal, setShowIncrementalImportModal] = useState(initialOpenUpdateRomaneio);
   const [importPdfFile, setImportPdfFile] = useState(null);
   const [isParsingRomaneio, setIsParsingRomaneio] = useState(false);
   const [romaneioParseError, setRomaneioParseError] = useState('');

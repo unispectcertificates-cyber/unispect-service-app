@@ -1,10 +1,33 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, ClipboardList, Users, MapPin, Trash2, ShieldAlert, Moon, Sun, UserCheck, Camera, PackagePlus } from 'lucide-react';
+import {
+  ClipboardList,
+  PackagePlus,
+  Users,
+  FileText,
+  Settings,
+  Camera,
+  LogOut,
+  MapPin,
+  UserCheck,
+  ChevronDown,
+  ChevronRight,
+  ShieldAlert,
+  Trash2
+} from 'lucide-react';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
 
-export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange, isDark, toggleDarkMode }) {
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+export default function Sidebar({
+  currentTab,
+  setCurrentTab,
+  user,
+  onLogout,
+  onOpenReport,
+  onUserChange
+}) {
   const [pendingFieldCount, setPendingFieldCount] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(
+    ['settings', 'locais', 'inspectors', 'usuarios'].includes(currentTab)
+  );
 
   useEffect(() => {
     const unsub = subscribePendingFieldContainers(
@@ -14,228 +37,237 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onUserChange,
     return () => unsub();
   }, []);
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADM', 'Inspector'] },
-    { id: 'bookings', label: 'Gerenciar Bookings', icon: ClipboardList, roles: ['ADM', 'Inspector'] },
-    { id: 'containers-sem-booking', label: 'Containers sem Booking', icon: PackagePlus, roles: ['ADM', 'Inspector'] },
-    { id: 'field-portal', label: 'Modo Campo (Mobile App)', icon: Camera, roles: ['ADM', 'Inspector'] },
-    { id: 'exportadores', label: 'Exportadores', icon: Users, roles: ['ADM'] },
-    { id: 'locais', label: 'Locais da Operação', icon: MapPin, roles: ['ADM'] },
-    { id: 'relatorios', label: 'Relatórios', icon: ClipboardList, roles: ['Exportador'] },
-  ];
+  useEffect(() => {
+    if (['settings', 'locais', 'inspectors', 'usuarios'].includes(currentTab)) {
+      setSettingsOpen(true);
+    }
+  }, [currentTab]);
 
-  const handleAccountDeletion = () => {
-    alert('Sua solicitação de exclusão de conta foi registrada. Os dados associados serão removidos em até 7 dias úteis, conforme as diretrizes da Play Store.');
-    setShowDeleteModal(false);
+  const isAdm = user?.role === 'ADM';
+  const isInspector = user?.role === 'Inspector';
+  const isExporter = user?.role === 'Exportador';
+
+  const getRoleLabel = () => {
+    if (isAdm) return 'MASTER';
+    if (isInspector) return 'INSPETOR';
+    if (isExporter) return 'EXPORTADOR';
+    return user?.role || 'USUÁRIO';
   };
 
-  const handleRoleChange = (e) => {
-    const role = e.target.value;
-    let username = 'Usuário';
-    if (role === 'ADM') username = 'Administrador';
-    if (role === 'Inspector') username = 'Carlos (Inspetor)';
-    if (role === 'Exporter') username = 'Café Atlântica (Exportador)';
-    onUserChange({ role, username });
-    
-    // Redireciona para o menu correto se o menu atual não for visível para a nova role
-    if (role === 'Exportador') {
-      setCurrentTab('relatorios');
-    } else {
-      setCurrentTab('dashboard');
-    }
+  const getInitials = (name) => {
+    if (!name) return 'US';
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
   return (
-    <aside className="sidebar no-print">
-      {/* Topo / Logo */}
-      <div style={{ padding: '28px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '14px' }}>
-        <div style={{ 
-          width: '42px', 
-          height: '42px', 
-          borderRadius: 'var(--radius-md)', 
-          background: 'var(--color-brand-gradient)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          color: '#fff', 
-          fontWeight: '800', 
-          fontSize: '20px',
-          boxShadow: 'var(--shadow-glow)'
-        }}>
-          US
-        </div>
-        <div>
-          <h2 style={{ fontSize: '18px', fontFamily: 'var(--font-display)', fontWeight: '700', lineHeight: '1.2' }}>Unispect Service</h2>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.05em' }}>SYSTEM v1.0</span>
-        </div>
-      </div>
-
-      {/* Seletor de Perfil (Simulador de Testes) */}
-      <div style={{ 
-        padding: '16px 18px', 
-        backgroundColor: 'var(--bg-tertiary)', 
-        margin: '20px 16px 10px', 
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--border-color)',
-        boxShadow: 'var(--shadow-sm)'
-      }}>
-        <label style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '6px', 
-          fontSize: '10px', 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.08em',
-          fontWeight: '800',
-          color: 'var(--text-muted)'
-        }}>
-          <UserCheck size={12} /> Testar Como (Perfil)
-        </label>
-        <select 
-          value={user.role} 
-          onChange={handleRoleChange}
-          style={{ 
-            padding: '8px 12px', 
-            fontSize: '13px', 
-            marginTop: '8px',
-            borderRadius: 'var(--radius-sm)',
-            fontWeight: '600'
-          }}
-        >
-          <option value="ADM">Administrador (ADM)</option>
-          <option value="Inspector">Inspetor</option>
-          <option value="Exportador">Exportador</option>
-        </select>
-        <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '500' }}>
-          Usuário: <strong style={{ color: 'var(--text-primary)' }}>{user.username}</strong>
-        </div>
-      </div>
-
-      {/* Menu Principal */}
-      <nav style={{ flex: 1, padding: '12px 12px' }}>
-        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {menuItems
-            .filter(item => item.roles.includes(user.role))
-            .map(item => {
-              const Icon = item.icon;
-              const isActive = currentTab === item.id;
-              return (
-                <li key={item.id}>
-                  <button
-                    onClick={() => setCurrentTab(item.id)}
-                    className="no-select"
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '12px 16px',
-                      borderRadius: 'var(--radius-md)',
-                      border: 'none',
-                      backgroundColor: isActive ? 'var(--color-brand-light)' : 'transparent',
-                      color: isActive ? 'var(--color-brand)' : 'var(--text-secondary)',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'var(--transition-all)',
-                      transform: isActive ? 'translateX(4px)' : 'none'
-                    }}
-                    onMouseEnter={e => {
-                      if (!isActive) {
-                        e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
-                        e.currentTarget.style.color = 'var(--text-primary)';
-                        e.currentTarget.style.transform = 'translateX(4px)';
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (!isActive) {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                        e.currentTarget.style.color = 'var(--text-secondary)';
-                        e.currentTarget.style.transform = 'none';
-                      }
-                    }}
-                  >
-                    <Icon size={18} style={{ color: isActive ? 'var(--color-brand)' : 'var(--text-muted)' }} />
-                    <span style={{ flex: 1 }}>{item.label}</span>
-                    {item.id === 'containers-sem-booking' && pendingFieldCount > 0 && (
-                      <span style={{
-                        backgroundColor: isActive ? 'var(--color-brand)' : '#10b981',
-                        color: '#fff',
-                        fontSize: '11px',
-                        fontWeight: '800',
-                        padding: '2px 7px',
-                        borderRadius: 'var(--radius-full)',
-                        marginLeft: 'auto'
-                      }}>
-                        {pendingFieldCount}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-        </ul>
-      </nav>
-
-      {/* Botões de Ações Inferiores */}
-      <div style={{ padding: '16px 16px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {/* Toggle Dark Mode */}
-        <button
-          onClick={toggleDarkMode}
-          className="btn btn-secondary no-select"
-          style={{ width: '100%', justifyContent: 'flex-start', fontSize: '13px', padding: '10px 14px', borderRadius: 'var(--radius-md)' }}
-        >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-          {isDark ? 'Tema Claro' : 'Tema Escuro'}
-        </button>
-
-        {/* Delete Account Button */}
-        <button
-          onClick={() => setShowDeleteModal(true)}
-          className="btn btn-secondary no-select"
-          style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--color-danger)', fontSize: '13px', padding: '10px 14px', borderRadius: 'var(--radius-md)' }}
-        >
-          <Trash2 size={16} />
-          Excluir Conta
-        </button>
-      </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(6, 8, 15, 0.7)',
-          backdropFilter: 'blur(12px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px'
-        }}>
-          <div className="glass-panel" style={{ maxWidth: '420px', width: '100%', padding: '28px', position: 'relative', border: '1px solid var(--border-color)' }}>
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div style={{ padding: '10px', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--color-danger-light)', color: 'var(--color-danger)' }}>
-                <ShieldAlert size={26} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: '20px', fontFamily: 'var(--font-display)', marginBottom: '8px' }}>Excluir Conta Permanentemente?</h3>
-                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                  Esta ação é irreversível. Todos os seus dados pessoais e logs operacionais vinculados a este usuário serão excluídos definitivamente da nossa base conforme os requisitos da Play Store.
-                </p>
-              </div>
+    <aside className="sidebar-desktop no-print">
+      {/* Topo / Logo UNISPECT */}
+      <div className="sidebar-header">
+        <div className="sidebar-brand-box">
+          <div className="sidebar-logo-badge">
+            <span className="sidebar-logo-un">UN</span>
+            <span className="sidebar-logo-sub">UNISPECT</span>
+          </div>
+          <div className="sidebar-brand-text">
+            <div className="sidebar-brand-title">
+              <span className="title-white">Unispect</span>
+              <span className="title-accent">Service</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setShowDeleteModal(false)} className="btn btn-secondary">Cancelar</button>
-              <button onClick={handleAccountDeletion} className="btn btn-danger">Confirmar Exclusão</button>
+            <div className="sidebar-brand-subtitle">
+              VISTORIAS &amp; CERTIFICAÇÕES
             </div>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Navegação Principal */}
+      <nav className="sidebar-nav">
+        <div className="sidebar-section-label">MENU PRINCIPAL</div>
+
+        <ul className="sidebar-menu-list">
+          {/* 1. Bookings */}
+          <li>
+            <button
+              type="button"
+              onClick={() => setCurrentTab('bookings')}
+              className={`sidebar-nav-item ${currentTab === 'bookings' ? 'active' : ''}`}
+            >
+              <ClipboardList size={18} className="sidebar-item-icon" />
+              <span className="sidebar-item-text">Bookings</span>
+            </button>
+          </li>
+
+          {/* 2. Containers sem Booking (com contagem real) */}
+          {(isAdm || isInspector) && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('containers-sem-booking')}
+                className={`sidebar-nav-item ${currentTab === 'containers-sem-booking' ? 'active' : ''}`}
+              >
+                <PackagePlus size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Containers sem Booking</span>
+                {pendingFieldCount > 0 && (
+                  <span className="sidebar-count-badge">
+                    {pendingFieldCount}
+                  </span>
+                )}
+              </button>
+            </li>
+          )}
+
+          {/* 3. Exportadores (Apenas ADM) */}
+          {isAdm && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('exportadores')}
+                className={`sidebar-nav-item ${currentTab === 'exportadores' ? 'active' : ''}`}
+              >
+                <Users size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Exportadores</span>
+              </button>
+            </li>
+          )}
+
+          {/* 4. Relatórios */}
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenReport) {
+                  onOpenReport();
+                } else {
+                  setCurrentTab('relatorios');
+                }
+              }}
+              className={`sidebar-nav-item ${currentTab === 'relatorios' ? 'active' : ''}`}
+            >
+              <FileText size={18} className="sidebar-item-icon" />
+              <span className="sidebar-item-text">Relatórios</span>
+            </button>
+          </li>
+
+          {/* 5. Configurações com sub-itens */}
+          {(isAdm || isInspector) && (
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsOpen(!settingsOpen);
+                  if (!settingsOpen) setCurrentTab('settings');
+                }}
+                className={`sidebar-nav-item ${['settings', 'locais', 'inspectors', 'usuarios'].includes(currentTab) ? 'active' : ''}`}
+              >
+                <Settings size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Configurações</span>
+                {settingsOpen ? (
+                  <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.7 }} />
+                ) : (
+                  <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.7 }} />
+                )}
+              </button>
+
+              {settingsOpen && (
+                <ul className="sidebar-submenu-list">
+                  {isAdm && (
+                    <>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentTab('locais')}
+                          className={`sidebar-subitem ${currentTab === 'locais' ? 'active' : ''}`}
+                        >
+                          <MapPin size={14} />
+                          <span>Locais de Operação</span>
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentTab('inspectors')}
+                          className={`sidebar-subitem ${currentTab === 'inspectors' ? 'active' : ''}`}
+                        >
+                          <UserCheck size={14} />
+                          <span>Cadastro de Inspetores</span>
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentTab('usuarios')}
+                          className={`sidebar-subitem ${currentTab === 'usuarios' ? 'active' : ''}`}
+                        >
+                          <Users size={14} />
+                          <span>Gerenciar Usuários</span>
+                        </button>
+                      </li>
+                    </>
+                  )}
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentTab('settings')}
+                      className={`sidebar-subitem ${currentTab === 'settings' ? 'active' : ''}`}
+                    >
+                      <Settings size={14} />
+                      <span>Ajustes &amp; Rede</span>
+                    </button>
+                  </li>
+                </ul>
+              )}
+            </li>
+          )}
+
+          {/* Modo Campo Mobile (atalho de teste no desktop) */}
+          {(isAdm || isInspector) && (
+            <li style={{ marginTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '14px' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('field-portal')}
+                className={`sidebar-nav-item ${currentTab === 'field-portal' ? 'active' : ''}`}
+                style={{ opacity: 0.85 }}
+                title="Visualizar interface móvel do Modo Campo"
+              >
+                <Camera size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Modo Campo (Mobile)</span>
+              </button>
+            </li>
+          )}
+        </ul>
+      </nav>
+
+      {/* Rodapé do Menu: Usuário, Perfil e Logout */}
+      <div className="sidebar-footer">
+        <div className="sidebar-user-card">
+          <div className="sidebar-user-avatar">
+            {getInitials(user?.username || user?.name)}
+          </div>
+          <div className="sidebar-user-info">
+            <div className="sidebar-user-name" title={user?.username || user?.name}>
+              {user?.username || user?.name || 'Usuário'}
+            </div>
+            <div className="sidebar-user-meta">
+              <span className={`sidebar-role-badge ${isAdm ? 'role-master' : 'role-user'}`}>
+                {getRoleLabel()}
+              </span>
+              <span className="sidebar-version-tag">v2.2.0</span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="sidebar-logout-btn"
+          title="Sair do sistema"
+        >
+          <LogOut size={16} />
+          <span>Sair da conta</span>
+        </button>
+      </div>
     </aside>
   );
 }

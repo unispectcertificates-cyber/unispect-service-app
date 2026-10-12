@@ -14,6 +14,8 @@ import MobileAppView from './components/MobileAppView';
 import Login from './components/Login';
 import UsersList from './components/UsersList';
 import FieldContainersView from './components/FieldContainersView';
+import Sidebar from './components/Sidebar';
+import DesktopDashboardView from './components/DesktopDashboardView';
 
 export default function App() {
   const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth <= 1024);
@@ -86,6 +88,38 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+
+  // Estados do Redesign Desktop e Atualização de Romaneio
+  const [showUpdateRomaneioPicker, setShowUpdateRomaneioPicker] = useState(false);
+  const [updatePickerSearch, setUpdatePickerSearch] = useState('');
+  const [isParsingPickerPdf, setIsParsingPickerPdf] = useState(false);
+  const [pickerPdfError, setPickerPdfError] = useState('');
+  const [initialOpenUpdateRomaneio, setInitialOpenUpdateRomaneio] = useState(false);
+
+  const handlePickerPdfUpload = async (file) => {
+    if (!file) return;
+    setIsParsingPickerPdf(true);
+    setPickerPdfError('');
+    try {
+      const parsed = await parseRomaneioPdf(file, { exportadores, locais });
+      if (!parsed.bookingNumber) {
+        setPickerPdfError('Não foi possível identificar o número do Booking no arquivo PDF.');
+        return;
+      }
+      const match = findBooking(bookings, parsed.bookingNumber);
+      if (match) {
+        setShowUpdateRomaneioPicker(false);
+        setInitialOpenUpdateRomaneio(true);
+        setSelectedBookingId(match.id);
+      } else {
+        setPickerPdfError(`O Booking "${parsed.bookingNumber}" identificado no PDF não existe no sistema. Utilize "+ Novo romaneio" para cadastrá-lo.`);
+      }
+    } catch (err) {
+      setPickerPdfError(err.message || 'Erro ao processar PDF.');
+    } finally {
+      setIsParsingPickerPdf(false);
+    }
+  };
 
   // Form de Novo Booking/Certificado
   const [newBookingData, setNewBookingData] = useState({
@@ -446,376 +480,113 @@ export default function App() {
   }
 
   return (
-    <div className="app-container">
-      {/* Mobile Top Bar */}
-      {isMobileOrTablet && (
-        <header className="mobile-top-bar no-print">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              background: 'linear-gradient(135deg, var(--color-brand), #b88f28)',
-              color: '#0d1127',
-              fontWeight: '800',
-              fontSize: '14px',
-              width: '28px',
-              height: '28px',
-              borderRadius: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              US
-            </div>
-            <div>
-              <h1 style={{ fontSize: '13px', fontWeight: '800', margin: 0 }}>Unispect Service</h1>
-              <span style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Mobile Portal</span>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: isOnline ? '#10b981' : '#ef4444'
-            }} />
-            <button
-              onClick={handleSystemRefresh}
-              disabled={isRefreshing}
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
+    <div className={isMobileOrTablet ? "app-container" : "desktop-layout-root"}>
+      {!isMobileOrTablet ? (
+        <>
+          <Sidebar
+            currentTab={currentTab}
+            setCurrentTab={(tab) => {
+              setSelectedBookingId(null);
+              setActiveReport(null);
+              setCurrentTab(tab);
+            }}
+            user={user}
+            onLogout={handleLogout}
+            onOpenReport={() => {
+              setSelectedBookingId(null);
+              setActiveReport({ id: null, type: 'administrative' });
+            }}
+          />
+          <DesktopDashboardView
+            currentTab={currentTab}
+            setCurrentTab={(tab) => {
+              setSelectedBookingId(null);
+              setActiveReport(null);
+              setCurrentTab(tab);
+            }}
+            user={user}
+            bookings={bookings}
+            exportadores={exportadores}
+            locais={locais}
+            isOnline={isOnline}
+            setIsOnline={setIsOnline}
+            isRefreshing={isRefreshing}
+            handleSystemRefresh={handleSystemRefresh}
+            activeReport={activeReport}
+            setActiveReport={setActiveReport}
+            setSelectedBookingId={setSelectedBookingId}
+            setInitialOpenUpdateRomaneio={setInitialOpenUpdateRomaneio}
+            setShowCreateModal={setShowCreateModal}
+            setShowUpdateRomaneioPicker={setShowUpdateRomaneioPicker}
+            handleRefreshData={handleRefreshData}
+            handleFinalizeBooking={handleFinalizeBooking}
+            handleDeleteBooking={handleDeleteBooking}
+            handleLogout={handleLogout}
+            serverIp={serverIp}
+            handleServerIpChange={handleServerIpChange}
+            pendingFieldCount={pendingFieldCount}
+          />
+        </>
+      ) : (
+        <>
+          {/* Mobile Top Bar */}
+          <header className="mobile-top-bar no-print">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                background: 'linear-gradient(135deg, var(--color-brand), #b88f28)',
+                color: '#0d1127',
+                fontWeight: '800',
+                fontSize: '14px',
+                width: '28px',
+                height: '28px',
                 borderRadius: '6px',
-                padding: '4px 10px',
-                color: '#fff',
-                fontSize: '11px',
-                fontWeight: '700',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '5px',
-                cursor: 'pointer'
-              }}
-            >
-              <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
-              <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
-            </button>
-          </div>
-        </header>
+                justifyContent: 'center'
+              }}>
+                US
+              </div>
+              <div>
+                <h1 style={{ fontSize: '13px', fontWeight: '800', margin: 0 }}>Unispect Service</h1>
+                <span style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Mobile Portal</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: isOnline ? '#10b981' : '#ef4444'
+              }} />
+              <button
+                onClick={handleSystemRefresh}
+                disabled={isRefreshing}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  color: '#fff',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+                <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
+              </button>
+            </div>
+          </header>
+        </>
       )}
 
-      {/* CABEÇALHO UNISPECT */}
-      <header className="app-header app-header-desktop no-print">
-
-        {/* Logo Unispect */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{
-            border: '2px solid var(--text-primary)',
-            padding: '4px 8px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            lineHeight: '1',
-            fontWeight: 'bold',
-            borderRadius: '2px'
-          }}>
-            <span style={{ fontSize: '18px', fontWeight: '800', letterSpacing: '1px', color: 'var(--text-primary)' }}>UN</span>
-            <span style={{ fontSize: '7px', fontWeight: '800', marginTop: '2px', letterSpacing: '0.5px', color: 'var(--text-primary)' }}>UNISPECT</span>
-          </div>
-          <div>
-            <div className="header-logo-text">
-              <span style={{ color: 'var(--text-primary)' }}>Unispect</span>
-              <span style={{ color: 'var(--color-brand)' }}>Service & Certificate</span>
-            </div>
-            <div className="header-subtitle-text">
-              VISTORIAS & CERTIFICAÇÕES
-            </div>
-          </div>
-        </div>
-
-        {/* Controles de Cabeçalho */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Toggle Online */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: 'var(--bg-tertiary)',
-            padding: '8px 14px',
-            borderRadius: 'var(--radius-full)',
-            border: '1px solid var(--border-color)'
-          }} className="no-select">
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: isOnline ? '#10b981' : '#ef4444',
-              display: 'inline-block'
-            }} />
-            <span style={{ fontSize: '11px', fontWeight: '700', color: isOnline ? '#10b981' : 'var(--text-muted)' }}>
-              {isOnline ? 'ONLINE' : 'OFFLINE'}
-            </span>
-            <input
-              type="checkbox"
-              checked={isOnline}
-              onChange={() => setIsOnline(!isOnline)}
-              style={{ width: '32px', height: '16px', borderRadius: '10px', cursor: 'pointer' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{user.name}</span>
-            <span className={`badge ${user.role === 'ADM' ? 'badge-progress' : 'badge-success'}`} style={{ padding: '3px 8px', fontSize: '9px' }}>
-              {user.role === 'ADM' ? 'MASTER' : 'INSPETOR'}
-            </span>
-            <span style={{ fontSize: '10px', backgroundColor: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', color: 'var(--color-brand)', fontWeight: '700' }} title="Versão do Sistema">
-              v2.1.1
-            </span>
-          </div>
-
-          {/* Botão de Atualizar Sistema no Topo */}
-          <button
-            onClick={handleSystemRefresh}
-            disabled={isRefreshing}
-            className="btn btn-secondary"
-            title="Recarregar e sincronizar dados do sistema"
-            style={{
-              padding: '8px 14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '12px',
-              fontWeight: '700',
-              border: '1px solid var(--border-color)',
-              backgroundColor: 'var(--bg-tertiary)',
-              color: 'var(--text-primary)',
-              cursor: isRefreshing ? 'wait' : 'pointer'
-            }}
-          >
-            <RefreshCw size={13} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
-            <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
-          </button>
-
-          <button
-            onClick={handleLogout}
-            className="btn btn-secondary"
-            style={{ padding: '6px 12px', fontSize: '11px', color: 'var(--color-danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-          >
-            Sair
-          </button>
-
-          {/* BOTÃO DE MENU DROPDOWN NO CANTO SUPERIOR DIREITO */}
-          <div ref={menuRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="btn btn-secondary"
-              style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid var(--text-secondary)' }}
-            >
-              <Menu size={16} />
-              <span>Menu</span>
-            </button>
-
-            {menuOpen && (
-              <div className="glass-panel mobile-menu-drawer" style={{
-                position: 'absolute',
-                top: '110%',
-                right: 0,
-                width: '260px',
-                backgroundColor: 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-md)',
-                boxShadow: 'var(--shadow-lg)',
-                padding: '8px 0',
-                zIndex: 1000,
-                display: 'flex',
-                flexDirection: 'column'
-              }}>
-                <button
-                  onClick={() => handleMenuOptionClick('dashboard')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: currentTab === 'bookings' ? 'var(--color-brand)' : 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  📊 Ver Painel / Dashboard
-                </button>
-
-                <button
-                  onClick={() => handleMenuOptionClick('containers-sem-booking')}
-                  style={{
-                    padding: '12px 20px',
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    color: currentTab === 'containers-sem-booking' ? 'var(--color-brand)' : 'var(--text-primary)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    borderTop: '1px solid var(--border-color)',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    📦 Consultar Containers sem booking
-                  </span>
-                  {pendingFieldCount > 0 && (
-                    <span style={{
-                      backgroundColor: '#10b981',
-                      color: '#fff',
-                      fontSize: '10px',
-                      fontWeight: '800',
-                      padding: '2px 7px',
-                      borderRadius: '10px'
-                    }}>
-                      {pendingFieldCount}
-                    </span>
-                  )}
-                </button>
-
-                {user.role === 'ADM' && (
-                  <>
-                    <button
-                      onClick={() => handleMenuOptionClick('new_booking')}
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        borderTop: '1px solid var(--border-color)'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      1 + Novo Certificado
-                    </button>
-                    <button
-                      onClick={() => handleMenuOptionClick('exportador')}
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      2 Cadastro e consulta Exportador
-                    </button>
-                    <button
-                      onClick={() => handleMenuOptionClick('locais')}
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      3 Locais de Operação e Cadastro
-                    </button>
-                    <button
-                      onClick={() => handleMenuOptionClick('inspetor')}
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      4 Cadastro de Inspetor
-                    </button>
-                    <button
-                      onClick={() => handleMenuOptionClick('usuarios')}
-                      style={{
-                        padding: '12px 20px',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      5 Gerenciar Usuários
-                    </button>
-                  </>
-                )}
-
-                {/* Configuração de rede para sincronizar de fora (Wifi / 5G / VPN) */}
-                <div style={{
-                  padding: '12px 20px',
-                  borderTop: '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.02)'
-                }}>
-                  <span style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                    SERVIDOR DE SINCRONIZAÇÃO
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="IP do Servidor (ex: 192.168.1.15)"
-                    value={serverIp}
-                    onChange={e => handleServerIpChange(e.target.value)}
-                    style={{
-                      fontSize: '11px',
-                      padding: '6px 10px',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--text-primary)',
-                      borderRadius: '4px',
-                      outline: 'none',
-                      width: '100%'
-                    }}
-                  />
-                  <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: '1.2' }}>
-                    Deixe em branco para usar o IP atual ({window.location.hostname}). Funciona em Wi-Fi, 5G ou VPN (Tailscale).
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* CONTEÚDO PRINCIPAL */}
-      <main className="main-content app-main-content">
+      {/* CONTEÚDO PRINCIPAL (Mobile) */}
+      {isMobileOrTablet && (
+        <main className="main-content app-main-content">
 
         {activeReport ? (
           <ReportView
@@ -1481,13 +1252,16 @@ export default function App() {
         )}
 
       </main>
+      )}
 
       {/* JANELA MODAL DE GERENCIAMENTO (Screenshot 2 overlay) */}
       {selectedBookingId && (
         <BookingManagementModal
           bookingId={selectedBookingId}
+          initialOpenUpdateRomaneio={initialOpenUpdateRomaneio}
           onClose={() => {
             setSelectedBookingId(null);
+            setInitialOpenUpdateRomaneio(false);
             handleRefreshData();
           }}
           user={user}
@@ -1893,6 +1667,174 @@ export default function App() {
             </div>
             </fieldset>
           </form>
+        </div>
+      )}
+
+      {/* MODAL: ATUALIZAR ROMANEIO NO DESKTOP */}
+      {showUpdateRomaneioPicker && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(5, 7, 15, 0.75)',
+          backdropFilter: 'blur(12px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2500,
+          padding: '20px'
+        }}>
+          <div className="glass-panel" style={{ maxWidth: '620px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <UploadCloud size={20} style={{ color: '#10b981' }} />
+                  Atualizar Romaneio Existente
+                </h2>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Selecione o Booking ou envie o PDF com o romaneio atualizado
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUpdateRomaneioPicker(false);
+                  setPickerPdfError('');
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Drag & Drop PDF */}
+            <div
+              className="pdf-drag-drop-zone"
+              style={{ margin: 0, padding: '20px' }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                  handlePickerPdfUpload(e.dataTransfer.files[0]);
+                }
+              }}
+              onClick={() => document.getElementById('picker-pdf-input')?.click()}
+            >
+              <input
+                id="picker-pdf-input"
+                type="file"
+                accept="application/pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handlePickerPdfUpload(e.target.files[0]);
+                  }
+                }}
+              />
+              <div className="icon-container">
+                {isParsingPickerPdf ? (
+                  <div className="pdf-loading-spinner"></div>
+                ) : (
+                  <UploadCloud size={28} />
+                )}
+              </div>
+              <span className="pdf-drag-drop-zone-text">
+                {isParsingPickerPdf ? 'Identificando Booking no PDF...' : 'Arraste o PDF do romaneio atualizado aqui'}
+              </span>
+              <span className="pdf-drag-drop-zone-subtext">
+                O sistema reconhecerá o número do Booking e abrirá a atualização incremental
+              </span>
+            </div>
+
+            {pickerPdfError && (
+              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '6px', padding: '10px 14px', color: '#ef4444', fontSize: '12px' }}>
+                ⚠️ {pickerPdfError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0' }}>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-color)' }}></div>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>OU ESCOLHA NA LISTA DE RESERVAS</span>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-color)' }}></div>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Filtrar por número do Booking, certificado ou exportador..."
+                value={updatePickerSearch}
+                onChange={e => setUpdatePickerSearch(e.target.value)}
+                style={{ paddingLeft: '34px', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+              {bookings
+                .filter(b => {
+                  if (!updatePickerSearch.trim()) return true;
+                  const term = updatePickerSearch.toLowerCase();
+                  const expName = (exportadores.find(e => e.id === b.exporterId)?.name || '').toLowerCase();
+                  return (b.bookingNumber && b.bookingNumber.toLowerCase().includes(term)) ||
+                         (b.certificateNumber && b.certificateNumber.toLowerCase().includes(term)) ||
+                         expName.includes(term);
+                })
+                .slice(0, 30)
+                .map(b => {
+                  const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'Exportador';
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => {
+                        setShowUpdateRomaneioPicker(false);
+                        setInitialOpenUpdateRomaneio(true);
+                        setSelectedBookingId(b.id);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-tertiary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)'; e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'; }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-primary)' }}>
+                          {b.bookingNumber} <span style={{ color: '#b45309', fontWeight: '800', marginLeft: '6px' }}>({b.certificateNumber})</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          {exp} • {b.vesselVoyage || 'Navio'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '700', backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', padding: '2px 8px', borderRadius: '9999px' }}>
+                          {b.containers?.length || 0} cont.
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#10b981', fontWeight: '700' }}>Atualizar &rarr;</span>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setShowUpdateRomaneioPicker(false)}
+                className="btn btn-secondary"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
