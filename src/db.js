@@ -1,5 +1,6 @@
 import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
 import { removeFieldPhotoMetadata } from './utils/fieldService';
+import { compressImage } from './utils/imageCompression';
 import { useState, useEffect } from 'react';
 import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
@@ -48,38 +49,11 @@ async function initializeCollectionIfEmpty(colName, defaultData) {
   }
 }
 
-// ── Compresão de imagem no cliente ──────────────────────────────────────────
-// Retorna Promise<string> com dataURL JPEG comprimido (max 800px, qualidade 0.65).
-// 100% client-side, sem dependência de Firebase Storage ou rede.
-function compressImageToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Falha ao ler o arquivo de imagem.'));
-    reader.onloadend = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('Falha ao carregar a imagem.'));
-      img.onload  = () => {
-        const MAX_PX = 800;
-        let w = img.width;
-        let h = img.height;
-        // Redimensiona proporcionalmente ao lado maior
-        if (w > h) {
-          if (w > MAX_PX) { h = Math.round(h * (MAX_PX / w)); w = MAX_PX; }
-        } else {
-          if (h > MAX_PX) { w = Math.round(w * (MAX_PX / h)); h = MAX_PX; }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width  = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        // JPEG 0.65 = bom equilíbrio qualidade/tamanho (~80-200KB por foto)
-        resolve(canvas.toDataURL('image/jpeg', 0.65));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
+// ── Compressão padronizada de imagem no cliente (módulo compartilhado) ────────
+// Mantido para compatibilidade retroativa com chamadas legadas
+export async function compressImageToDataUrl(file) {
+  const compressed = await compressImage(file);
+  return compressed.dataUrl;
 }
 
 const bookingRepository = createBookingRepository({
@@ -226,15 +200,14 @@ export const db = {
    * @returns {Promise<{id: string, name: string, url: string}>}
    */
   async uploadPhoto(file, containerId = '') {
-    // 1. Comprime a imagem localmente
-    const dataUrl = await compressImageToDataUrl(file);
+    // 1. Comprime a imagem localmente com a regra padronizada (<= 45.000 bytes, adaptativo)
+    const compressed = await compressImage(file);
 
     // 2. ID único para a foto
     const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
-    // 3. Converte dataURL base64 para Blob para upload eficiente
-    const response  = await fetch(dataUrl);
-    const blob      = await response.blob();
+    // 3. Blob comprimido pronto para upload direto sem conversões redundantes
+    const blob = compressed.blob;
 
     // 4. Faz upload do Blob para Firebase Storage
     //    Path: containers/{containerId}/{photoId}.jpg
@@ -245,18 +218,33 @@ export const db = {
     // 5. Obtém a URL pública permanente do Storage
     const downloadUrl = await getDownloadURL(storageRef);
 
-    // 6. Salva apenas os metadados no Firestore (sem base64 — evita erro de 1MB)
+    // 6. Salva metadados no Firestore com informações de resolução e versão da compressão
     await setDoc(doc(dbFirestore, PHOTOS_COL, photoId), {
-      id:          photoId,
-      containerId: containerId,
-      storagePath: storagePath,
-      url:         downloadUrl,
-      name:        '',
-      createdAt:   Date.now()
+      id:                  photoId,
+      containerId:         containerId,
+      storagePath:         storagePath,
+      url:                 downloadUrl,
+      name:                '',
+      createdAt:           Date.now(),
+      width:               compressed.width,
+      height:              compressed.height,
+      sizeBytes:           compressed.sizeBytes,
+      compressionVersion:  compressed.compressionVersion,
+      quality:             compressed.quality,
+      withinLimit:         compressed.withinLimit
     });
 
     // 7. Retorna metadados + URL do Storage para exibição imediata
-    return { id: photoId, name: '', url: downloadUrl };
+    return {
+      id:                  photoId,
+      name:                '',
+      url:                 downloadUrl,
+      storagePath:         storagePath,
+      width:               compressed.width,
+      height:              compressed.height,
+      sizeBytes:           compressed.sizeBytes,
+      compressionVersion:  compressed.compressionVersion
+    };
   },
 
   /**

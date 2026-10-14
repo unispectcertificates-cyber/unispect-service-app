@@ -13,7 +13,8 @@ import {
   ChevronDown,
   ChevronRight,
   ShieldAlert,
-  Trash2
+  Trash2,
+  Layers
 } from 'lucide-react';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
 
@@ -100,7 +101,21 @@ export default function Sidebar({
             </button>
           </li>
 
-          {/* 2. Containers sem Booking (com contagem real) */}
+          {/* 2. Inventário do Pátio */}
+          {(isAdm || isInspector) && (
+            <li>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('yard-inventory')}
+                className={`sidebar-nav-item ${currentTab === 'yard-inventory' ? 'active' : ''}`}
+              >
+                <Layers size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Inventário do Pátio</span>
+              </button>
+            </li>
+          )}
+
+          {/* 3. Containers sem Booking (com contagem real) */}
           {(isAdm || isInspector) && (
             <li>
               <button

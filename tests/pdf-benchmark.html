@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Benchmark e Comparação de Qualidade do PDF Unispect</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; color: #111; }
+    h1 { color: #0a1c3f; }
+    .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+    th, td { border: 1px solid #c2d1e0; padding: 10px; text-align: left; }
+    th { background: #0a1c3f; color: #fff; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+    .badge-orig { background: #fee2e2; color: #991b1b; }
+    .badge-opt { background: #dcfce7; color: #166534; }
+    
+    /* Layout exato do relatório do Unispect */
+    .a4-page {
+      width: 21cm;
+      height: 29.6cm;
+      padding: 1.2cm 1.5cm 1.8cm 1.5cm;
+      box-sizing: border-box;
+      position: relative;
+      background-color: #fff;
+      color: #000;
+      margin: 0 auto;
+      font-family: Arial, sans-serif;
+      line-height: 1.4;
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      border: 1px solid #ccc;
+      margin-bottom: 20px;
+    }
+    .a4-page table td { color: #000 !important; border-color: #c2d1e0 !important; }
+    .a4-page table th { color: #000 !important; border-color: #c2d1e0 !important; }
+    .a4-footer {
+      position: absolute;
+      bottom: 0.6cm;
+      left: 1.5cm;
+      right: 1.5cm;
+      border-top: 1px solid #999;
+      padding-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 9px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Painel de Medição e Comparação de Qualidade do PDF</h1>
+  <div class="card">
+    <div id="status">Iniciando teste de compressão de fotos e geração de PDF...</div>
+    <div id="results"></div>
+  </div>
+
+  <!-- Relatório modelo para benchmark -->
+  <div id="printable-content" style="max-width: 21cm; margin: 0 auto;">
+    <!-- Página 1: Capa Operacional -->
+    <div class="a4-page">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0a1c3f; padding-bottom: 10px; margin-bottom: 10px;">
+        <div style="display: flex; align-items: center; gap: 18px;">
+          <div style="font-size: 26px; font-weight: 900; color: #0a1c3f; text-transform: uppercase;">UNISPECT</div>
+          <div style="border-left: 2.5px solid #0a1c3f; padding-left: 18px;">
+            <div style="font-size: 14px; font-weight: bold; color: #b88f28; text-transform: uppercase;">Service & certificate</div>
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 13px; font-weight: 900; color: #000;">CONTAINER STUFFING REPORT</div>
+          <div style="font-size: 11px; font-weight: 800; color: #10b981; margin-top: 4px;">CERTIFICADO: UN1005/2026</div>
+        </div>
+      </div>
+      <p style="font-size: 14px; text-align: justify; margin: 12px 0; color: #111; line-height: 1.5;">
+        WE HEREBY CERTIFY that the undersigned surveyors, acting at the request and on behalf of INTERPORT LOGÍSTICA LTDA., supervised the coffee cargo stuffing operation for the exporter CAFÉ ATLÂNTICA EXPORTADORA LTDA, as well as the fumigation process, the inspection conducted by MAPA (Brazilian Ministry of Agriculture and Livestock), and the application of the carrier's final seal to the containers at the Interport Logística REDEX Facility.
+      </p>
+      <h3 style="font-size: 11.5px; font-weight: 800; color: #000; border-bottom: 2px solid #0a1c3f; padding-bottom: 4px; margin-bottom: 8px; text-transform: uppercase;">
+        1. BOOKING OPERATIONAL DATA
+      </h3>
+      <table style="width: 100%; font-size: 10.5px; border-collapse: collapse; border: 1px solid #c2d1e0;">
+        <tr>
+          <td style="background-color: #f0f4f8; font-weight: bold; width: 25%;">CERTIFICATE NO.</td>
+          <td style="width: 25%; font-weight: bold;">UN1005/2026</td>
+          <td style="background-color: #f0f4f8; font-weight: bold; width: 25%;">BOOKING NO.</td>
+          <td style="width: 25%; font-weight: bold;">MEDU1234567</td>
+        </tr>
+        <tr>
+          <td style="background-color: #f0f4f8; font-weight: bold;">EXPORTER</td>
+          <td style="font-weight: bold;">CAFÉ ATLÂNTICA LTDA</td>
+          <td style="background-color: #f0f4f8; font-weight: bold;">OPERATIONAL SITE</td>
+          <td style="font-weight: bold;">Interport Logística</td>
+        </tr>
+        <tr>
+          <td style="background-color: #f0f4f8; font-weight: bold;">VESSEL / VOYAGE</td>
+          <td style="font-weight: bold;">MSC ALTAIR / 241E</td>
+          <td style="background-color: #f0f4f8; font-weight: bold;">CARRIER</td>
+          <td style="font-weight: bold;">MSC - MEDITERRANEAN</td>
+        </tr>
+      </table>
+      <div class="a4-footer">
+        <div>Page 1 of 2 - UNISPECT-CERT-UN1005-2026</div>
+        <div>Assinado Digitalmente por Bruno O. G. Lobo</div>
+      </div>
+    </div>
+
+    <!-- Página 2: Container e Fotos -->
+    <div class="a4-page">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0a1c3f; padding-bottom: 10px; margin-bottom: 10px;">
+        <div style="font-size: 20px; font-weight: bold; color: #0a1c3f;">UNISPECT SERVICE</div>
+        <div style="font-size: 11px; font-weight: bold; color: #10b981;">CERTIFICADO: UN1005/2026</div>
+      </div>
+      <h3 style="font-size: 11px; font-weight: 800; color: #000; border-bottom: 2px solid #0a1c3f; padding-bottom: 4px; margin: 0; text-transform: uppercase;">
+        3. DETAILS OF INSPECTED CONTAINERS
+      </h3>
+      <div style="font-size: 10.5px; font-weight: bold; margin: 4px 0;">
+        CONTAINER 1 OF 1: MSBU5289970
+      </div>
+      <table style="width: 100%; font-size: 10px; border-collapse: collapse; border: 1px solid #c2d1e0; margin-bottom: 12px;">
+        <tr>
+          <td style="background-color: #f0f4f8; font-weight: bold; width: 25%;">CONTAINER NUMBER</td>
+          <td style="width: 25%; font-weight: bold;">MSBU5289970</td>
+          <td style="background-color: #f0f4f8; font-weight: bold; width: 25%;">FUMIGATION DATE</td>
+          <td style="width: 25%; font-weight: bold;">2026-10-12</td>
+        </tr>
+        <tr>
+          <td style="background-color: #f0f4f8; font-weight: bold;">PROVISIONAL SEAL</td>
+          <td style="font-weight: bold;">PROV-998822</td>
+          <td style="background-color: #f0f4f8; font-weight: bold;">DEFINITE SEAL</td>
+          <td style="font-weight: bold;">BR-2026-987654</td>
+        </tr>
+      </table>
+
+      <!-- Grade de 4 Fotos (209px x 279px cada) -->
+      <div id="photos-grid" style="display: grid; grid-template-columns: repeat(2, 209px); gap: 16px 24px; justify-content: center; margin-top: 10px;">
+        <!-- Imagens serão injetadas via script -->
+      </div>
+
+      <div style="border-top: 1px solid #c2d1e0; padding-top: 8px; margin-top: 15px; font-size: 11px; font-weight: bold; text-align: center;">
+        “WE UNISPECT CERTIFY THAT THESE CONTAINERS ARE RELEASED FOR SHIPMENT”
+      </div>
+      <div class="a4-footer">
+        <div>Page 2 of 2 - UNISPECT-CERT-UN1005-2026</div>
+        <div>Assinado Digitalmente por Bruno O. G. Lobo</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { compressImage } from '../src/utils/imageCompression.js';
+
+    // Cria foto de teste com ruído e textos reais para simular container e lacres
+    function createSyntheticContainerPhoto(text, isVertical = true) {
+      const w = isVertical ? 2400 : 3200;
+      const h = isVertical ? 3200 : 2400;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+
+      // Fundo e detalhes fotográficos
+      ctx.fillStyle = '#2b394a';
+      ctx.fillRect(0, 0, w, h);
+
+      // Portas de container com corrugados
+      for (let x = 0; x < w; x += 120) {
+        ctx.fillStyle = x % 240 === 0 ? '#1f2937' : '#374151';
+        ctx.fillRect(x, 0, 110, h);
+      }
+
+      // Painel de numeração do container
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(100, 200, w - 200, 300);
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 90px Arial';
+      ctx.fillText(text, 150, 380);
+
+      // Lacre
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(w / 2 - 150, h / 2 - 150, 300, 300);
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 45px Arial';
+      ctx.fillText('SEAL 987654', w / 2 - 130, h / 2);
+
+      // Ruído fotográfico simulado
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4 * 17) {
+        const noise = (Math.random() - 0.5) * 40;
+        d[i] = Math.min(255, Math.max(0, d[i] + noise));
+        d[i+1] = Math.min(255, Math.max(0, d[i+1] + noise));
+        d[i+2] = Math.min(255, Math.max(0, d[i+2] + noise));
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      return new Promise(resolve => c.toBlob(resolve, 'image/jpeg', 0.95));
+    }
+
+    async function runBenchmark() {
+      const statusEl = document.getElementById('status');
+      const resultsEl = document.getElementById('results');
+
+      statusEl.innerHTML = '1/4 Gerando e comprimindo 4 fotos de teste com o novo algoritmo padronizado (máx 45.000 bytes)...';
+
+      const photoLabels = [
+        'MSBU 528997-0 / LACRE DEFINITIVO',
+        'PORTA DIREITA / VISTORIA GERAL',
+        'FUNDO DO CONTAINER / ESTUFAGEM',
+        'SACARIA DE CAFÉ / LOTE 4492'
+      ];
+
+      const compressedPhotos = [];
+      for (let i = 0; i < 4; i++) {
+        const rawBlob = await createSyntheticContainerPhoto(photoLabels[i], i % 2 === 0);
+        const comp = await compressImage(rawBlob);
+        compressedPhotos.push(comp);
+      }
+
+      // Injeta fotos no grid
+      const grid = document.getElementById('photos-grid');
+      grid.innerHTML = '';
+      compressedPhotos.forEach((p, idx) => {
+        const item = document.createElement('div');
+        item.style = 'display: flex; flex-direction: column; align-items: center; gap: 4px;';
+        item.innerHTML = `
+          <div style="width: 209px; height: 279px; min-width: 209px; max-width: 209px; min-height: 279px; maxHeight: 279px; backgroundColor: #f8f9fa; border: 2px solid #ddd; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+            <img src="${p.dataUrl}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
+          </div>
+          <span style="font-size: 8px; color: #555;">Foto ${idx + 1} (${p.width}x${p.height} - ${(p.sizeBytes/1024).toFixed(1)} KB)</span>
+        `;
+        grid.appendChild(item);
+      });
+
+      statusEl.innerHTML = '2/4 Fotos preparadas. Aguardando renderização do DOM...';
+      await new Promise(r => setTimeout(r, 600));
+
+      const element = document.getElementById('printable-content');
+      const qualities = [0.98, 0.90, 0.85, 0.80];
+      const pdfResults = [];
+
+      for (const q of qualities) {
+        statusEl.innerHTML = `3/4 Testando exportação de PDF com escala 2 e JPEG Quality = ${q}...`;
+        const opt = {
+          margin: 0,
+          image: { type: 'jpeg', quality: q },
+          html2canvas: { scale: 2, useCORS: true, allowTaint: true, logging: false },
+          jsPDF: { unit: 'cm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'] }
+        };
+
+        const pdfBlob = await window.html2pdf().from(element).set(opt).output('blob');
+        pdfResults.push({
+          quality: q,
+          sizeBytes: pdfBlob.size,
+          sizeKb: (pdfBlob.size / 1024).toFixed(1),
+          sizeMb: (pdfBlob.size / (1024 * 1024)).toFixed(2)
+        });
+      }
+
+      statusEl.innerHTML = '4/4 Medição concluída com sucesso!';
+
+      const baseline = pdfResults[0].sizeBytes; // 0.98
+
+      let tableHtml = `
+        <h3>1. Tamanho Real das Novas Fotos Comprimidas (Regra: <= 45.000 bytes)</h3>
+        <table>
+          <tr>
+            <th>Foto</th>
+            <th>Dimensões (px)</th>
+            <th>Orientação</th>
+            <th>Qualidade Adaptativa</th>
+            <th>Tamanho (Bytes)</th>
+            <th>Status Limite (45 KB)</th>
+          </tr>
+      `;
+
+      compressedPhotos.forEach((p, idx) => {
+        tableHtml += `
+          <tr>
+            <td>Foto ${idx + 1}</td>
+            <td>${p.width} × ${p.height}</td>
+            <td>${p.width >= p.height ? 'Horizontal (Landscape)' : 'Vertical (Portrait)'}</td>
+            <td>${(p.quality * 100).toFixed(0)}% (${p.quality})</td>
+            <td><strong>${p.sizeBytes.toLocaleString()} bytes</strong> (${(p.sizeBytes/1024).toFixed(1)} KB)</td>
+            <td><span class="badge ${p.withinLimit ? 'badge-opt' : 'badge-orig'}">${p.withinLimit ? '✓ Dentro do Limite' : '⚠ Excedeu'}</span></td>
+          </tr>
+        `;
+      });
+      tableHtml += `</table>`;
+
+      tableHtml += `
+        <h3 style="margin-top: 25px;">2. Comparação do Tamanho do PDF (Relatório com Capa + Container + 4 Fotos)</h3>
+        <table>
+          <tr>
+            <th>Configuração</th>
+            <th>Qualidade JPEG de Página</th>
+            <th>Tamanho Total (KB)</th>
+            <th>Tamanho Total (MB)</th>
+            <th>Redução Relativa ao Atual (0.98)</th>
+            <th>Avaliação de Nitidez dos Textos e Lacres</th>
+          </tr>
+      `;
+
+      pdfResults.forEach(res => {
+        const diffBytes = baseline - res.sizeBytes;
+        const diffPercent = ((diffBytes / baseline) * 100).toFixed(1);
+        const isCurrent = res.quality === 0.98;
+
+        let readability = '';
+        if (res.quality === 0.98) readability = 'Referência atual (ótima, mas arquivo muito pesado)';
+        else if (res.quality === 0.90) readability = 'Excelente: textos, números e lacres perfeitamente nítidos';
+        else if (res.quality === 0.85) readability = 'Ótima: excelente equilíbrio, sem artefatos visíveis nos textos';
+        else if (res.quality === 0.80) readability = 'Boa: leve compressão perceptível ao aproximar o zoom no PDF';
+
+        tableHtml += `
+          <tr style="${isCurrent ? 'font-weight: bold; background: #fff1f2;' : ''}">
+            <td>${isCurrent ? 'Atual (baseline)' : 'Otimizado'}</td>
+            <td>${res.quality} (${(res.quality * 100).toFixed(0)}%)</td>
+            <td>${res.sizeKb} KB</td>
+            <td>${res.sizeMb} MB</td>
+            <td>${isCurrent ? '-' : `<strong style="color: #166534;">- ${diffPercent}% (${(diffBytes/1024).toFixed(0)} KB menor)</strong>`}</td>
+            <td>${readability}</td>
+          </tr>
+        `;
+      });
+      tableHtml += `</table>`;
+
+      resultsEl.innerHTML = tableHtml;
+      window.pdfBenchmarkResults = { photos: compressedPhotos, pdfs: pdfResults };
+    }
+
+    window.addEventListener('load', runBenchmark);
+  </script>
+</body>
+</html>

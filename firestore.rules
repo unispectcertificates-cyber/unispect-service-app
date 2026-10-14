@@ -75,5 +75,37 @@ service cloud.firestore {
       allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // MÓDULO: INVENTÁRIO DO PÁTIO
+    // ─────────────────────────────────────────────────────────────
+
+    function isAdmin() {
+      return isAuthenticated() && (request.auth.token.role == 'ADM' || request.auth.token.admin == true);
+    }
+
+    // Passagens de containers pelo pátio
+    match /yardPassages/{passageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Atualização comum permitida a inspetores; transição para saída ('exited') exclusiva de ADM
+      allow update: if isAuthenticated() && (
+        request.resource.data.status != 'exited' ||
+        resource.data.status == 'exited' ||
+        isAdmin()
+      );
+      allow delete: if false; // Preserva histórico imutável
+    }
+
+    // Locks atômicos para unicidade de passagem ativa por pátio/container
+    match /yardActiveLocks/{lockKey} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Conferências diárias de pátio
+    match /yardAudits/{auditId} {
+      allow read, create, update: if isAuthenticated();
+      allow delete: if false; // Preserva auditorias
+    }
   }
 }

@@ -2,12 +2,15 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Search, Camera, Image, Trash2, ArrowLeft, X,
   CheckCircle2, Package, ClipboardList, Settings,
-  ChevronRight, Loader2, User, LogOut, RefreshCw
+  ChevronRight, Loader2, User, LogOut, RefreshCw, Layers
 } from 'lucide-react';
 import { db, useBookings, useExportadores, useLocais, getSealText, matchesBooking, getMatchedContainers } from '../db';
 import FieldCapturePanel from './FieldCapturePanel';
 import FieldCaptureNotice from './FieldCaptureNotice';
+import YardFieldFlow from './YardFieldFlow';
 import { startFieldSynchronization } from '../utils/fieldService';
+import { startYardSynchronization } from '../utils/yardService';
+import { generateUUID } from '../utils/uuid';
 import { recognizeContainerPhoto, validateIso6346CheckDigit, formatContainerNumber } from '../utils/containerOcr';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
 import { fieldQueue } from '../utils/fieldQueue';
@@ -111,11 +114,12 @@ function SaveIndicator({ status }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Bottom Navigation — 3 abas: Booking | Container | Ajustes
+// Bottom Navigation — 4 abas: Booking | Pátio | Container | Ajustes
 // ────────────────────────────────────────────────────────────────────────────
 function BottomNav({ activeTab, onTabChange, hasContainer }) {
   const tabs = [
     { id: 'booking',   label: 'Booking',   Icon: ClipboardList },
+    { id: 'yard',      label: 'Pátio',     Icon: Layers        },
     { id: 'container', label: 'Container',  Icon: Package       },
     { id: 'ajustes',   label: 'Ajustes',   Icon: Settings      },
   ];
@@ -307,7 +311,14 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing }) {
 export default function MobileAppView({ user, onLogout, hideHeader = false, onRefresh, isRefreshing: parentRefreshing = false }) {
   useEffect(() => {
     const role = String(user?.role || '').trim().toUpperCase();
-    if (role === 'ADM' || role === 'INSPECTOR') return startFieldSynchronization();
+    if (role === 'ADM' || role === 'INSPECTOR') {
+      const stopField = startFieldSynchronization();
+      const stopYard = startYardSynchronization();
+      return () => {
+        if (typeof stopField === 'function') stopField();
+        if (typeof stopYard === 'function') stopYard();
+      };
+    }
   }, [user?.role]);
   const bookings     = useBookings();
   const exportadores = useExportadores();
@@ -549,12 +560,15 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     if (tab === 'booking') {
       if (screen === 'container') {
         goToBooking();
-      } else if (screen === 'ajustes') {
+      } else if (screen === 'ajustes' || screen === 'yard') {
         setScreen(selectedBooking ? 'booking' : 'list');
         setActiveTab('booking');
       } else {
         setActiveTab('booking');
       }
+    } else if (tab === 'yard') {
+      setScreen('yard');
+      setActiveTab('yard');
     } else if (tab === 'container') {
       if (selectedContainer) {
         setScreen('container');
@@ -587,8 +601,17 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         // Retorna { id, name, url } — url é a URL pública do Storage
         const result = await db.uploadPhoto(f, containerId);
         if (!isMountedRef.current) return;
-        // Inclui url e storagePath para exibição imediata e exclusão futura
-        newPhotoRefs.push({ id: result.id, name: result.name, url: result.url });
+        // Inclui url, storagePath e metadados de compressão para exibição e controle
+        newPhotoRefs.push({
+          id: result.id,
+          name: result.name,
+          url: result.url,
+          storagePath: result.storagePath,
+          width: result.width,
+          height: result.height,
+          sizeBytes: result.sizeBytes,
+          compressionVersion: result.compressionVersion
+        });
       }
 
       // Captura referências estáveis (evita closure stale)
@@ -691,7 +714,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
       if (!photoRef) {
         // Modo offline ou fallback: salva foto no armazenamento local seguro (fieldQueue)
-        const photoId = crypto.randomUUID();
+        const photoId = generateUUID();
         await fieldQueue.savePhoto(photoId, photoFile);
         const localUrl = URL.createObjectURL(photoFile);
         photoRef = { id: photoId, name: 'Foto Identificação', url: localUrl };
@@ -1480,6 +1503,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       }}>
         {screen === 'list'      && renderList()}
         {screen === 'booking'   && renderBooking()}
+        {screen === 'yard'      && <YardFieldFlow user={user} onBack={() => { setActiveTab('booking'); setScreen(selectedBooking ? 'booking' : 'list'); }} />}
         {screen === 'container' && renderContainer()}
         {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} />}
       </main>

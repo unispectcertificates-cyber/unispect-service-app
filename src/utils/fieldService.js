@@ -3,6 +3,7 @@ import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebas
 import { dbFirestore, storage } from '../firebase';
 import { createFieldRepository, fieldErrorMessage } from './fieldContainers.js';
 import { fieldQueue, createFieldSync } from './fieldQueue.js';
+import { compressImage } from './imageCompression.js';
 
 const repository = createFieldRepository({
   listBookings: async () => {
@@ -42,28 +43,15 @@ export function subscribePendingFieldContainers(next, error) {
 }
 
 async function compressPhoto(blob) {
-  const url = URL.createObjectURL(blob);
-  try {
-    const image = new Image();
-    await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = () => reject(new Error('Não foi possível preparar esta foto para envio. Ela continua salva no aparelho.'));
-      image.src = url;
-    });
-    const ratio = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
-    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('Falha ao preparar a foto.')), 'image/jpeg', 0.8));
-  } finally { URL.revokeObjectURL(url); }
+  const result = await compressImage(blob);
+  return result.blob;
 }
 
 async function uploadFieldPhoto(photo, record) {
-  const blob = await compressPhoto(photo.blob);
+  const compressed = await compressImage(photo.blob);
   const storagePath = `containers/${record.sourceContainerId}/${photo.id}.jpg`;
   const storageRef = ref(storage, storagePath);
-  const task = uploadBytesResumable(storageRef, blob, { contentType: 'image/jpeg' });
+  const task = uploadBytesResumable(storageRef, compressed.blob, { contentType: 'image/jpeg' });
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       task.cancel();
@@ -72,7 +60,18 @@ async function uploadFieldPhoto(photo, record) {
     task.on('state_changed', undefined, error => { clearTimeout(timeout); reject(error); }, () => { clearTimeout(timeout); resolve(); });
   });
   const url = await getDownloadURL(storageRef);
-  return { id: photo.id, name: '', url, storagePath };
+  return {
+    id: photo.id,
+    name: '',
+    url,
+    storagePath,
+    width: compressed.width,
+    height: compressed.height,
+    sizeBytes: compressed.sizeBytes,
+    compressionVersion: compressed.compressionVersion,
+    quality: compressed.quality,
+    withinLimit: compressed.withinLimit
+  };
 }
 
 export let fieldSyncState = { syncing: false, error: '' };

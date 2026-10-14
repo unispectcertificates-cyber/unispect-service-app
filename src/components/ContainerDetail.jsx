@@ -107,7 +107,16 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
         // db.uploadPhoto comprime + faz upload para Firebase Storage
         // Retorna { id, name, url } onde url é a URL pública do Storage
         const result = await db.uploadPhoto(file, containerId);
-        newPhotoRefs.push({ id: result.id, name: result.name, url: result.url });
+        newPhotoRefs.push({
+          id: result.id,
+          name: result.name,
+          url: result.url,
+          storagePath: result.storagePath,
+          width: result.width,
+          height: result.height,
+          sizeBytes: result.sizeBytes,
+          compressionVersion: result.compressionVersion
+        });
       }
 
       const updatedPhotos = [...(localContainer.photos || []), ...newPhotoRefs];

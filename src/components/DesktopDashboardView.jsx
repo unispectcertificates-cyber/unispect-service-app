@@ -24,6 +24,7 @@ import InspectorsList from './InspectorsList';
 import ReportView from './ReportView';
 import UsersList from './UsersList';
 import FieldContainersView from './FieldContainersView';
+import YardInventoryView from './YardInventoryView';
 import AnalyticsReportsView from './AnalyticsReportsView';
 import MobileAppView from './MobileAppView';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
@@ -204,6 +205,7 @@ export default function DesktopDashboardView({
           <span>/</span>
           <span className="desktop-breadcrumb-current">
             {currentTab === 'bookings' && 'Bookings e operações'}
+            {currentTab === 'yard-inventory' && 'Inventário do Pátio'}
             {currentTab === 'containers-sem-booking' && 'Containers sem Booking'}
             {currentTab === 'analytics-reports' && 'Análise e Relatórios'}
             {currentTab === 'exportadores' && 'Exportadores'}
@@ -833,6 +835,8 @@ export default function DesktopDashboardView({
               </div>
             </div>
           </>
+        ) : currentTab === 'yard-inventory' ? (
+          <YardInventoryView user={user} />
         ) : currentTab === 'containers-sem-booking' ? (
           <FieldContainersView user={user} />
         ) : currentTab === 'analytics-reports' ? (

@@ -1,8 +1,9 @@
 import { validateFieldCapture } from './fieldContainers.js';
+import { generateUUID } from './uuid.js';
 
 const DB_NAME = 'unispect-field-captures-v1';
 const STORES = ['drafts', 'outbox', 'photos'];
-const uid = prefix => prefix + '_' + crypto.randomUUID();
+const uid = prefix => prefix + '_' + generateUUID();
 let databasePromise;
 const emitChange = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event('unispect-field-change')); };
 

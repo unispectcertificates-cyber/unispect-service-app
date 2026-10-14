@@ -4,6 +4,7 @@ import { fieldQueue } from '../utils/fieldQueue';
 import { fieldSyncState, subscribePendingFieldContainers, syncFieldNow, deleteFieldContainer } from '../utils/fieldService';
 import { findFieldTarget, mergePhotos, validateFieldCapture } from '../utils/fieldContainers';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
+import { generateUUID } from '../utils/uuid';
 import PhotoDownloadButton from './PhotoDownloadButton';
 
 const sealText = seal => typeof seal === 'string' ? seal : (seal?.sealNumber || seal?.seal || seal?.number || '');
@@ -206,7 +207,7 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
     if (initialCapture.photoFile) {
       const url = initialCapture.photoUrl || URL.createObjectURL(initialCapture.photoFile);
       urls.current.add(url);
-      setNewPhotos([{ id: crypto.randomUUID(), file: initialCapture.photoFile, url }]);
+      setNewPhotos([{ id: generateUUID(), file: initialCapture.photoFile, url }]);
     } else {
       setNewPhotos([]);
     }
@@ -239,7 +240,7 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
     if (savingRef.current) return;
     if (newPhotos.length + files.length > 100) { setError('Salve até 100 fotos por vez. Você pode acrescentar outras depois.'); return; }
     if (files.some(file => !file.type.startsWith('image/'))) { setError('Selecione apenas arquivos de imagem.'); return; }
-    const added = files.map(file => { const url = URL.createObjectURL(file); urls.current.add(url); return { id: crypto.randomUUID(), file, url }; });
+    const added = files.map(file => { const url = URL.createObjectURL(file); urls.current.add(url); return { id: generateUUID(), file, url }; });
     setNewPhotos(previous => [...previous, ...added]); setError('');
   };
   const save = async event => {
