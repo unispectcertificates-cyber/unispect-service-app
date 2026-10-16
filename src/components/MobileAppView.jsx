@@ -1,5 +1,5 @@
-import {enqueueBookingPhotos, listBookingPhotoJobs, retryBookingPhotos} from '../utils/bookingPhotoQueue.js';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import {enqueueBookingPhotos, listBookingPhotoJobs, retryBookingPhotos, cancelBookingPhoto, getLocalPhotoUrl} from '../utils/bookingPhotoQueue.js';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   Search, Camera, Image, Trash2, ArrowLeft, X,
   CheckCircle2, Package, ClipboardList, Settings,
@@ -336,8 +336,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   const [saveStatus, setSaveStatus]   = useState('idle');  // 'idle' | 'saving' | 'saved'
   const debounceTimerRef              = useRef(null);
 
-  // ── Upload de fotos
-  const [uploadingPhotos, setUploadingPhotos] = useState(false); // Apenas gravação local, não duração do upload.
+  // ── Upload de fotos e miniaturas imediatas
   const [photoJobs, setPhotoJobs] = useState([]);
   const saveChainRef = useRef(Promise.resolve());
   const pendingEditsRef = useRef(new Map());
@@ -347,6 +346,34 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     saveChainRef.current = pending.catch(() => {});
     return pending;
   }, []);
+
+  // Miniaturas imediatas: combina fotos remotas confirmadas com fotos pendentes na fila local
+  const displayedPhotos = useMemo(() => {
+    if (!selectedContainer) return [];
+    const confirmed = selectedContainer.photos || [];
+    const confirmedIds = new Set(confirmed.map(p => p.id));
+    const pending = photoJobs
+      .filter(j => j.containerId === selectedContainer.id && !confirmedIds.has(j.id))
+      .map(j => ({
+        id: j.id,
+        name: j.file?.name || `foto_${j.id}.jpg`,
+        url: j.localUrl || getLocalPhotoUrl(j.id) || null,
+        isPending: true,
+        containerId: j.containerId,
+        bookingId: j.bookingId,
+        createdAt: j.createdAt || 0
+      }));
+    return [...confirmed, ...pending];
+  }, [selectedContainer, photoJobs]);
+
+  // Contagem de fotos considerando pendências na fila para os cards de container
+  const getContainerPhotoCount = useCallback(c => {
+    const confirmed = c.photos || [];
+    const confirmedIds = new Set(confirmed.map(p => p.id));
+    const pendingCount = photoJobs.filter(j => j.containerId === c.id && !confirmedIds.has(j.id)).length;
+    return confirmed.length + pendingCount;
+  }, [photoJobs]);
+
   useEffect(() => {
     const refresh = () => listBookingPhotoJobs().then(setPhotoJobs).catch(e => console.error('Fila local:',e));
     const saved = event => {
@@ -449,18 +476,50 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   const selectedBookingRef = useRef(selectedBooking);
   useEffect(() => { selectedBookingRef.current = selectedBooking; }, [selectedBooking]);
 
-  // Atualiza somente fotos em tempo real; preserva os campos em digitação.
+  // Sincronização multiusuário contínua: atualiza outros containers e fotos em tempo real sem sobrescrever campos em digitação
   useEffect(() => {
-    if(!selectedBooking?.id)return;
+    if (!selectedBooking?.id) return;
     return db.subscribeBooking(selectedBooking.id, remote => {
-      if(!remote)return;
-      const remoteContainers=new Map((remote.containers || []).map(c=>[c.id,c]));
-      setSelectedBooking(prev => prev?.id===remote.id ? {...prev,_revision:remote._revision,
-        containers:prev.containers.map(c=>remoteContainers.has(c.id) ? {...c,photos:remoteContainers.get(c.id).photos || [],deletedPhotoIds:remoteContainers.get(c.id).deletedPhotoIds || []} : c)} : prev);
-      setSelectedContainer(prev => prev && remoteContainers.has(prev.id) ? {...prev,
-        photos:remoteContainers.get(prev.id).photos || [],deletedPhotoIds:remoteContainers.get(prev.id).deletedPhotoIds || []} : prev);
-    }, error=>console.error('Atualização das fotos:',error));
-  },[selectedBooking?.id]);
+      if (!remote) return;
+      const remoteContainers = new Map((remote.containers || []).map(c => [c.id, c]));
+
+      setSelectedBooking(prev => {
+        if (!prev || prev.id !== remote.id) return prev;
+        const updatedContainers = (prev.containers || []).map(c => {
+          if (!remoteContainers.has(c.id)) return c;
+          const remoteC = remoteContainers.get(c.id);
+          // Se for o container atualmente aberto, preserva os campos com edição pendente
+          if (c.id === selectedContainer?.id) {
+            const merged = { ...remoteC };
+            for (const edit of pendingEditsRef.current.values()) {
+              if (edit.containerId === c.id) {
+                merged[edit.field] = edit.value;
+              }
+            }
+            return merged;
+          }
+          // Outros containers são atualizados diretamente
+          return remoteC;
+        });
+        return {
+          ...remote,
+          containers: updatedContainers
+        };
+      });
+
+      setSelectedContainer(prev => {
+        if (!prev || !remoteContainers.has(prev.id)) return prev;
+        const remoteC = remoteContainers.get(prev.id);
+        const merged = { ...remoteC };
+        for (const edit of pendingEditsRef.current.values()) {
+          if (edit.containerId === prev.id) {
+            merged[edit.field] = edit.value;
+          }
+        }
+        return merged;
+      });
+    }, error => console.error('Atualização remota do booking:', error));
+  }, [selectedBooking?.id, selectedContainer?.id]);
 
   // CSS keyframe para spinner (injetado uma vez)
   useEffect(() => {
@@ -603,31 +662,52 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     }
   }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // Guarda no IndexedDB antes de devolver o controle. A rede trabalha em segundo plano.
+  // Guarda no IndexedDB e libera a interface imediatamente. A rede envia em segundo plano.
   const handlePhotoUpload = async e => {
-    const files=Array.from(e.target.files || []);
-    e.target.value='';
-    const bookingId=selectedBookingRef.current?.id;
-    const containerId=selectedContainer?.id;
-    if(!files.length || !bookingId || !containerId)return;
-    setUploadingPhotos(true);
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    const bookingId = selectedBookingRef.current?.id;
+    const containerId = selectedContainer?.id;
+    if (!files.length || !bookingId || !containerId) return;
+
     try {
-      await enqueueBookingPhotos(bookingId,containerId,files);
-      if(isMountedRef.current)showToast('Fotos guardadas no aparelho. Você já pode continuar fotografando.');
-    }catch(error){if(isMountedRef.current)showToast(error.message+' Selecione as fotos novamente.');}
-    finally{if(isMountedRef.current)setUploadingPhotos(false);}
+      await enqueueBookingPhotos(bookingId, containerId, files);
+      // Sem avisos intrusivos por captura: as miniaturas surgem imediatamente via photoJobs + displayedPhotos
+    } catch (error) {
+      if (isMountedRef.current) showToast(error.message + ' Selecione as fotos novamente.');
+    }
   };
 
   const handleDeletePhoto = async id => {
-    const bookingId=selectedBookingRef.current?.id;
-    const containerId=selectedContainer?.id;
-    const photo=(selectedContainer?.photos || []).find(p=>p.id===id);
-    if(!bookingId || !containerId)return;
+    const bookingId = selectedBookingRef.current?.id;
+    const containerId = selectedContainer?.id;
+    const photo = displayedPhotos.find(p => p.id === id);
+    if (!bookingId || !containerId) return;
+
+    // Se a foto é uma pendência local que ainda não concluiu o upload:
+    if (photo?.isPending || String(id).startsWith('bookingphoto_')) {
+      await cancelBookingPhoto(id);
+      if (isMountedRef.current) {
+        setSelectedContainer(prev => prev?.id === containerId
+          ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) }
+          : prev
+        );
+      }
+      return;
+    }
+
     try {
-      await serializeEdit(()=>db.removeBookingPhoto(bookingId,containerId,id));
-      if(isMountedRef.current)setSelectedContainer(prev=>prev?.id===containerId ? {...prev,photos:prev.photos.filter(p=>p.id!==id)} : prev);
-      await db.deletePhoto(id,photo?.storagePath || null);
-    }catch(error){if(isMountedRef.current)showToast('Não foi possível concluir a exclusão: '+error.message);}
+      await serializeEdit(() => db.removeBookingPhoto(bookingId, containerId, id));
+      if (isMountedRef.current) {
+        setSelectedContainer(prev => prev?.id === containerId
+          ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) }
+          : prev
+        );
+      }
+      await db.deletePhoto(id, photo?.storagePath || null);
+    } catch (error) {
+      if (isMountedRef.current) showToast('Não foi possível concluir a exclusão: ' + error.message);
+    }
   };
 
   const handleAddSeal = () => {
@@ -684,7 +764,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       selectedBookingRef.current=targetBooking;
       setHighlightedContainerId(targetContainer.id);
       setScreen('booking');setActiveTab('booking');
-      showToast('Foto guardada no aparelho e adicionada à fila deste container.');
     }catch(error){showToast('Não foi possível guardar a foto: '+error.message);}
   };
 
@@ -988,7 +1067,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                 Nenhum container nesta reserva.
               </div>
             ) : containers.map(c => {
-              const hasPhotos  = (c.photos || []).length > 0;
+              const photoCount = getContainerPhotoCount(c);
+              const hasPhotos  = photoCount > 0;
               const sealText   = getSealText(c.definiteSeal);
               const hasDefSeal = !!sealText;
               const isHighlighted = highlightedContainerId && (
@@ -1039,7 +1119,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{c.containerType}</div>
                     <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                       {hasPhotos && (
-                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#3b82f6' }}>📸 {c.photos.length} foto{c.photos.length !== 1 ? 's' : ''}</span>
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: '#3b82f6' }}>📸 {photoCount} foto{photoCount !== 1 ? 's' : ''}</span>
                       )}
                       {hasDefSeal ? (
                         <span style={{ fontSize: '10px', fontWeight: '700', color: '#10b981' }}>🔒 {sealText}</span>
@@ -1096,16 +1176,15 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         <div style={S.card}>
           <div style={S.sectionTitle}>📸 Fotos do Container</div>
 
-          {/* Botões câmera / galeria */}
+          {/* Botões câmera / galeria: gravação imediata sem travar a interface */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
             <button
-              onClick={() => !uploadingPhotos && cameraInputRef.current?.click()}
-              disabled={uploadingPhotos}
+              onClick={() => cameraInputRef.current?.click()}
               style={{
                 padding: '12px',
                 borderRadius: '10px',
                 border: 'none',
-                backgroundColor: uploadingPhotos ? 'var(--border-color)' : 'var(--color-brand)',
+                backgroundColor: 'var(--color-brand)',
                 color: '#fff',
                 fontWeight: '800',
                 fontSize: '13px',
@@ -1113,47 +1192,41 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                cursor: uploadingPhotos ? 'not-allowed' : 'pointer',
-                opacity: uploadingPhotos ? 0.7 : 1,
+                cursor: 'pointer',
                 transition: 'all 0.2s'
               }}
             >
-              {uploadingPhotos
-                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Enviando...</>
-                : <><Camera size={16} /> Câmera</>
-              }
+              <Camera size={16} /> Câmera
             </button>
             <button
-              onClick={() => !uploadingPhotos && galleryInputRef.current?.click()}
-              disabled={uploadingPhotos}
+              onClick={() => galleryInputRef.current?.click()}
               style={{
                 padding: '12px',
                 borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 backgroundColor: 'var(--bg-tertiary)',
-                color: uploadingPhotos ? 'var(--text-muted)' : 'var(--text-primary)',
+                color: 'var(--text-primary)',
                 fontWeight: '700',
                 fontSize: '13px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                cursor: uploadingPhotos ? 'not-allowed' : 'pointer',
-                opacity: uploadingPhotos ? 0.6 : 1,
+                cursor: 'pointer',
                 transition: 'all 0.2s'
               }}
             >
-              <Image size={16} style={{ color: uploadingPhotos ? 'var(--text-muted)' : 'var(--color-brand)' }} /> Galeria
+              <Image size={16} style={{ color: 'var(--color-brand)' }} /> Galeria
             </button>
             <input type="file" ref={cameraInputRef}  onChange={handlePhotoUpload} accept="image/*" capture="environment" style={{ display: 'none' }} />
             <input type="file" ref={galleryInputRef} onChange={handlePhotoUpload} accept="image/*" multiple style={{ display: 'none' }} />
           </div>
 
-          {/* Grid de fotos */}
-          {(c.photos || []).length > 0 ? (
+          {/* Grid de fotos com miniaturas imediatas e status discreto */}
+          {displayedPhotos.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {(c.photos || []).map((photo, idx) => {
-                // URL direta do Firebase Storage (ou fallback para base64 legado)
+              {displayedPhotos.map((photo, idx) => {
+                // URL direta do Firebase Storage ou ObjectURL local imediato da fila
                 const photoSrc = photo.url || photo.dataUrl || null;
                 return (
                   <div key={photo.id || idx} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', aspectRatio: '1', backgroundColor: 'var(--bg-tertiary)' }}>
@@ -1161,12 +1234,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                       <img
                         src={photoSrc}
                         alt=""
-                        onClick={() => { setPreviewPhotoIndex(idx); setPreviewContainer(c); }}
+                        onClick={() => { setPreviewPhotoIndex(idx); setPreviewContainer({ ...c, photos: displayedPhotos }); }}
                         style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
                       />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Loader2 size={20} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
+                      </div>
+                    )}
+                    {photo.isPending && (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: '4px',
+                        right: '4px',
+                        backgroundColor: 'rgba(0,0,0,0.65)',
+                        borderRadius: '10px',
+                        padding: '2px 6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontSize: '9px',
+                        color: '#fff',
+                        fontWeight: '700',
+                        pointerEvents: 'none'
+                      }}>
+                        <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} />
+                        <span>Fila</span>
                       </div>
                     )}
                     <PhotoDownloadButton
@@ -1410,6 +1503,57 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Indicador discreto no cabeçalho: contador de fotos na fila */}
+            {photoJobs.length > 0 && (() => {
+              const critical = photoJobs.filter(j => j.attempts >= 5 || (j.error && /espaço|autoriz|permiss|não está mais/i.test(j.error)));
+              if (critical.length > 0) {
+                return (
+                  <button
+                    onClick={() => {
+                      showToast(`Atenção no envio: ${critical[0].error || 'Falha persistente'}`);
+                      retryBookingPhotos().catch(() => {});
+                    }}
+                    title={`${critical.length} foto(s) com erro persistente. Toque para tentar novamente.`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      color: '#ef4444',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <span style={{ fontSize: '12px' }}>⚠️</span>
+                    <span>{photoJobs.length}</span>
+                  </button>
+                );
+              }
+              return (
+                <div
+                  title={`${photoJobs.length} foto(s) enviando em segundo plano`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '4px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(14, 165, 233, 0.12)',
+                    border: '1px solid rgba(14, 165, 233, 0.25)',
+                    color: 'var(--color-brand)',
+                    fontSize: '11px',
+                    fontWeight: '700'
+                  }}
+                >
+                  <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>{photoJobs.length}</span>
+                </div>
+              );
+            })()}
             {/* Indicador de save no header quando em container */}
             {screen === 'container' && <SaveIndicator status={saveStatus} />}
             <button
@@ -1455,15 +1599,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         onTabChange={handleTabChange}
         hasContainer={!!selectedContainer}
       />
-
-      {photoJobs.length > 0 && (
-        <div role="status" style={{position:'fixed',bottom:'calc(70px + env(safe-area-inset-bottom, 0px))',left:12,right:12,zIndex:1500,padding:10,borderRadius:10,background:'var(--bg-secondary)',border:'1px solid var(--border-color)',fontSize:12}}>
-          <strong>{photoJobs.length} foto(s) aguardando confirmação</strong>
-          <div>Você pode continuar trabalhando. {photoJobs.filter(j=>j.error).length} com nova tentativa pendente.</div>
-          {photoJobs.some(j=>j.error) && <div>{photoJobs.find(j=>j.error).error}</div>}
-          <button onClick={()=>retryBookingPhotos().catch(e=>showToast(e.message))}>Tentar envio agora</button>
-        </div>
-      )}
       {/* Toast de erro — não-bloqueante, substitui alert() */}
       {toastError && (
         <div

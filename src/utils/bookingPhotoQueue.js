@@ -6,8 +6,15 @@ const listeners = new Set();
 let running;
 let timer;
 let wakeAgain = false;
+const localUrls = new Map();
+
 export const photoQueueOwner = () => String(db.getUser()?.id || db.getUser()?.login || '');
 const notify = () => window.dispatchEvent(new Event('unispect-booking-photo-queue'));
+
+export function getLocalPhotoUrl(jobId) {
+  return localUrls.get(jobId) || null;
+}
+
 function open() {
   if (!connection) connection = new Promise((resolve,reject) => {
     const req = indexedDB.open('unispect-booking-photo-outbox-v1', 1);
@@ -24,6 +31,7 @@ function open() {
   }).catch(e => {connection = undefined; throw e;});
   return connection;
 }
+
 async function transaction(stores, mode, action) {
   const database = await open();
   return new Promise((resolve,reject) => {
@@ -35,33 +43,95 @@ async function transaction(stores, mode, action) {
     try { action(tx, x => {value=x;}); } catch(e) {tx.abort();reject(e);}
   });
 }
+
 const get = (store,id) => transaction([store],'readonly',(tx,done) => {
   const req=tx.objectStore(store).get(id); req.onsuccess=()=>done(req.result);
 });
+
+export async function getPhotoBlob(jobId) {
+  const local = await get('blobs', jobId);
+  return local?.blob || null;
+}
+
 export async function listBookingPhotoJobs() {
   const owner=photoQueueOwner();
   return transaction(['jobs'],'readonly',(tx,done)=>{
     const req=tx.objectStore('jobs').getAll();
-    req.onsuccess=()=>done(req.result.filter(j=>j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt));
+    req.onsuccess=()=>done(req.result.filter(j=>j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt).map(j=>({
+      ...j,
+      localUrl: localUrls.get(j.id) || null
+    })));
   });
 }
+
 export async function enqueueBookingPhotos(bookingId,containerId,files) {
   const owner=photoQueueOwner();
   if (!owner || !bookingId || !containerId) throw new Error('Entre no sistema e selecione um container antes de fotografar.');
-  const jobs=Array.from(files).map(file=>({id:'bookingphoto_'+crypto.randomUUID(),owner,bookingId,containerId,
-    file,createdAt:Date.now(),attempts:0,nextAttempt:0,error:''}));
+  const jobs=Array.from(files).map(file=>{
+    const id='bookingphoto_'+crypto.randomUUID();
+    let localUrl = null;
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && file instanceof Blob) {
+      try {
+        localUrl = URL.createObjectURL(file);
+        localUrls.set(id, localUrl);
+      } catch (err) {
+        void err;
+      }
+    }
+    return {
+      id,
+      owner,
+      bookingId,
+      containerId,
+      file,
+      localUrl,
+      createdAt:Date.now(),
+      attempts:0,
+      nextAttempt:0,
+      error:''
+    };
+  });
   if (!jobs.length || jobs.some(j=>!(j.file instanceof Blob) || !j.file.size)) throw new Error('Foto vazia ou inválida.');
   await transaction(['jobs','blobs'],'readwrite',tx=>{
-    for(const {file,...job} of jobs){tx.objectStore('jobs').put(job);tx.objectStore('blobs').put({id:job.id,blob:file});}
+    for(const job of jobs){
+      const jobData = { ...job };
+      delete jobData.file;
+      delete jobData.localUrl;
+      tx.objectStore('jobs').put(jobData);
+      tx.objectStore('blobs').put({id:job.id,blob:job.file});
+    }
   });
   notify();
   navigator.storage?.persist?.().catch(()=>{});
   void syncBookingPhotos().catch(()=>{});
-  return jobs.length;
+  return jobs;
 }
+
+export async function cancelBookingPhoto(jobId) {
+  const url = localUrls.get(jobId);
+  if (url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      void err;
+    }
+  }
+  localUrls.delete(jobId);
+  try {
+    await transaction(['jobs','blobs'],'readwrite',tx=>{
+      tx.objectStore('jobs').delete(jobId);
+      tx.objectStore('blobs').delete(jobId);
+    });
+    notify();
+  } catch (err) {
+    console.warn('cancelBookingPhoto error:', err);
+  }
+}
+
 async function saveJob(job) {
   await transaction(['jobs'],'readwrite',tx=>tx.objectStore('jobs').put(job)); notify();
 }
+
 async function processJob(job) {
   try {
     if (photoQueueOwner()!==job.owner) return;
@@ -79,13 +149,23 @@ async function processJob(job) {
     await transaction(['jobs','blobs'],'readwrite',tx=>{
       tx.objectStore('jobs').delete(job.id);tx.objectStore('blobs').delete(job.id);
     });
-    window.dispatchEvent(new CustomEvent('unispect-booking-photo-saved',{detail:{booking,containerId:job.containerId}}));
+    const url = localUrls.get(job.id);
+    if (url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        void err;
+      }
+    }
+    localUrls.delete(job.id);
+    window.dispatchEvent(new CustomEvent('unispect-booking-photo-saved',{detail:{booking,containerId:job.containerId,photoId:job.id}}));
     notify();
   } catch(e) {
     const attempts=job.attempts+1;
     await saveJob({...job,attempts,error:e.message || String(e),nextAttempt:Date.now()+Math.min(300000,5000*2**Math.min(attempts-1,6))});
   }
 }
+
 export function syncBookingPhotos() {
   if(running){wakeAgain=true;return running;}
   const drain=async()=>{
@@ -102,16 +182,25 @@ export function syncBookingPhotos() {
     .finally(()=>{running=undefined;});
   return running;
 }
+
 export async function retryBookingPhotos() {
   for(const job of await listBookingPhotoJobs())await saveJob({...job,nextAttempt:0});
   return syncBookingPhotos();
 }
+
 export function startBookingPhotoQueue() {
   if(timer)return;
   const wake=()=>void syncBookingPhotos().catch(e=>console.error('Fila de fotos:',e));
+  const onReconnect=()=>{
+    void retryBookingPhotos().catch(e=>console.error('Fila de fotos (reconexão):',e));
+  };
   listeners.add(wake);
-  window.addEventListener('online',wake);
-  document.addEventListener('visibilitychange',wake);
-  timer=setInterval(wake,15000);
+  listeners.add(onReconnect);
+  window.addEventListener('online',onReconnect);
+  document.addEventListener('visibilitychange',()=>{
+    if (document.visibilityState === 'visible') onReconnect();
+    else wake();
+  });
+  timer=setInterval(wake,10000);
   wake();
 }
