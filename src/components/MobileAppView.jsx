@@ -352,8 +352,12 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     if (!selectedContainer) return [];
     const confirmed = selectedContainer.photos || [];
     const confirmedIds = new Set(confirmed.map(p => p.id));
+    const isTarget = j =>
+      String(j.containerId || '').trim() === String(selectedContainer.id || '').trim() ||
+      (selectedContainer.containerNumber && String(j.containerId || '').trim().toUpperCase() === String(selectedContainer.containerNumber).trim().toUpperCase());
+
     const pending = photoJobs
-      .filter(j => j.containerId === selectedContainer.id && !confirmedIds.has(j.id))
+      .filter(j => isTarget(j) && !confirmedIds.has(j.id))
       .map(j => ({
         id: j.id,
         name: j.file?.name || `foto_${j.id}.jpg`,
@@ -368,37 +372,70 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
   // Contagem de fotos considerando pendências na fila para os cards de container
   const getContainerPhotoCount = useCallback(c => {
+    if (!c) return 0;
     const confirmed = c.photos || [];
     const confirmedIds = new Set(confirmed.map(p => p.id));
-    const pendingCount = photoJobs.filter(j => j.containerId === c.id && !confirmedIds.has(j.id)).length;
+    const isTarget = j =>
+      String(j.containerId || '').trim() === String(c.id || '').trim() ||
+      (c.containerNumber && String(j.containerId || '').trim().toUpperCase() === String(c.containerNumber).trim().toUpperCase());
+
+    const pendingCount = photoJobs.filter(j => isTarget(j) && !confirmedIds.has(j.id)).length;
     return confirmed.length + pendingCount;
   }, [photoJobs]);
 
   useEffect(() => {
-    const refresh = () => listBookingPhotoJobs().then(setPhotoJobs).catch(e => console.error('Fila local:',e));
+    const refresh = () => listBookingPhotoJobs().then(setPhotoJobs).catch(e => console.error('Fila local:', e));
     const saved = event => {
-      const {booking,containerId} = event.detail;
-      setSelectedBooking(prev => prev?.id === booking.id ? {...prev, _revision:booking._revision,
-        containers:prev.containers.map(c=>c.id===containerId ? {...c, photos:booking.containers.find(x=>x.id===containerId).photos} : c)} : prev);
-      setSelectedContainer(prev => prev?.id === containerId ? {...prev,photos:booking.containers.find(c=>c.id===containerId).photos} : prev);
+      const {booking, containerId} = event.detail;
+      const remoteCont = (booking?.containers || []).find(x =>
+        String(x.id || '').trim() === String(containerId).trim() ||
+        String(x.containerNumber || '').trim().toUpperCase() === String(containerId).trim().toUpperCase()
+      );
+      if (remoteCont) {
+        setSelectedBooking(prev => prev?.id === booking.id ? {
+          ...prev,
+          _revision: booking._revision,
+          containers: (prev.containers || []).map(c =>
+            (String(c.id || '').trim() === String(containerId).trim() ||
+             String(c.containerNumber || '').trim().toUpperCase() === String(containerId).trim().toUpperCase())
+              ? { ...c, photos: remoteCont.photos || [] }
+              : c
+          )
+        } : prev);
+        setSelectedContainer(prev => {
+          if (!prev) return prev;
+          const match = String(prev.id || '').trim() === String(containerId).trim() ||
+                        String(prev.containerNumber || '').trim().toUpperCase() === String(containerId).trim().toUpperCase();
+          return match ? { ...prev, photos: remoteCont.photos || [] } : prev;
+        });
+      }
     };
-    window.addEventListener('unispect-booking-photo-queue',refresh);
-    window.addEventListener('unispect-booking-photo-saved',saved);
+    window.addEventListener('unispect-booking-photo-queue', refresh);
+    window.addEventListener('unispect-booking-photo-saved', saved);
     refresh();
-    return()=>{window.removeEventListener('unispect-booking-photo-queue',refresh);window.removeEventListener('unispect-booking-photo-saved',saved);};
+    return () => {
+      window.removeEventListener('unispect-booking-photo-queue', refresh);
+      window.removeEventListener('unispect-booking-photo-saved', saved);
+    };
   }, [user?.id, user?.login]);
 
   // ── Atualização Manual / Refresh
   const [localRefreshing, setLocalRefreshing] = useState(false);
   const isRefreshing = parentRefreshing || localRefreshing;
 
-  // ── Toast de erro (não-bloqueante, substitui alert())
-  const [toastError, setToastError] = useState('');
+  // ── Toast de notificação tipado (vermelho exclusivamente para falhas reais)
+  const [toast, setToast] = useState(null); // { message: string, type: 'error' | 'success' | 'info' | 'warning' }
   const toastTimerRef = useRef(null);
-  const showToast = useCallback((msg) => {
-    setToastError(msg);
+  const showToast = useCallback((msg, type = 'error') => {
+    if (!msg) {
+      setToast(null);
+      return;
+    }
+    const message = typeof msg === 'string' ? msg : (msg?.message || String(msg));
+    const finalType = (typeof msg === 'object' && msg?.type) ? msg.type : type;
+    setToast({ message, type: finalType });
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToastError(''), 5000);
+    toastTimerRef.current = setTimeout(() => setToast(null), finalType === 'error' ? 6000 : 3500);
   }, []);
 
   const handleManualRefresh = useCallback(async () => {
@@ -418,10 +455,10 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       if (onRefresh) {
         await onRefresh();
       }
-      showToast('✓ Dados e sistema sincronizados com sucesso!');
+      showToast('Dados e sistema sincronizados com sucesso!', 'success');
     } catch (err) {
       console.error('Refresh error:', err);
-      showToast('Erro ao atualizar: ' + (err.message || 'Tente novamente.'));
+      showToast('Erro ao atualizar: ' + (err.message || 'Tente novamente.'), 'error');
     } finally {
       if (isMountedRef.current) setLocalRefreshing(false);
     }
@@ -674,7 +711,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       await enqueueBookingPhotos(bookingId, containerId, files);
       // Sem avisos intrusivos por captura: as miniaturas surgem imediatamente via photoJobs + displayedPhotos
     } catch (error) {
-      if (isMountedRef.current) showToast(error.message + ' Selecione as fotos novamente.');
+      if (isMountedRef.current) showToast('Não foi possível gravar a foto no aparelho: ' + (error.message || 'Verifique o espaço disponível.'), 'error');
     }
   };
 
@@ -706,7 +743,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       }
       await db.deletePhoto(id, photo?.storagePath || null);
     } catch (error) {
-      if (isMountedRef.current) showToast('Não foi possível concluir a exclusão: ' + error.message);
+      if (isMountedRef.current) showToast('Não foi possível concluir a exclusão: ' + error.message, 'error');
     }
   };
 
@@ -757,20 +794,23 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     }
   };
 
-  const associatePhotoAndOpenBooking = async (targetBooking,targetContainer,photoFile) => {
+  const associatePhotoAndOpenBooking = async (targetBooking, targetContainer, photoFile) => {
     try {
-      await enqueueBookingPhotos(targetBooking.id,targetContainer.id,[photoFile]);
+      await enqueueBookingPhotos(targetBooking.id, targetContainer.id, [photoFile]);
       setSelectedBooking(targetBooking);
-      selectedBookingRef.current=targetBooking;
+      selectedBookingRef.current = targetBooking;
       setHighlightedContainerId(targetContainer.id);
-      setScreen('booking');setActiveTab('booking');
-    }catch(error){showToast('Não foi possível guardar a foto: '+error.message);}
+      setScreen('booking');
+      setActiveTab('booking');
+    } catch (error) {
+      if (isMountedRef.current) showToast('Não foi possível guardar a foto: ' + (error.message || 'Erro local.'), 'error');
+    }
   };
 
   const handleConfirmAndSearchBooking = async () => {
     const cleanNum = normalizeContainerNumber(recognizedNumber);
     if (!/^[A-Z]{4}\d{7}$/.test(cleanNum)) {
-      showToast('Digite um número de container válido com 4 letras e 7 dígitos (ex: MSDU8821297).');
+      showToast('Digite um número de container válido com 4 letras e 7 dígitos (ex: MSDU8821297).', 'warning');
       return;
     }
 
@@ -825,7 +865,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       photoFile: capturedPhotoFile,
       photoUrl: capturedPhotoUrl
     });
-    showToast(`Container ${cleanNum} não vinculado a nenhum Booking. Abrindo cadastro sem Booking.`);
+    showToast(`Container ${cleanNum} não vinculado a nenhum Booking. Abrindo cadastro sem Booking.`, 'info');
   };
 
   const handleSelectMultipleBooking = async (match) => {
@@ -1510,7 +1550,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                 return (
                   <button
                     onClick={() => {
-                      showToast(`Atenção no envio: ${critical[0].error || 'Falha persistente'}`);
+                      showToast(`Falha no envio de fotos: ${critical[0].error || 'Falha persistente de rede ou permissão'}`, 'error');
                       retryBookingPhotos().catch(() => {});
                     }}
                     title={`${critical.length} foto(s) com erro persistente. Toque para tentar novamente.`}
@@ -1599,23 +1639,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         onTabChange={handleTabChange}
         hasContainer={!!selectedContainer}
       />
-      {/* Toast de erro — não-bloqueante, substitui alert() */}
-      {toastError && (
+      {/* Toast de notificação tipado — vermelho exclusivamente para falhas reais */}
+      {toast && (
         <div
-          onClick={() => setToastError('')}
+          role="alert"
+          onClick={() => setToast(null)}
           style={{
             position: 'fixed',
             top: '70px',
             left: '16px',
             right: '16px',
             zIndex: 20000,
-            backgroundColor: '#ef4444',
+            backgroundColor: toast.type === 'error'
+              ? '#dc2626'
+              : toast.type === 'success'
+                ? '#059669'
+                : toast.type === 'warning'
+                  ? '#d97706'
+                  : '#0284c7',
             color: '#fff',
             padding: '12px 16px',
             borderRadius: '12px',
             fontSize: '13px',
-            fontWeight: '700',
-            boxShadow: '0 4px 20px rgba(239,68,68,0.4)',
+            fontWeight: '600',
+            boxShadow: toast.type === 'error'
+              ? '0 4px 20px rgba(220, 38, 38, 0.45)'
+              : '0 4px 20px rgba(0, 0, 0, 0.25)',
             display: 'flex',
             alignItems: 'flex-start',
             gap: '10px',
@@ -1623,10 +1672,14 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
             animation: 'slideDown 0.3s ease'
           }}
         >
-          <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+          <span style={{ fontSize: '16px', flexShrink: 0 }}>
+            {toast.type === 'error' ? '⚠️' : toast.type === 'success' ? '✓' : toast.type === 'warning' ? '⚠️' : 'ℹ️'}
+          </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '2px', opacity: 0.85 }}>Erro</div>
-            <div>{toastError}</div>
+            <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '2px', opacity: 0.9 }}>
+              {toast.type === 'error' ? 'Erro' : toast.type === 'success' ? 'Sucesso' : toast.type === 'warning' ? 'Atenção' : 'Aviso'}
+            </div>
+            <div>{toast.message}</div>
           </div>
           <span style={{ flexShrink: 0, opacity: 0.7, fontSize: '16px' }}>✕</span>
         </div>

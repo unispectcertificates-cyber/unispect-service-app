@@ -170,3 +170,51 @@ test('4. Retomada automática após retorno de conexão sem duplicar envios', as
   assert.equal((await q.listBookingPhotoJobs()).length, 0);
   assert.equal(stores.get('blobs').size, 0);
 });
+
+test('5. Verificação separada e explícita da conclusão de uploads: upload -> append -> cleanup -> evento', async () => {
+  navigator.onLine = true;
+  stores.get('jobs')?.clear();
+  stores.get('blobs')?.clear();
+  uploadsCount = 0;
+  linkedPhotos = [];
+
+  const savedEvents = [];
+  const listener = ev => savedEvents.push(ev.detail);
+  window.addEventListener('unispect-booking-photo-saved', listener);
+
+  try {
+    const jobs = await q.enqueueBookingPhotos('B_VERIFY', 'C_VERIFY', [
+      makePhoto('test_complete_1'),
+      makePhoto('test_complete_2')
+    ]);
+
+    assert.equal(jobs.length, 2);
+
+    // Aguarda conclusão dos uploads em segundo plano
+    await q.syncBookingPhotos();
+
+    // 1. db.uploadPhoto foi chamado para cada foto
+    assert.equal(uploadsCount, 2, 'Todos os arquivos foram enviados');
+
+    // 2. db.appendBookingPhoto vinculou cada foto ao container e booking corretos
+    assert.equal(linkedPhotos.length, 2, 'Todas as fotos foram vinculadas remotamente');
+    assert.equal(linkedPhotos[0].bookingId, 'B_VERIFY');
+    assert.equal(linkedPhotos[0].containerId, 'C_VERIFY');
+    assert.equal(linkedPhotos[1].bookingId, 'B_VERIFY');
+    assert.equal(linkedPhotos[1].containerId, 'C_VERIFY');
+
+    // 3. Os registros locais (jobs e blobs) são removidos do IndexedDB após confirmação
+    assert.equal(stores.get('jobs').size, 0, 'Object store jobs foi drenada');
+    assert.equal(stores.get('blobs').size, 0, 'Object store blobs foi drenada');
+    const pendingJobs = await q.listBookingPhotoJobs();
+    assert.equal(pendingJobs.length, 0, 'Nenhum job pendente listado');
+
+    // 4. O evento de sucesso é disparado para que a interface atualize a miniatura de "pendente" para "remota"
+    assert.equal(savedEvents.length, 2, 'Evento unispect-booking-photo-saved disparado para cada upload');
+    assert.equal(savedEvents[0].containerId, 'C_VERIFY');
+    assert.equal(savedEvents[1].containerId, 'C_VERIFY');
+  } finally {
+    window.removeEventListener('unispect-booking-photo-saved', listener);
+  }
+});
+

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 const source=await fs.readFile(new URL('../src/utils/bookingConcurrent.js',import.meta.url),'utf8');
 const {createConcurrentRepository}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
-function fixture(){
- let booking={id:'b',bookingNumber:'BK1',certificateNumber:'UN1000/2026',_revision:1,containers:[{id:'a',notes:'',tara:'100',photos:[]},{id:'c',notes:'',photos:[]}]};
+function fixture(initial = {}){
+ let booking={id:'b',bookingNumber:'BK1',certificateNumber:'UN1000/2026',_revision:1,containers:[{id:'a',notes:'',tara:'100',photos:[]},{id:'c',notes:'',photos:[]}],...initial};
  let version=0;
  const repository=createConcurrentRepository({reference:(collection,id)=>({collection,id}),transaction:async callback=>{
    for(let attempt=0;attempt<100;attempt++){
@@ -41,3 +41,15 @@ test('container removido e substituição estrutural são recusados',async()=>{
  await assert.rejects(f.repository.patchBooking('b',{containers:[]},{containers:[]}),/não permitido/);
  assert.equal(f.current().containers.length,2);
 });
+test('vínculo de foto localiza container por containerNumber ou id alternativo',async()=>{
+ const f=fixture({
+   containers: [
+     { id: 'a', notes: '', tara: '100', photos: [] },
+     { id: 'c', containerNumber: 'MSDU8821297', notes: '', photos: [] }
+   ]
+ });
+ await f.repository.appendPhoto('b','MSDU8821297',{id:'p_by_num',url:'https://example.test/num'});
+ assert.equal(f.current().containers[1].photos.length,1);
+ assert.equal(f.current().containers[1].photos[0].id,'p_by_num');
+});
+
