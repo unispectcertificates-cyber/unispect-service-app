@@ -451,14 +451,28 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
           console.warn('SW update warning:', e);
         }
       }
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          for (const k of keys) await caches.delete(k);
+        } catch (ce) {
+          console.warn('Caches delete:', ce);
+        }
+      }
       await db.init().catch(e => console.warn('DB init refresh:', e));
       if (onRefresh) {
         await onRefresh();
       }
       showToast('Dados e sistema sincronizados com sucesso!', 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
     } catch (err) {
       console.error('Refresh error:', err);
       showToast('Erro ao atualizar: ' + (err.message || 'Tente novamente.'), 'error');
+      setTimeout(() => {
+        window.location.reload();
+      }, 600);
     } finally {
       if (isMountedRef.current) setLocalRefreshing(false);
     }

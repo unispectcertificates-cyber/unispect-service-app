@@ -2,7 +2,7 @@ import { findBooking, planImport, previewToken, normalizeContainerNumber, import
 import { parseRomaneioPdf } from './utils/pdfParser';
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Menu, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, PackagePlus } from 'lucide-react';
+import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
 import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
 import { subscribePendingFieldContainers } from './utils/fieldService';
 import BookingManagementModal from './components/BookingManagementModal';
@@ -86,8 +86,6 @@ export default function App() {
 
   // Modais e Menu Dropdown
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
 
   // Estados do Redesign Desktop e Atualização de Romaneio
   const [showUpdateRomaneioPicker, setShowUpdateRomaneioPicker] = useState(false);
@@ -164,17 +162,6 @@ export default function App() {
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
-    // Fechar menu ao clicar fora
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-
-    // Sincronização periódica em background (Polling leve de 3 segundos)
-    // Sincronização via Firebase
-
     // Detecção automática de conexão online/offline
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -182,7 +169,6 @@ export default function App() {
     window.addEventListener('offline', handleOffline);
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -208,19 +194,28 @@ export default function App() {
         }
       }
 
-      // 2. Re-inicializa coleções se necessário
+      // 2. Limpa cache de requisições antigas para carregar o bundle mais recente
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          for (const k of keys) await caches.delete(k);
+        } catch (cErr) {
+          console.warn('Cache clear warning:', cErr);
+        }
+      }
+
+      // 3. Re-inicializa coleções se necessário
       await db.init().catch(e => console.warn('DB init refresh:', e));
 
-      // 3. Feedback visual
+      // 4. Feedback visual e reload para aplicar versão nova imediatamente
       handleRefreshData();
       setRefreshFeedback('Sistema e dados atualizados com sucesso!');
-      setTimeout(() => setRefreshFeedback(''), 3500);
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
     } catch (err) {
       console.error('Erro ao atualizar sistema:', err);
-      setRefreshFeedback('Erro ao atualizar. Tente recarregar a página.');
-      setTimeout(() => setRefreshFeedback(''), 4000);
-    } finally {
-      setTimeout(() => setIsRefreshing(false), 600);
+      window.location.reload();
     }
   };
 
@@ -440,41 +435,6 @@ export default function App() {
     setUser(null);
     db.setUser(null);
     setCurrentTab('bookings');
-  };
-
-  // Funções do Menu Dropdown
-  const handleMenuOptionClick = (option) => {
-    setMenuOpen(false);
-
-    // Fecha visualizações detalhadas ativas antes de navegar
-    setSelectedBookingId(null);
-    setActiveReport(null);
-
-    switch (option) {
-      case 'new_booking':
-        setShowCreateModal(true);
-        break;
-      case 'exportador':
-        setCurrentTab('exportadores');
-        break;
-      case 'locais':
-        setCurrentTab('locais');
-        break;
-      case 'inspetor':
-        setCurrentTab('inspectors');
-        break;
-      case 'usuarios':
-        setCurrentTab('usuarios');
-        break;
-      case 'dashboard':
-        setCurrentTab('bookings');
-        break;
-      case 'containers-sem-booking':
-        setCurrentTab('containers-sem-booking');
-        break;
-      default:
-        break;
-    }
   };
 
   // Mobile redirect removed to support responsive layouts

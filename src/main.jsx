@@ -6,24 +6,45 @@ import App from './App.jsx'
 import { db } from './db'
 import { registerSW } from 'virtual:pwa-register'
 
-// Registrar Service Worker do PWA para carregamento offline/instantâneo
-registerSW({ 
+// Controle de versão do build para invalidar caches antigos no navegador do usuário
+const CURRENT_APP_BUILD = '2026.10.16.r4';
+try {
+  const cachedBuild = localStorage.getItem('unispect_app_build');
+  if (cachedBuild !== CURRENT_APP_BUILD) {
+    localStorage.setItem('unispect_app_build', CURRENT_APP_BUILD);
+    if ('caches' in window) {
+      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(() => {});
+    }
+  }
+} catch (e) {
+  void e;
+}
+
+// Registrar Service Worker do PWA com atualização automática forçada
+const updateSW = registerSW({ 
   immediate: true,
   onNeedRefresh() {
     console.log("Novo conteúdo disponível, atualizando cache...");
-    console.info('Atualização disponível. Será aplicada ao reabrir o aplicativo; as capturas continuam na fila.');
+    updateSW(true);
+  },
+  onOfflineReady() {
+    console.log("App pronto para uso offline.");
   }
 });
 
-// Forçar atualização de Service Workers antigos se existirem
+// Forçar atualização e reload imediato quando novo SW assumir controle
+let isReloading = false;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
     for (let registration of registrations) {
-      registration.update();
+      registration.update().catch(() => {});
     }
-  });
+  }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    console.info('Atualização disponível. Será aplicada ao reabrir o aplicativo; as capturas continuam na fila.');
+    if (!isReloading) {
+      isReloading = true;
+      window.location.reload();
+    }
   });
 }
 

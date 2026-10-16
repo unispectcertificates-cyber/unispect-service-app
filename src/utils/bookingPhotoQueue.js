@@ -8,10 +8,7 @@ let timer;
 let wakeAgain = false;
 const localUrls = new Map();
 
-export const photoQueueOwner = () => {
-  const u = db.getUser?.();
-  return String(u?.id || u?.login || u?.username || 'unispect_user');
-};
+export const photoQueueOwner = () => String(db.getUser()?.id || db.getUser()?.login || db.getUser()?.username || '');
 const notify = () => window.dispatchEvent(new Event('unispect-booking-photo-queue'));
 
 export function getLocalPhotoUrl(jobId) {
@@ -69,7 +66,7 @@ export async function listBookingPhotoJobs() {
 
 export async function enqueueBookingPhotos(bookingId,containerId,files) {
   const owner=photoQueueOwner();
-  if (!bookingId || !containerId) throw new Error('Selecione um container antes de fotografar.');
+  if (!owner || !bookingId || !containerId) throw new Error('Entre no sistema e selecione um container antes de fotografar.');
   const jobs=Array.from(files).map(file=>{
     const id='bookingphoto_'+crypto.randomUUID();
     let localUrl = null;
