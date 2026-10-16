@@ -1,3 +1,4 @@
+import {enqueueBookingPhotos, listBookingPhotoJobs, retryBookingPhotos} from '../utils/bookingPhotoQueue.js';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Search, Camera, Image, Trash2, ArrowLeft, X,
@@ -10,10 +11,8 @@ import FieldCaptureNotice from './FieldCaptureNotice';
 import YardFieldFlow from './YardFieldFlow';
 import { startFieldSynchronization } from '../utils/fieldService';
 import { startYardSynchronization } from '../utils/yardService';
-import { generateUUID } from '../utils/uuid';
-import { recognizeContainerPhoto, validateIso6346CheckDigit, formatContainerNumber } from '../utils/containerOcr';
+import { recognizeContainerPhoto, validateIso6346CheckDigit } from '../utils/containerOcr';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
-import { fieldQueue } from '../utils/fieldQueue';
 import PhotoDownloadButton from './PhotoDownloadButton';
 import PhotoEnlargedModal from './PhotoEnlargedModal';
 
@@ -335,11 +334,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
   // ── Auto-save
   const [saveStatus, setSaveStatus]   = useState('idle');  // 'idle' | 'saving' | 'saved'
-  const saveTimerRef                  = useRef(null);
   const debounceTimerRef              = useRef(null);
 
   // ── Upload de fotos
-  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false); // Apenas gravação local, não duração do upload.
+  const [photoJobs, setPhotoJobs] = useState([]);
+  const saveChainRef = useRef(Promise.resolve());
+  const pendingEditsRef = useRef(new Map());
+  const flushEditsRef = useRef(null);
+  const serializeEdit = useCallback(action => {
+    const pending = saveChainRef.current.then(action);
+    saveChainRef.current = pending.catch(() => {});
+    return pending;
+  }, []);
+  useEffect(() => {
+    const refresh = () => listBookingPhotoJobs().then(setPhotoJobs).catch(e => console.error('Fila local:',e));
+    const saved = event => {
+      const {booking,containerId} = event.detail;
+      setSelectedBooking(prev => prev?.id === booking.id ? {...prev, _revision:booking._revision,
+        containers:prev.containers.map(c=>c.id===containerId ? {...c, photos:booking.containers.find(x=>x.id===containerId).photos} : c)} : prev);
+      setSelectedContainer(prev => prev?.id === containerId ? {...prev,photos:booking.containers.find(c=>c.id===containerId).photos} : prev);
+    };
+    window.addEventListener('unispect-booking-photo-queue',refresh);
+    window.addEventListener('unispect-booking-photo-saved',saved);
+    refresh();
+    return()=>{window.removeEventListener('unispect-booking-photo-queue',refresh);window.removeEventListener('unispect-booking-photo-saved',saved);};
+  }, [user?.id, user?.login]);
 
   // ── Atualização Manual / Refresh
   const [localRefreshing, setLocalRefreshing] = useState(false);
@@ -398,7 +418,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   const [ocrModalOpen, setOcrModalOpen] = useState(false);
   const [recognizedNumber, setRecognizedNumber] = useState('');
   const [recognizedTara, setRecognizedTara] = useState('');
-  const [ocrConfidence, setOcrConfidence] = useState(0);
+  const [, setOcrConfidence] = useState(0);
 
   // ── Desempate quando container existe em múltiplos bookings
   const [multipleBookingsList, setMultipleBookingsList] = useState([]);
@@ -417,8 +437,9 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      // Entrega as edições já digitadas antes de limpar o debounce.
+      flushEditsRef.current?.();
       // Limpar todos os timers ao desmontar
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
@@ -427,6 +448,19 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   // Ref para evitar stale closure no auto-save
   const selectedBookingRef = useRef(selectedBooking);
   useEffect(() => { selectedBookingRef.current = selectedBooking; }, [selectedBooking]);
+
+  // Atualiza somente fotos em tempo real; preserva os campos em digitação.
+  useEffect(() => {
+    if(!selectedBooking?.id)return;
+    return db.subscribeBooking(selectedBooking.id, remote => {
+      if(!remote)return;
+      const remoteContainers=new Map((remote.containers || []).map(c=>[c.id,c]));
+      setSelectedBooking(prev => prev?.id===remote.id ? {...prev,_revision:remote._revision,
+        containers:prev.containers.map(c=>remoteContainers.has(c.id) ? {...c,photos:remoteContainers.get(c.id).photos || [],deletedPhotoIds:remoteContainers.get(c.id).deletedPhotoIds || []} : c)} : prev);
+      setSelectedContainer(prev => prev && remoteContainers.has(prev.id) ? {...prev,
+        photos:remoteContainers.get(prev.id).photos || [],deletedPhotoIds:remoteContainers.get(prev.id).deletedPhotoIds || []} : prev);
+    }, error=>console.error('Atualização das fotos:',error));
+  },[selectedBooking?.id]);
 
   // CSS keyframe para spinner (injetado uma vez)
   useEffect(() => {
@@ -437,63 +471,53 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     document.head.appendChild(style);
   }, []);
 
-  // ── Função de auto-save
-  const autoSave = useCallback(async (booking, container) => {
-    if (!booking || !container) return;
-    if (!isMountedRef.current) return; // Guard: não atualiza se desmontado
+  // Apenas os campos editados entram na transação. Edições em containers distintos não se substituem.
+  const scheduleEdit = useCallback((bookingId, containerId, field, value, previous) => {
+    const key = JSON.stringify([bookingId,containerId,field]);
+    const old = pendingEditsRef.current.get(key);
+    pendingEditsRef.current.set(key,{bookingId,containerId,field,value,previous:old ? old.previous : previous});
+    if(debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     setSaveStatus('saving');
-    try {
-      const updatedContainers = (booking.containers || []).map(c =>
-        c.id === container.id ? container : c
-      );
-      const updatedBooking = { ...booking, containers: updatedContainers };
-      await db.saveBooking(updatedBooking);
+    flushEditsRef.current = () => {
+      if(debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      const edits = [...pendingEditsRef.current.values()];
+      pendingEditsRef.current.clear();
+      void serializeEdit(async () => {
+        let hadError = false;
+        for(const edit of edits) {
+          const changes = {[edit.field]:edit.value};
+          const expected = {[edit.field]:edit.previous};
+          try {
+            const saved = edit.containerId
+              ? await db.patchBookingContainer(edit.bookingId,edit.containerId,changes,expected)
+              : await db.patchBookingFields(edit.bookingId,changes,expected);
+            if(isMountedRef.current) setSelectedBooking(prev => prev?.id===saved.id ? saved : prev);
+          } catch(error) {
+            if(isMountedRef.current) {setSaveStatus('idle');showToast(error.message+' Esta alteração não foi confirmada.');}
+            hadError = true;
+            console.error('Campo não confirmado:',error);
+          }
+        }
+        if(isMountedRef.current) setSaveStatus(hadError ? 'idle' : 'saved');
+      }).catch(error => console.error('Salvamento por campo:',error));
+    };
+    debounceTimerRef.current = setTimeout(()=>flushEditsRef.current?.(),800);
+  },[serializeEdit,showToast]);
 
-      // Guard pós-await: verifica novamente pois o usuário pode ter navegado
-      if (!isMountedRef.current) return;
+  const updateContField = useCallback((field,value) => {
+    if(!selectedContainer || !selectedBookingRef.current)return;
+    scheduleEdit(selectedBookingRef.current.id,selectedContainer.id,field,value,selectedContainer[field]);
+    setSelectedContainer(prev=>({...prev,[field]:value}));
+  },[selectedContainer,scheduleEdit]);
 
-      setSelectedBooking(updatedBooking);
-      selectedBookingRef.current = updatedBooking;
-      setSaveStatus('saved');
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current) setSaveStatus('idle');
-      }, 1800);
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      setSaveStatus('idle');
-      showToast((err.message || 'Erro ao salvar.') + ' Reabra o Booking para carregar os dados atuais; esta edição não foi salva.');
-      console.error('Auto-save error:', err);
-    }
-  }, [showToast]);
-
-  // ── Auto-save com debounce (para campos de texto)
-  const debouncedSave = useCallback((booking, container) => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      autoSave(booking, container);
-    }, 800);
-  }, [autoSave]);
-
-  // ── Atualizar campo do container + auto-save com debounce
-  const updateContField = useCallback((field, value) => {
-    setSelectedContainer(prev => {
-      const updated = { ...prev, [field]: value };
-      debouncedSave(selectedBookingRef.current, updated);
-      return updated;
-    });
-  }, [debouncedSave]);
-
-  // ── Atualizar status/pendência do booking + auto-save
-  const updateBookingField = useCallback((field, value) => {
-    setSelectedBooking(prev => {
-      const updated = { ...prev, [field]: value };
-      selectedBookingRef.current = updated;
-      // Salva o booking inteiro (com o container atual já sincronizado)
-      debouncedSave(updated, selectedContainer);
-      return updated;
-    });
-  }, [debouncedSave, selectedContainer]);
+  const updateBookingField = useCallback((field,value) => {
+    const previous=selectedBookingRef.current;
+    if(!previous)return;
+    scheduleEdit(previous.id,null,field,value,previous[field]);
+    const updated={...previous,[field]:value};
+    selectedBookingRef.current=updated;
+    setSelectedBooking(updated);
+  },[scheduleEdit]);
 
   // ── Filtro de bookings com busca universal e inteligente
   const filteredBookings = bookings.filter(b => 
@@ -525,19 +549,18 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       const photoMap = {};
       photos.forEach(p => { photoMap[p.id] = p; });
 
-      const mergedPhotos = (c.photos || []).map(ref => ({
-        ...ref,
-        url: photoMap[ref.id]?.url || ref.url || null,
-        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null
-      }));
+
 
       if (isMountedRef.current) {
-        setSelectedContainer(prev => ({ ...prev, photos: mergedPhotos }));
+        setSelectedContainer(prev => prev?.id !== c.id ? prev : ({...prev, photos:(prev.photos || []).map(ref => ({
+          ...ref, url:photoMap[ref.id]?.url || ref.url || null,
+          storagePath:photoMap[ref.id]?.storagePath || ref.storagePath || null
+        }))}));
       }
     } catch (err) {
       console.warn('Não foi possível carregar fotos do container:', err);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Navegação: voltar para lista de Bookings
   const goToList = useCallback(() => {
@@ -580,75 +603,31 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     }
   }, [screen, selectedBooking, selectedContainer, goToBooking]);
 
-  // ── Upload de fotos — salva no Firebase Storage via db.uploadPhoto
+  // Guarda no IndexedDB antes de devolver o controle. A rede trabalha em segundo plano.
   const handlePhotoUpload = async e => {
-    const files = Array.from(e.target.files || []);
-    // Reset input antes de processar (permite re-seleção do mesmo arquivo)
-    e.target.value = '';
-
-    if (!files.length || !selectedContainer) return;
-
+    const files=Array.from(e.target.files || []);
+    e.target.value='';
+    const bookingId=selectedBookingRef.current?.id;
+    const containerId=selectedContainer?.id;
+    if(!files.length || !bookingId || !containerId)return;
     setUploadingPhotos(true);
-    setSaveStatus('saving');
-
     try {
-      const containerId = selectedContainer.id;
-
-      // Faz upload de cada arquivo sequencialmente (evita sobrecarga de memória)
-      const newPhotoRefs = [];
-      for (const f of files) {
-        // db.uploadPhoto comprime + envia para Firebase Storage
-        // Retorna { id, name, url } — url é a URL pública do Storage
-        const result = await db.uploadPhoto(f, containerId);
-        if (!isMountedRef.current) return;
-        // Inclui url, storagePath e metadados de compressão para exibição e controle
-        newPhotoRefs.push({
-          id: result.id,
-          name: result.name,
-          url: result.url,
-          storagePath: result.storagePath,
-          width: result.width,
-          height: result.height,
-          sizeBytes: result.sizeBytes,
-          compressionVersion: result.compressionVersion
-        });
-      }
-
-      // Captura referências estáveis (evita closure stale)
-      const currentContainer = selectedContainer;
-      const currentBooking   = selectedBookingRef.current;
-
-      // Salva as referências (id, name, url) no booking
-      const updatedContainer = {
-        ...currentContainer,
-        photos: [...(currentContainer.photos || []), ...newPhotoRefs]
-      };
-
-      setSelectedContainer(updatedContainer);
-      await autoSave(currentBooking, updatedContainer);
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      setSaveStatus('idle');
-      const msg = err?.message || 'Erro ao enviar foto.';
-      showToast(msg);
-      console.error('Photo upload error:', err);
-    } finally {
-      if (isMountedRef.current) setUploadingPhotos(false);
-    }
+      await enqueueBookingPhotos(bookingId,containerId,files);
+      if(isMountedRef.current)showToast('Fotos guardadas no aparelho. Você já pode continuar fotografando.');
+    }catch(error){if(isMountedRef.current)showToast(error.message+' Selecione as fotos novamente.');}
+    finally{if(isMountedRef.current)setUploadingPhotos(false);}
   };
 
   const handleDeletePhoto = async id => {
-    if (!isMountedRef.current) return;
-    // Pega o storagePath da foto atual para passar ao deletePhoto
-    const photo = (selectedContainer?.photos || []).find(p => p.id === id);
-    // Remove do Firestore e do Firebase Storage
-    db.deletePhoto(id, photo?.storagePath || null).catch(err => console.warn('deletePhoto error:', err));
-    // Remove da lista de referências no container e salva
-    setSelectedContainer(prev => {
-      const updated = { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) };
-      autoSave(selectedBookingRef.current, updated);
-      return updated;
-    });
+    const bookingId=selectedBookingRef.current?.id;
+    const containerId=selectedContainer?.id;
+    const photo=(selectedContainer?.photos || []).find(p=>p.id===id);
+    if(!bookingId || !containerId)return;
+    try {
+      await serializeEdit(()=>db.removeBookingPhoto(bookingId,containerId,id));
+      if(isMountedRef.current)setSelectedContainer(prev=>prev?.id===containerId ? {...prev,photos:prev.photos.filter(p=>p.id!==id)} : prev);
+      await db.deletePhoto(id,photo?.storagePath || null);
+    }catch(error){if(isMountedRef.current)showToast('Não foi possível concluir a exclusão: '+error.message);}
   };
 
   const handleAddSeal = () => {
@@ -698,53 +677,15 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     }
   };
 
-  const associatePhotoAndOpenBooking = async (targetBooking, targetContainer, photoFile) => {
+  const associatePhotoAndOpenBooking = async (targetBooking,targetContainer,photoFile) => {
     try {
-      showToast('Salvando foto no container...');
-      let photoRef = null;
-
-      if (navigator.onLine) {
-        try {
-          const uploadRes = await db.uploadPhoto(photoFile, targetContainer.id);
-          photoRef = { id: uploadRes.id, name: uploadRes.name || '', url: uploadRes.url };
-        } catch (uploadErr) {
-          console.warn('Falha no upload online da foto, gerando registro local:', uploadErr);
-        }
-      }
-
-      if (!photoRef) {
-        // Modo offline ou fallback: salva foto no armazenamento local seguro (fieldQueue)
-        const photoId = generateUUID();
-        await fieldQueue.savePhoto(photoId, photoFile);
-        const localUrl = URL.createObjectURL(photoFile);
-        photoRef = { id: photoId, name: 'Foto Identificação', url: localUrl };
-      }
-
-      // Adiciona a foto preservando todas as fotos existentes do container
-      const updatedContainers = (targetBooking.containers || []).map(c => {
-        if (c.id === targetContainer.id) {
-          const currentPhotos = c.photos || [];
-          return {
-            ...c,
-            photos: [...currentPhotos, photoRef]
-          };
-        }
-        return c;
-      });
-
-      const updatedBooking = { ...targetBooking, containers: updatedContainers };
-      await db.saveBooking(updatedBooking);
-
-      // Abre o booking completo e destaca o container fotografado
-      setSelectedBooking(updatedBooking);
+      await enqueueBookingPhotos(targetBooking.id,targetContainer.id,[photoFile]);
+      setSelectedBooking(targetBooking);
+      selectedBookingRef.current=targetBooking;
       setHighlightedContainerId(targetContainer.id);
-      setScreen('booking');
-      setActiveTab('booking');
-      showToast(`✓ Foto salva no container ${targetContainer.containerNumber} do Booking ${targetBooking.bookingNumber}!`);
-    } catch (err) {
-      console.error('Erro ao associar foto ao container do booking:', err);
-      showToast('Erro ao salvar foto no booking. Tente novamente.');
-    }
+      setScreen('booking');setActiveTab('booking');
+      showToast('Foto guardada no aparelho e adicionada à fila deste container.');
+    }catch(error){showToast('Não foi possível guardar a foto: '+error.message);}
   };
 
   const handleConfirmAndSearchBooking = async () => {
@@ -1515,6 +1456,14 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         hasContainer={!!selectedContainer}
       />
 
+      {photoJobs.length > 0 && (
+        <div role="status" style={{position:'fixed',bottom:'calc(70px + env(safe-area-inset-bottom, 0px))',left:12,right:12,zIndex:1500,padding:10,borderRadius:10,background:'var(--bg-secondary)',border:'1px solid var(--border-color)',fontSize:12}}>
+          <strong>{photoJobs.length} foto(s) aguardando confirmação</strong>
+          <div>Você pode continuar trabalhando. {photoJobs.filter(j=>j.error).length} com nova tentativa pendente.</div>
+          {photoJobs.some(j=>j.error) && <div>{photoJobs.find(j=>j.error).error}</div>}
+          <button onClick={()=>retryBookingPhotos().catch(e=>showToast(e.message))}>Tentar envio agora</button>
+        </div>
+      )}
       {/* Toast de erro — não-bloqueante, substitui alert() */}
       {toastError && (
         <div

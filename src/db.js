@@ -1,10 +1,11 @@
+import { createConcurrentRepository } from './utils/bookingConcurrent.js';
 import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
 import { removeFieldPhotoMetadata } from './utils/fieldService';
 import { compressImage } from './utils/imageCompression';
 import { useState, useEffect } from 'react';
 import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // Coleções
 const LOCALS_COL       = 'locais';
@@ -67,7 +68,17 @@ const bookingRepository = createBookingRepository({
   now: () => Date.now()
 });
 
+const concurrent = createConcurrentRepository({
+  reference: (col, id) => doc(dbFirestore, col, id),
+  transaction: callback => runTransaction(dbFirestore, callback)
+});
+
 export const db = {
+  subscribeBooking: (id, next, error) => onSnapshot(doc(dbFirestore, BOOKINGS_COL, id), snap => next(snap.exists() ? {...snap.data(),id:snap.id} : null), error),
+  patchBookingContainer: concurrent.patchContainer,
+  patchBookingFields: concurrent.patchBooking,
+  appendBookingPhoto: concurrent.appendPhoto,
+  removeBookingPhoto: concurrent.removePhoto,
   async init() {
     await initializeCollectionIfEmpty(LOCALS_COL, defaultLocais);
     await initializeCollectionIfEmpty(EXPORTERS_COL, defaultExportadores);
@@ -199,12 +210,13 @@ export const db = {
    * @param {string} containerId - ID do container ao qual a foto pertence
    * @returns {Promise<{id: string, name: string, url: string}>}
    */
-  async uploadPhoto(file, containerId = '') {
+  async uploadPhoto(file, containerId = '', options = {}) {
     // 1. Comprime a imagem localmente com a regra padronizada (<= 45.000 bytes, adaptativo)
-    const compressed = await compressImage(file);
+    const compressed = await compressImage(file, { includeDataUrl: false });
+    if (!compressed.blob?.size) throw new Error('Não foi possível preparar esta foto; a captura continua no aparelho.');
 
     // 2. ID único para a foto
-    const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const photoId = options.photoId || 'photo_' + crypto.randomUUID();
 
     // 3. Blob comprimido pronto para upload direto sem conversões redundantes
     const blob = compressed.blob;
@@ -213,7 +225,18 @@ export const db = {
     //    Path: containers/{containerId}/{photoId}.jpg
     const storagePath = `containers/${containerId || 'uncategorized'}/${photoId}.jpg`;
     const storageRef  = ref(storage, storagePath);
-    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+    const task = uploadBytesResumable(storageRef, blob, { contentType: blob.type || 'image/jpeg' });
+    await new Promise((resolve, reject) => {
+      let timer;
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => {
+        task.cancel(); reject(new Error('Envio sem progresso. A foto permanece na fila para nova tentativa.'));
+      }, 60000); };
+      arm();
+      let transferred = -1;
+      task.on('state_changed', snapshot => {
+        if (snapshot.bytesTransferred > transferred) { transferred = snapshot.bytesTransferred; arm(); }
+      }, error => { clearTimeout(timer); reject(error); }, () => { clearTimeout(timer); resolve(); });
+    });
 
     // 5. Obtém a URL pública permanente do Storage
     const downloadUrl = await getDownloadURL(storageRef);

@@ -268,7 +268,7 @@ export async function compressImage(fileOrBlob, options = {}) {
     });
 
     // 5. Gera dataURL para visualização imediata se necessário
-    const dataUrl = await blobToDataUrl(compression.blob);
+    const dataUrl = options.includeDataUrl === false ? '' : await blobToDataUrl(compression.blob);
 
     return {
       blob: compression.blob,

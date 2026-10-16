@@ -1,3 +1,4 @@
+import {startBookingPhotoQueue} from './utils/bookingPhotoQueue.js';
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -10,7 +11,7 @@ registerSW({
   immediate: true,
   onNeedRefresh() {
     console.log("Novo conteúdo disponível, atualizando cache...");
-    window.location.reload();
+    console.info('Atualização disponível. Será aplicada ao reabrir o aplicativo; as capturas continuam na fila.');
   }
 });
 
@@ -22,12 +23,14 @@ if ('serviceWorker' in navigator) {
     }
   });
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    window.location.reload();
+    console.info('Atualização disponível. Será aplicada ao reabrir o aplicativo; as capturas continuam na fila.');
   });
 }
 
 // Inicializar banco de dados se necessário (cria coleções padrão se vazias)
 db.init().catch(err => console.error("Database initialization failed:", err));
+
+startBookingPhotoQueue();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
