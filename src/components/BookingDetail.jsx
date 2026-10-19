@@ -26,7 +26,7 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
   const [showAddContainerModal, setShowAddContainerModal] = useState(false);
   const [newContainerData, setNewContainerData] = useState({
     containerNumber: '',
-    containerType: "20' Dry",
+    containerType: '20"/DV',
     status: 'Pendente'
   });
 
@@ -94,7 +94,7 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
     // Reseta form e fecha modal
     setNewContainerData({
       containerNumber: '',
-      containerType: "20' Dry",
+      containerType: '20"/DV',
       status: 'Pendente'
     });
     setShowAddContainerModal(false);
@@ -679,10 +679,14 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
                   value={newContainerData.containerType}
                   onChange={e => setNewContainerData({ ...newContainerData, containerType: e.target.value })}
                 >
+                  <option value='20"/DV'>20"/DV</option>
+                  <option value='20"22G1'>20"22G1</option>
+                  <option value='40"/HC'>40"/HC</option>
+                  <option value='40"45G1'>40"45G1</option>
+                  <option value="40' Reefer">40' Reefer</option>
                   <option value="20' Dry">20' Dry</option>
                   <option value="40' Dry">40' Dry</option>
                   <option value="40' HC">40' HC</option>
-                  <option value="40' Reefer">40' Reefer</option>
                 </select>
               </div>
 

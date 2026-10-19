@@ -33,7 +33,17 @@ async function localTransaction(stores, mode, callback) {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     let result;
-    const tx = database.transaction(stores, mode, mode === 'readwrite' ? { durability: 'strict' } : undefined);
+    let tx;
+    try {
+      tx = database.transaction(stores, mode, mode === 'readwrite' ? { durability: 'strict' } : undefined);
+    } catch {
+      try {
+        tx = database.transaction(stores, mode);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+    }
     tx.oncomplete = () => resolve(result);
     tx.onabort = () => reject(tx.error || new Error('Não foi possível salvar no aparelho. Verifique o espaço disponível.'));
     tx.onerror = () => {}; // onabort is the single rejection path

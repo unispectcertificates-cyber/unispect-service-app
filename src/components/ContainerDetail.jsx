@@ -222,10 +222,17 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
             style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
           >
             <option value="">Selecione...</option>
+            <option value='20"/DV'>20"/DV</option>
+            <option value='20"22G1'>20"22G1</option>
+            <option value='40"/HC'>40"/HC</option>
+            <option value='40"45G1'>40"45G1</option>
+            <option value="40' Reefer">40' Reefer</option>
             <option value="20' Dry">20' Dry</option>
             <option value="40' Dry">40' Dry</option>
             <option value="40' HC">40' HC</option>
-            <option value="40' Reefer">40' Reefer</option>
+            {localContainer.containerType && !['20"/DV', '20"22G1', '40"/HC', '40"45G1', "40' Reefer", "20' Dry", "40' Dry", "40' HC"].includes(localContainer.containerType) && (
+              <option value={localContainer.containerType}>{localContainer.containerType}</option>
+            )}
           </select>
         </div>
 

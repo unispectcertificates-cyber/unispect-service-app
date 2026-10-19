@@ -1187,6 +1187,36 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
               );
             })}
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFieldCaptureInitial({
+                number: '',
+                tara: ''
+              });
+              setScreen('list');
+            }}
+            style={{
+              marginTop: '14px',
+              padding: '12px 16px',
+              borderRadius: '10px',
+              border: '1px dashed var(--color-brand)',
+              backgroundColor: 'rgba(230, 185, 65, 0.08)',
+              color: 'var(--color-brand)',
+              fontWeight: '800',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              cursor: 'pointer',
+              width: '100%'
+            }}
+          >
+            <Package size={17} />
+            <span>+ Inserir novo container</span>
+          </button>
         </div>
       </div>
     );
@@ -1630,6 +1660,32 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
               <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
               <span>{isRefreshing ? '...' : 'Atualizar'}</span>
             </button>
+            {onLogout && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Deseja realmente sair da sua conta?')) {
+                    onLogout();
+                  }
+                }}
+                title="Sair do Sistema"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '8px',
+                  padding: '6px 10px',
+                  color: '#ef4444',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                <LogOut size={13} />
+                <span>Sair</span>
+              </button>
+            )}
           </div>
         </header>
       )}

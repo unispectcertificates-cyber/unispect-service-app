@@ -2,6 +2,7 @@ import { createConcurrentRepository } from './utils/bookingConcurrent.js';
 import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
 import { removeFieldPhotoMetadata } from './utils/fieldService';
 import { compressImage } from './utils/imageCompression';
+import { generateUUID } from './utils/uuid';
 import { useState, useEffect } from 'react';
 import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
@@ -216,7 +217,7 @@ export const db = {
     if (!compressed.blob?.size) throw new Error('Não foi possível preparar esta foto; a captura continua no aparelho.');
 
     // 2. ID único para a foto
-    const photoId = options.photoId || 'photo_' + crypto.randomUUID();
+    const photoId = options.photoId || 'photo_' + generateUUID();
 
     // 3. Blob comprimido pronto para upload direto sem conversões redundantes
     const blob = compressed.blob;

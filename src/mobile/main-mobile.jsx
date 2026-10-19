@@ -5,27 +5,36 @@ import MobileAppView from '../components/MobileAppView';
 import Login from '../components/Login';
 import { db } from '../db';
 import { registerSW } from 'virtual:pwa-register';
+import { startBookingPhotoQueue } from '../utils/bookingPhotoQueue.js';
 
+let isReloading = false;
 registerSW({ 
   immediate: true,
   onNeedRefresh() {
-    window.location.reload();
+    if (!isReloading) {
+      isReloading = true;
+      window.location.reload();
+    }
   }
 });
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
     for (let registration of registrations) {
-      registration.update();
+      registration.update().catch(() => {});
     }
-  });
+  }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    window.location.reload();
+    if (!isReloading) {
+      isReloading = true;
+      window.location.reload();
+    }
   });
 }
 
 // Inicializar banco
 db.init().catch(err => console.error('DB init error:', err));
+startBookingPhotoQueue();
 
 function MobileRoot() {
   const [user, setUser] = useState(db.getUser());

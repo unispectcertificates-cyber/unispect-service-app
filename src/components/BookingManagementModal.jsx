@@ -61,7 +61,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   // Form de Novo Container
   const [newContainer, setNewContainer] = useState({
     containerNumber: '',
-    containerType: "40' Reefer (Refrigerado)",
+    containerType: '40"/HC',
     status: 'Pendente',
     provisional1: '',
     provisional2: '',
@@ -284,7 +284,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     // Reset Form
     setNewContainer({
       containerNumber: '',
-      containerType: "40' Reefer (Refrigerado)",
+      containerType: '40"/HC',
       status: 'Pendente',
       provisional1: '',
       provisional2: '',
@@ -1350,10 +1350,14 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                 value={newContainer.containerType}
                 onChange={e => setNewContainer({ ...newContainer, containerType: e.target.value })}
               >
+                <option value='20"/DV'>20"/DV</option>
+                <option value='20"22G1'>20"22G1</option>
+                <option value='40"/HC'>40"/HC</option>
+                <option value='40"45G1'>40"45G1</option>
+                <option value="40' Reefer (Refrigerado)">40' Reefer (Refrigerado)</option>
                 <option value="20' Dry Van (Carga Seca)">20' Dry Van (Carga Seca)</option>
                 <option value="40' Dry Van (Carga Seca)">40' Dry Van (Carga Seca)</option>
                 <option value="40' HC (High Cube)">40' HC (High Cube)</option>
-                <option value="40' Reefer (Refrigerado)">40' Reefer (Refrigerado)</option>
               </select>
             </div>
 

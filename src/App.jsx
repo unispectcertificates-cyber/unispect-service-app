@@ -2,7 +2,7 @@ import { findBooking, planImport, previewToken, normalizeContainerNumber, import
 import { parseRomaneioPdf } from './utils/pdfParser';
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus } from 'lucide-react';
+import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, LogOut } from 'lucide-react';
 import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
 import { subscribePendingFieldContainers } from './utils/fieldService';
 import BookingManagementModal from './components/BookingManagementModal';
@@ -523,32 +523,61 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: isOnline ? '#10b981' : '#ef4444'
-              }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span
+                title={isOnline ? 'Online' : 'Offline'}
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: isOnline ? '#10b981' : '#ef4444',
+                  flexShrink: 0
+                }}
+              />
               <button
                 onClick={handleSystemRefresh}
                 disabled={isRefreshing}
+                title="Sincronizar e atualizar"
                 style={{
                   background: 'rgba(255,255,255,0.05)',
                   border: '1px solid rgba(255,255,255,0.1)',
                   borderRadius: '6px',
-                  padding: '4px 10px',
+                  padding: '6px 8px',
                   color: '#fff',
                   fontSize: '11px',
                   fontWeight: '700',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '5px',
+                  gap: '4px',
+                  cursor: isRefreshing ? 'wait' : 'pointer'
+                }}
+              >
+                <RefreshCw size={13} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
+              </button>
+
+              <button
+                onClick={() => {
+                  if (window.confirm('Deseja realmente sair da sua conta?')) {
+                    handleLogout();
+                  }
+                }}
+                title="Sair do Sistema"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  color: '#ef4444',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
                   cursor: 'pointer'
                 }}
               >
-                <RefreshCw size={12} className={isRefreshing ? "spin" : ""} style={{ color: 'var(--color-brand)' }} />
-                <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
+                <LogOut size={13} />
+                <span>Sair</span>
               </button>
             </div>
           </header>

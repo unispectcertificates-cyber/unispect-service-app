@@ -12,6 +12,224 @@ export const parseBrazilianOrStandardFloat = (str) => {
   return parseFloat(clean) || 0;
 };
 
+export function normalizeContainerType(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim().toUpperCase();
+
+  // 1. Verificação ISO / Códigos específicos (22G1, 45G1, 42G1)
+  if (s.includes('22G1') || s.includes('20"22G1') || s.includes('20/22G1')) {
+    return '20"22G1';
+  }
+  if (s.includes('45G1') || s.includes('40"45G1') || s.includes('40/45G1')) {
+    return '40"45G1';
+  }
+
+  // 2. 20 pés (DV / Dry / GP)
+  if (
+    s.includes('20"/DV') ||
+    s.includes('20/DV') ||
+    s.includes('20"DV') ||
+    s.includes('20 DV') ||
+    s.includes('20\' DV') ||
+    (s.includes('20') && (s.includes('DV') || s.includes('DRY') || s.includes('GP') || s.includes('VAN')))
+  ) {
+    return '20"/DV';
+  }
+
+  // 3. 40 pés High Cube (HC / High Cube)
+  if (
+    s.includes('40"/HC') ||
+    s.includes('40/HC') ||
+    s.includes('40"HC') ||
+    s.includes('40 HC') ||
+    s.includes('40\' HC') ||
+    (s.includes('40') && (s.includes('HC') || s.includes('HIGH') || s.includes('CUBE')))
+  ) {
+    return '40"/HC';
+  }
+
+  // 4. Reefer
+  if (s.includes('REEFER') || s.includes('REFRIGERADO')) {
+    return "40' Reefer";
+  }
+
+  // 5. 20 geral
+  if (s.includes('20') || s.startsWith('20')) {
+    return '20"/DV';
+  }
+
+  // 6. 40 geral
+  if (s.includes('40') || s.startsWith('40')) {
+    return '40"/HC';
+  }
+
+  return raw.trim();
+}
+
+export function extractContainersFromText(fullText, defaultContainerType = '40"/HC') {
+  const containerRegexGlobal = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
+  const containerMatches = [];
+  let match;
+  while ((match = containerRegexGlobal.exec(fullText)) !== null) {
+    const rawNum = match[1].trim().toUpperCase().replace(/[-\s]/g, '');
+    if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
+
+    if (!containerMatches.some(m => m.number === rawNum && Math.abs(m.index - match.index) < 5)) {
+      containerMatches.push({
+        number: rawNum,
+        index: match.index,
+        length: match[0].length
+      });
+    }
+  }
+
+  let defaultType = defaultContainerType || '40"/HC';
+  const globalTypeMatch = fullText.match(/(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:40"45G1|20"22G1|45G1|22G1)\b/i);
+  if (globalTypeMatch) {
+    defaultType = normalizeContainerType(globalTypeMatch[0]) || defaultType;
+  }
+
+  const parsedContainers = [];
+  const typePattern = /(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:40"45G1|20"22G1|45G1|22G1|42G1)\b/i;
+
+  for (let i = 0; i < containerMatches.length; i++) {
+    const current = containerMatches[i];
+    const next = containerMatches[i + 1];
+
+    const startIndex = current.index;
+    let endIndex = next ? next.index : fullText.length;
+
+    if (!next) {
+      const stopMatch = fullText.substring(startIndex).match(/\n\s*(?:Totais|Observaç[ãa]o|Observacao|Faturamento):/i);
+      if (stopMatch) {
+        endIndex = startIndex + stopMatch.index;
+      }
+    }
+
+    const segment = fullText.substring(startIndex, endIndex);
+
+    // 1. Tipo de Container
+    let containerType = defaultType;
+    const typeMatch = segment.match(typePattern);
+    if (typeMatch) {
+      containerType = normalizeContainerType(typeMatch[0]);
+    }
+
+    // 2. Definite Seal e Provisional Seals
+    let definiteSeal = '';
+    const provSeals = [];
+    const sealRegex = /\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/gi;
+    let sMatch;
+    while ((sMatch = sealRegex.exec(segment)) !== null) {
+      const cand = sMatch[1].trim();
+      if (cand === current.number) continue;
+      if (/^(20"\/DV|40"\/HC|40"45G1|20"22G1|45G1|22G1|42G1|20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|TOTAIS)$/i.test(cand)) continue;
+      if (!definiteSeal) {
+        definiteSeal = cand;
+      } else if (!provSeals.some(p => (typeof p === 'string' ? p : p.sealNumber) === cand) && cand !== definiteSeal) {
+        provSeals.push({
+          id: 'seal_' + Date.now() + '_' + provSeals.length,
+          sealNumber: cand
+        });
+      }
+    }
+
+    // 3. Marca / Lote / OIC
+    let brand = '';
+    const oicMatch = segment.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
+    if (oicMatch) {
+      brand = oicMatch[1].trim();
+    } else {
+      const codeMatch = segment.match(/^\s*(0\d{3})\b/);
+      if (codeMatch) brand = codeMatch[1];
+    }
+
+    // 4. Tokens numéricos (tara, peso, sacas)
+    let tokensSection = segment;
+    if (typeMatch) {
+      const typeIdx = segment.indexOf(typeMatch[0]);
+      if (typeIdx !== -1) {
+        tokensSection = segment.substring(typeIdx + typeMatch[0].length);
+      }
+    }
+
+    const rawNumTokens = tokensSection.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
+    const parseVal = (str) => {
+      if (!str) return 0;
+      let s = str.trim();
+      if (s.includes(',')) {
+        s = s.replace(/\./g, '').replace(/,/g, '.');
+      } else if (/\.\d{3}$/.test(s)) {
+        s = s.replace(/\./g, '');
+      }
+      return parseFloat(s) || 0;
+    };
+
+    let rowBags = 0;
+    let netWeight = '';
+    let tara = '';
+    let grossWeight = '';
+
+    const weightTokens = rawNumTokens.filter(t => t !== current.number && !current.number.includes(t));
+    if (weightTokens.length >= 4) {
+      rowBags = parseInt(weightTokens[0].replace(/[.,]/g, ''), 10) || 0;
+      netWeight = weightTokens[1];
+      tara = weightTokens[2].replace(/[.,]/g, '');
+      grossWeight = weightTokens[3];
+    } else if (weightTokens.length >= 3) {
+      netWeight = weightTokens[0];
+      tara = weightTokens[1].replace(/[.,]/g, '');
+      grossWeight = weightTokens[2];
+    } else {
+      const taraCand = weightTokens.find(t => {
+        const v = parseVal(t);
+        return v >= 1800 && v <= 4900;
+      });
+      if (taraCand) {
+        tara = taraCand.replace(/[.,]/g, '');
+      }
+    }
+
+    if (!tara) {
+      const allTokens = (segment.match(/[0-9]+(?:[.,][0-9]+)*/g) || []).filter(t => t !== current.number && !current.number.includes(t));
+      const taraCand = allTokens.find(t => {
+        const v = parseVal(t);
+        return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight && t !== brand;
+      });
+      if (taraCand) tara = taraCand.replace(/[.,]/g, '');
+    }
+
+    parsedContainers.push({
+      id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      containerNumber: current.number,
+      containerType,
+      provisionalSeals: provSeals,
+      definiteSeal: definiteSeal || '',
+      fumigationDate: '',
+      fitoDate: '',
+      definiteSealDate: '',
+      notes: '',
+      photos: [],
+      bagsQuantity: rowBags,
+      netWeight: netWeight || '',
+      tara: tara || '',
+      grossWeight: grossWeight || '',
+      brand: brand || ''
+    });
+  }
+
+  const explicitType = parsedContainers.find(c => c.containerType && c.containerType !== '40"/HC')?.containerType;
+  if (explicitType) {
+    parsedContainers.forEach(c => {
+      if (!c.containerType || c.containerType === '40"/HC') {
+        c.containerType = explicitType;
+      }
+    });
+  }
+
+  return parsedContainers;
+}
+
 export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais = [] } = {}) {
   const getPdfLib = () => {
     if (typeof window !== 'undefined' && window.pdfjsLib) return window.pdfjsLib;
@@ -72,8 +290,9 @@ export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais
     }
   }
 
-  // Normalização de tipos de container (ex: 20" / DV, 40" / HC)
+  // Normalização de tipos de container (ex: 20" / DV, 40" / HC, 20" 22G1, 40" 45G1)
   fullText = fullText.replace(/\b(20|40)\s*["']?\s*[\s|]*\/\s*(DV|HC|Dry|Reefer|GP|HR)\b/gi, (match, p1, p2) => p1 + '"/' + p2);
+  fullText = fullText.replace(/\b(20|40)\s*["']?\s*[\s|]*(22G1|45G1|42G1)\b/gi, (match, p1, p2) => p1 + '"' + p2);
 
   const pendingReferences = [];
 
@@ -220,24 +439,18 @@ export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais
   }
 
   // 5. Container Type Padrão
-  let defaultContainerType = "40' HC";
+  let defaultContainerType = '40"/HC';
   let rawType = extractFieldWithStops(
     fullText,
     /(?:tipo\s*d[oe]\s*cntr|tipo\s*cntr|cntr\s*type|container\s*type|tipo)[.\s:]*([^\n\r]+)/i,
     stopKeywords
   );
   if (rawType) {
-    const typeStr = rawType.toUpperCase();
-    if (typeStr.includes('20') && (typeStr.includes('DRY') || typeStr.includes('DV'))) {
-      defaultContainerType = "20' Dry";
-    } else if (typeStr.includes('20')) {
-      defaultContainerType = "20' Dry";
-    } else if (typeStr.includes('40') && typeStr.includes('DRY')) {
-      defaultContainerType = "40' Dry";
-    } else if (typeStr.includes('40') && (typeStr.includes('HC') || typeStr.includes('HIGH') || typeStr.includes('45G1'))) {
-      defaultContainerType = "40' HC";
-    } else if (typeStr.includes('REEFER')) {
-      defaultContainerType = "40' Reefer";
+    defaultContainerType = normalizeContainerType(rawType) || '40"/HC';
+  } else {
+    const globalTypeMatch = fullText.match(/(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:40"45G1|20"22G1|45G1|22G1)\b/i);
+    if (globalTypeMatch) {
+      defaultContainerType = normalizeContainerType(globalTypeMatch[0]) || '40"/HC';
     }
   }
 
@@ -389,246 +602,7 @@ export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais
   }
 
   // 12. Containers
-  const containerRegexLine = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
-  const lines = fullText.split('\n');
-  const lineContainers = [];
-
-  for (const line of lines) {
-    let cMatch;
-    containerRegexLine.lastIndex = 0;
-    while ((cMatch = containerRegexLine.exec(line)) !== null) {
-      const rawNum = cMatch[1].trim().toUpperCase().replace(/[-\s]/g, '');
-      if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
-
-      const containerIdx = line.indexOf(cMatch[0]);
-      let subAfter = line.substring(containerIdx + cMatch[0].length).trim();
-
-      // Definite Seal
-      let definiteSeal = '';
-      const sealMatch = subAfter.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
-      if (sealMatch) {
-        const candidate = sealMatch[1].trim();
-        if (!/^(20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|45G1|22G1|42G1)$/i.test(candidate)) {
-          definiteSeal = candidate;
-          subAfter = subAfter.replace(sealMatch[0], ' ');
-        }
-      }
-
-      // Brand
-      let brand = '';
-      const oicMatch = subAfter.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
-      if (oicMatch) {
-        brand = oicMatch[1].trim();
-        subAfter = subAfter.replace(oicMatch[0], ' ');
-      } else {
-        const codeMatch = subAfter.match(/^\s*(0\d{3})\b/);
-        if (codeMatch) {
-          brand = codeMatch[1];
-          subAfter = subAfter.replace(codeMatch[0], ' ');
-        }
-      }
-
-      // Container Type
-      let containerType = defaultContainerType;
-      const typeMatch = subAfter.match(/(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:45G1|22G1|42G1)\b/i);
-      if (typeMatch) {
-        const rawT = typeMatch[0].toUpperCase();
-        if (rawT.includes('20') || rawT.includes('22G1') || rawT.includes('DV')) containerType = "20' Dry";
-        else if (rawT.includes('45G1') || rawT.includes('HC')) containerType = "40' HC";
-        else if (rawT.includes('REEFER')) containerType = "40' Reefer";
-        else if (rawT.includes('40')) containerType = "40' Dry";
-        subAfter = subAfter.replace(typeMatch[0], ' ');
-      }
-
-      // Tokens numéricos
-      const rawNumTokens = subAfter.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
-
-      const parseVal = (str) => {
-        if (!str) return 0;
-        let s = str.trim();
-        if (s.includes(',')) {
-          s = s.replace(/\./g, '').replace(/,/g, '.');
-        } else if (/\.\d{3}$/.test(s)) {
-          s = s.replace(/\./g, '');
-        }
-        return parseFloat(s) || 0;
-      };
-
-      let rowBags = 0;
-      let netWeight = '';
-      let tara = '';
-      let grossWeight = '';
-
-      let provisionalSeals = [];
-      if (rawNumTokens.length >= 4) {
-        const wTokens = rawNumTokens.slice(-4);
-        rowBags = parseInt(wTokens[0].replace(/[.,]/g, ''), 10) || 0;
-        netWeight = wTokens[1];
-        tara = wTokens[2].replace(/[.,]/g, '');
-        grossWeight = wTokens[3];
-
-        const extraTokens = rawNumTokens.slice(0, -4);
-        if (extraTokens.length > 0) {
-          provisionalSeals = extraTokens.map((s, idx) => ({
-            id: 'seal_' + Date.now() + '_' + idx,
-            sealNumber: s
-          }));
-        }
-      } else if (rawNumTokens.length === 3) {
-        const v0 = parseVal(rawNumTokens[0]);
-        const v1 = parseVal(rawNumTokens[1]);
-        const v2 = parseVal(rawNumTokens[2]);
-        if (v1 >= 1800 && v1 <= 4900 && v2 > v0) {
-          netWeight = rawNumTokens[0];
-          tara = rawNumTokens[1].replace(/[.,]/g, '');
-          grossWeight = rawNumTokens[2];
-        } else {
-          rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
-          netWeight = rawNumTokens[1];
-          grossWeight = rawNumTokens[2];
-        }
-      } else if (rawNumTokens.length === 2) {
-        netWeight = rawNumTokens[0];
-        grossWeight = rawNumTokens[1];
-      } else if (rawNumTokens.length === 1) {
-        const v0 = parseVal(rawNumTokens[0]);
-        if (v0 >= 1800 && v0 <= 4900) {
-          tara = rawNumTokens[0].replace(/[.,]/g, '');
-        } else if (v0 > 5000) {
-          netWeight = rawNumTokens[0];
-        } else {
-          rowBags = parseInt(rawNumTokens[0].replace(/[.,]/g, ''), 10) || 0;
-        }
-      }
-
-      if (!tara) {
-        const taraCand = rawNumTokens.find(t => {
-          const v = parseVal(t);
-          return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
-        });
-        if (taraCand) tara = taraCand.replace(/[.,]/g, '');
-      }
-
-      lineContainers.push({
-        id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        containerNumber: rawNum,
-        containerType: containerType,
-        provisionalSeals: provisionalSeals,
-        definiteSeal: definiteSeal || '',
-        fumigationDate: '',
-        fitoDate: '',
-        definiteSealDate: '',
-        notes: '',
-        photos: [],
-        bagsQuantity: rowBags,
-        netWeight: netWeight || '',
-        tara: tara || '',
-        grossWeight: grossWeight || '',
-        brand: brand || ''
-      });
-    }
-  }
-
-  let parsedContainers = [];
-  if (lineContainers.length > 0) {
-    parsedContainers = lineContainers;
-  } else {
-    // Fallback por segmentos
-    const containerRegexGlobal = /\b([A-Z]{4}[-\s]?\d{6}[-\s]?\d)\b/gi;
-    const containerMatches = [];
-    let match;
-    while ((match = containerRegexGlobal.exec(fullText)) !== null) {
-      const rawNum = match[1].trim().toUpperCase().replace(/[-\s]/g, '');
-      if (rawNum.startsWith('MLB') || rawNum.includes('MLBR')) continue;
-
-      containerMatches.push({
-        number: rawNum,
-        index: match.index,
-        length: match[0].length
-      });
-    }
-
-    for (let i = 0; i < containerMatches.length; i++) {
-      const currentMatch = containerMatches[i];
-      const nextMatch = containerMatches[i + 1];
-
-      const startIndex = currentMatch.index;
-      const endIndex = nextMatch ? nextMatch.index : fullText.length;
-      const segment = fullText.substring(startIndex, endIndex);
-
-      const containerNumber = currentMatch.number;
-
-      let definiteSeal = '';
-      const sealMatch = segment.match(/\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/i);
-      if (sealMatch && sealMatch[1] !== containerNumber) {
-        definiteSeal = sealMatch[1].trim();
-      }
-
-      let brand = '';
-      const oicMatch = segment.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
-      if (oicMatch) brand = oicMatch[1].trim();
-
-      const rawNumTokens = segment.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
-      const parseVal = (str) => {
-        if (!str) return 0;
-        let s = str.trim();
-        if (s.includes(',')) {
-          s = s.replace(/\./g, '').replace(/,/g, '.');
-        } else if (/\.\d{3}$/.test(s)) {
-          s = s.replace(/\./g, '');
-        }
-        return parseFloat(s) || 0;
-      };
-
-      let rowBags = 0;
-      let netWeight = '';
-      let tara = '';
-      let grossWeight = '';
-
-      const weightTokens = rawNumTokens.filter(t => t !== containerNumber && !containerNumber.includes(t));
-      let fallbackProvSeals = [];
-      if (weightTokens.length >= 4) {
-        const wTokens = weightTokens.slice(-4);
-        rowBags = parseInt(wTokens[0].replace(/[.,]/g, ''), 10) || 0;
-        netWeight = wTokens[1];
-        tara = wTokens[2].replace(/[.,]/g, '');
-        grossWeight = wTokens[3];
-        const extraTokens = weightTokens.slice(0, -4);
-        if (extraTokens.length > 0) {
-          fallbackProvSeals = extraTokens.map((s, idx) => ({
-            id: 'seal_' + Date.now() + '_' + idx,
-            sealNumber: s
-          }));
-        }
-      } else if (weightTokens.length >= 2) {
-        netWeight = weightTokens[0];
-        grossWeight = weightTokens[weightTokens.length - 1];
-        const taraCand = weightTokens.find(t => {
-          const v = parseVal(t);
-          return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight;
-        });
-        if (taraCand) tara = taraCand.replace(/[.,]/g, '');
-      }
-
-      parsedContainers.push({
-        id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        containerNumber,
-        containerType: defaultContainerType,
-        provisionalSeals: fallbackProvSeals,
-        definiteSeal: definiteSeal || '',
-        fumigationDate: '',
-        fitoDate: '',
-        definiteSealDate: '',
-        notes: '',
-        photos: [],
-        bagsQuantity: rowBags,
-        netWeight: netWeight || '',
-        tara: tara || '',
-        grossWeight: grossWeight || '',
-        brand: brand || ''
-      });
-    }
-  }
+  const parsedContainers = extractContainersFromText(fullText, defaultContainerType);
 
   let totalBagsNum = parseBrazilianOrStandardFloat(bagsQuantity);
   if ((!totalBagsNum || totalBagsNum === 0) && parsedContainers.length > 0) {

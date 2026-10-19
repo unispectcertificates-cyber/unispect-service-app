@@ -1,5 +1,15 @@
 import {db} from '../db';
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 // Fila separada: não altera o esquema nem os registros da fila de campo existente.
 let connection;
 const listeners = new Set();
@@ -57,7 +67,7 @@ export async function listBookingPhotoJobs() {
   const owner=photoQueueOwner();
   return transaction(['jobs'],'readonly',(tx,done)=>{
     const req=tx.objectStore('jobs').getAll();
-    req.onsuccess=()=>done(req.result.filter(j=>j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt).map(j=>({
+    req.onsuccess=()=>done((req.result || []).filter(j=>!owner || !j.owner || j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt).map(j=>({
       ...j,
       localUrl: localUrls.get(j.id) || null
     })));
@@ -66,9 +76,9 @@ export async function listBookingPhotoJobs() {
 
 export async function enqueueBookingPhotos(bookingId,containerId,files) {
   const owner=photoQueueOwner();
-  if (!owner || !bookingId || !containerId) throw new Error('Entre no sistema e selecione um container antes de fotografar.');
+  if (!bookingId || !containerId) throw new Error('Selecione um container antes de fotografar.');
   const jobs=Array.from(files).map(file=>{
-    const id='bookingphoto_'+crypto.randomUUID();
+    const id='bookingphoto_'+generateUUID();
     let localUrl = null;
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && file instanceof Blob) {
       try {

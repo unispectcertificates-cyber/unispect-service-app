@@ -172,14 +172,14 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
   const lookup = value => {
     setNumber(value.toUpperCase()); setError('');
     const key = normalizeContainerNumber(value);
-    if (!/^[A-Z]{4}\d{7}$/.test(key)) { setContext(null); setTara(''); setSealNumber(''); return; }
+    if (!/^[A-Z]{4}\d{7}$/.test(key)) { setContext(null); return; }
     const local = drafts.find(d => d.number === key);
     const remote = remoteRecords.find(record => record.id === key);
     let booked;
     try { booked = findFieldTarget(bookings, key); }
     catch (problem) { setError(problem.message); setContext(null); return; }
     if (local?.remoteStatus === 'linked' && !booked && !remote) {
-      setError('Este registro já foi vinculado a um Booking que não está ativo. Peça ao administrador para revisar antes de iniciar outra operação.'); setContext(null); return;
+      console.warn('Registro de container com status vinculado anteriormente:', key);
     }
     const container = remote?.container || booked?.container;
     const fields = remote ? {
@@ -189,7 +189,9 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
       tara: container.tara, sealType: container.definiteSeal ? 'definitive' : 'provisional',
       sealNumber: sealText(container.definiteSeal || container.provisionalSeals?.[0])
     } : {});
-    setTara(prev => fields.tara || prev || ''); setSealType(fields.sealType || 'definitive'); setSealNumber(fields.sealNumber || '');
+    if (fields.tara) setTara(fields.tara);
+    if (fields.sealType) setSealType(fields.sealType);
+    if (fields.sealNumber) setSealNumber(fields.sealNumber);
     setContext({ exists: Boolean(local || remote || booked), sourceContainerId: remote?.sourceContainerId || local?.sourceContainerId,
       photos: mergePhotos(container?.photos, local?.photos), status: booked ? 'linked' : 'pending',
       lockedTara: Boolean(fields.tara), lockedSeal: Boolean(fields.sealNumber), booking: booked?.booking });
@@ -247,13 +249,36 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
     event.preventDefault();
     if (savingRef.current) return;
     try {
-      if (!context) throw new Error('Confira o número completo do container antes de continuar.');
+      const key = normalizeContainerNumber(number);
+      if (!/^[A-Z]{4}\d{7}$/.test(key)) {
+        throw new Error('Informe o número completo do container: 4 letras e 7 números (ex: MSDU1234567).');
+      }
+      if (!newPhotos.length) {
+        throw new Error('Tire ou selecione pelo menos uma foto antes de salvar.');
+      }
       validateFieldCapture({ containerNumber: number, tara, sealType, sealNumber }, newPhotos.length);
+
+      let effectiveContext = context;
+      if (!effectiveContext) {
+        const local = drafts.find(d => d.number === key);
+        const remote = remoteRecords.find(record => record.id === key);
+        let booked;
+        try { booked = findFieldTarget(bookings, key); } catch {}
+        const container = remote?.container || booked?.container;
+        effectiveContext = {
+          exists: Boolean(local || remote || booked),
+          sourceContainerId: remote?.sourceContainerId || local?.sourceContainerId,
+          photos: mergePhotos(container?.photos, local?.photos),
+          status: booked ? 'linked' : 'pending',
+          booking: booked?.booking
+        };
+      }
+
       savingRef.current = true; setSaving(true); setError('');
       await fieldQueue.save({ containerNumber: number, tara, sealType, sealNumber }, newPhotos.map(p => p.file),
-        { id: user.id || '', name: user.name || '' }, context);
+        { id: user?.id || '', name: user?.name || user?.username || 'Inspetor' }, effectiveContext);
       // Return to the main screen immediately after local commit; uploads run independently.
-      releasePhotos(); setOpen(false); setMessage(`✓ ${normalizeContainerNumber(number)} salvo no aparelho. ${navigator.onLine ? 'Envio iniciado em segundo plano.' : 'Aguardando sinal para enviar automaticamente.'}`);
+      releasePhotos(); setOpen(false); setMessage(`✓ ${key} salvo no aparelho. ${navigator.onLine ? 'Envio iniciado em segundo plano.' : 'Aguardando sinal para enviar automaticamente.'}`);
       syncFieldNow();
     } catch (problem) { setError(problem.name === 'QuotaExceededError' ? 'O aparelho está sem espaço para salvar as fotos. A tela foi mantida aberta; libere espaço e tente novamente.' : problem.message || 'Não foi possível salvar no aparelho. As fotos continuam nesta tela.'); }
     finally { savingRef.current = false; setSaving(false); }
@@ -320,15 +345,15 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
       <form onSubmit={save} style={{ maxWidth: '700px', margin: '0 auto', display: 'grid', gap: '16px' }}>
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><h2 id="field-capture-title" style={{ fontSize: '20px' }}>Container sem Booking</h2><button type="button" aria-label="Voltar para a tela principal" disabled={saving} onClick={close} className="btn btn-secondary"><X /></button></header>
         <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0, display: 'grid', gap: '16px', minWidth: 0 }}>
-          <label>Número do container *<input autoFocus style={inputStyle} value={number} onChange={event => lookup(event.target.value)} disabled={newPhotos.length > 0} placeholder="ABCU1234567" autoCapitalize="characters" autoComplete="off" required /></label>
+          <label>Número do container *<input autoFocus style={inputStyle} value={number} onChange={event => lookup(event.target.value)} placeholder="ABCU1234567" autoCapitalize="characters" autoComplete="off" required /></label>
           {context?.exists && <p>Container já cadastrado. As novas fotos serão acrescentadas ao mesmo registro.{context.booking && ` Booking: ${context.booking.bookingNumber}.`}</p>}
           <label>Tara do container (kg) *<input style={inputStyle} value={tara} onChange={event => setTara(event.target.value)} inputMode="decimal" readOnly={context?.exists && context.lockedTara} required /></label>
           <label>Tipo de lacre *<select style={inputStyle} value={sealType} onChange={event => setSealType(event.target.value)} disabled={context?.exists && context.lockedSeal}><option value="definitive">Definitivo</option><option value="provisional">Provisório</option></select></label>
           <label>Número do lacre *<input style={inputStyle} value={sealNumber} onChange={event => setSealNumber(event.target.value)} readOnly={context?.exists && context.lockedSeal} autoCapitalize="characters" required /></label>
           {context?.photos.length > 0 && <div><strong>Fotos já cadastradas ({context.photos.length})</strong><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px', marginTop: '8px' }}>{context.photos.map((photo, idx) => <SavedPhoto key={photo.id || idx} photo={photo} containerNumber={number} index={idx} />)}</div></div>}
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-primary" style={buttonStyle} disabled={!context} onClick={() => camera.current.click()}><Camera /> Tirar foto</button>
-            <button type="button" className="btn btn-secondary" style={buttonStyle} disabled={!context} onClick={() => gallery.current.click()}><Image /> Galeria</button>
+            <button type="button" className="btn btn-primary" style={buttonStyle} onClick={() => camera.current.click()}><Camera /> Tirar foto</button>
+            <button type="button" className="btn btn-secondary" style={buttonStyle} onClick={() => gallery.current.click()}><Image /> Galeria</button>
             <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={addPhotos} />
             <input ref={gallery} type="file" accept="image/*" multiple hidden onChange={addPhotos} />
           </div>
@@ -337,7 +362,7 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
             <button type="button" aria-label="Remover esta foto antes de salvar" onClick={() => { URL.revokeObjectURL(photo.url); urls.current.delete(photo.url); setNewPhotos(previous => previous.filter(p => p.id !== photo.id)); }} style={{ position: 'absolute', right: '4px', top: '4px', padding: '6px', background: 'white', color: '#b91c1c', borderRadius: '6px' }}><X size={18} /></button>
           </div>)}</div>
           {error && <p role="alert" style={{ color: '#dc2626' }}>{error}</p>}
-          <button type="submit" className="btn btn-primary" style={{ ...buttonStyle, width: '100%', fontSize: '17px', background: '#059669' }} disabled={saving || !context || !newPhotos.length}><Save /> {saving ? 'Salvando no aparelho…' : `Salvar${newPhotos.length ? ` (${newPhotos.length} foto${newPhotos.length > 1 ? 's' : ''})` : ''}`}</button>
+          <button type="submit" className="btn btn-primary" style={{ ...buttonStyle, width: '100%', fontSize: '17px', background: '#059669', opacity: saving ? 0.7 : 1 }} disabled={saving}><Save /> {saving ? 'Salvando no aparelho…' : `Salvar${newPhotos.length ? ` (${newPhotos.length} foto${newPhotos.length > 1 ? 's' : ''})` : ''}`}</button>
           <p style={{ fontSize: '12px' }}>Ao salvar, você volta à tela principal. As fotos são enviadas automaticamente em segundo plano.</p>
 
           {context?.exists && !context.booking && (
