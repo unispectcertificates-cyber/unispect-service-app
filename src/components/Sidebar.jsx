@@ -263,7 +263,7 @@ export default function Sidebar({
               <span className={`sidebar-role-badge ${isAdm ? 'role-master' : 'role-user'}`}>
                 {getRoleLabel()}
               </span>
-              <span className="sidebar-version-tag">v2.2.0</span>
+              <span className="sidebar-version-tag">v2.2.1</span>
             </div>
           </div>
         </div>
