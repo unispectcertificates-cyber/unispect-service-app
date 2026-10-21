@@ -246,3 +246,73 @@ test('4. Push do Lacre Romaneio para Lacre Definitivo no Modelo 2: atualiza cont
   assert.equal(result.booking.containers[0].containerType, '40"45G1');
   assert.deepEqual(result.booking.containers[0].photos, [{ id: 'ph_cx', url: 'cx.jpg' }]);
 });
+
+test('5. Romaneio EBKG18397960: extrai lacres 005780 / 005947, não confunde com MSNU-209037-0 (209037) e atualiza container', async () => {
+  const romaneioMsnuText = `
+21/10/2026
+Romaneio
+Página: 1
+Booking...: EBKG18397960 Quantidade: 333 ALPHA BAGS
+Navio.....: LOG-IN DISCOVERY Mercadoria: CAFÉ - S84599.000
+Viagem....: 744S Marca.....: 002/1643/0640
+Importador: Armador...: MSC
+Exportador: ED E F MAN VOLCAFE BRASIL LTDA. Agente....: ** Não informado
+CNPJ Exportador: 33729690000335 Recinto...:
+Destino...: PUERTO MOIN - COSTA RICA
+Tipo Peso Peso
+N° Contêiner Lacres Cod.Lote/Marca Quant. Tara
+Cntr Carga Bruto
+1 MSNU-209037-0 005780 002/1643/0640 20"/DV 333 19.980,000 2.220 22.200,00
+* 005947
+Totais: 333 19.980,000 2.220 22.200,00
+*** LOTE HAVERÁ FITO - 22/10 ***
+INTERPORT LOGISTICA LTDA
+`;
+
+  const containers = extractContainersFromText(romaneioMsnuText);
+  assert.equal(containers.length, 1);
+  assert.equal(containers[0].containerNumber, 'MSNU2090370');
+  assert.equal(containers[0].containerType, '20"/DV');
+  assert.equal(containers[0].definiteSeal, '005780 / 005947');
+  assert.notEqual(containers[0].definiteSeal, '209037');
+  assert.equal(containers[0].definiteSeal.includes('209037'), false);
+  assert.equal(containers[0].bagsQuantity, 333);
+  assert.equal(containers[0].netWeight, '19.980,000');
+  assert.equal(containers[0].tara, '2220');
+  assert.equal(containers[0].grossWeight, '22.200,00');
+  assert.equal(containers[0].brand, '002/1643/0640');
+
+  // Teste de Push: mesmo se o container no banco tinha o lacre bugado '209037', deve atualizar para '005780 / 005947'
+  const existingContainers = [
+    {
+      id: 'c_msnu',
+      containerNumber: 'MSNU2090370',
+      definiteSeal: '209037', // lacre anterior incorreto
+      photos: [{ id: 'p1', url: 'photo1.jpg' }]
+    }
+  ];
+
+  const currentBooking = {
+    id: 'b_ebkg18397960',
+    bookingNumber: 'EBKG18397960',
+    containers: existingContainers,
+    _revision: 1
+  };
+
+  const { repo } = createMemoryRepo([currentBooking]);
+  const incoming = {
+    ...currentBooking,
+    containers
+  };
+
+  const plan = planImport(currentBooking, incoming.containers);
+  const result = await repo.importBooking(incoming, {
+    expectedPreview: previewToken(currentBooking, plan),
+    sourceName: 'romaneio_msnu.pdf'
+  });
+
+  assert.equal(result.updatedContainersCount, 1);
+  assert.equal(result.booking.containers[0].definiteSeal, '005780 / 005947');
+  assert.deepEqual(result.booking.containers[0].photos, [{ id: 'p1', url: 'photo1.jpg' }]);
+});
+

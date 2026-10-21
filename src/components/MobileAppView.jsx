@@ -260,7 +260,7 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Versão</span>
-            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>2.1.1</span>
+            <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>2.1.2</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Modo</span>

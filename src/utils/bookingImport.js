@@ -217,7 +217,16 @@ export function createBookingRepository({ listBookings, reference, newId, transa
             const updated = { ...prev };
             let changed = false;
 
-            const isBuggySeal = prev.definiteSeal && key.includes(prev.definiteSeal.replace(/[-\s]/g, ''));
+            const prevSealStr = String(typeof prev.definiteSeal === 'object' && prev.definiteSeal !== null
+              ? (prev.definiteSeal.sealNumber || prev.definiteSeal.seal || prev.definiteSeal.number || '')
+              : (prev.definiteSeal || '')).trim();
+            const prevSealDigits = prevSealStr.replace(/\D/g, '');
+            const isBuggySeal = Boolean(
+              prevSealStr && (
+                key.includes(prevSealStr.replace(/[-\s]/g, '')) ||
+                (prevSealDigits.length >= 6 && key.replace(/\D/g, '').includes(prevSealDigits))
+              )
+            );
 
             // Peso Carga (Net Weight)
             if (inc.netWeight !== undefined && inc.netWeight !== '' && inc.netWeight !== null) {

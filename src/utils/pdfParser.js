@@ -89,6 +89,20 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
     defaultType = normalizeContainerType(globalTypeMatch[0]) || defaultType;
   }
 
+  // Conjunto de todos os números e seriais (6 dígitos centrais) de containers para evitar que sejam lidos como lacres
+  const allContainerSerials = new Set();
+  const allContainerFull = new Set();
+  containerMatches.forEach(m => {
+    allContainerFull.add(m.number);
+    const digits = m.number.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      allContainerSerials.add(digits.slice(0, 6)); // ex: "209037" de MSNU-209037-0
+    }
+    if (digits.length >= 7) {
+      allContainerSerials.add(digits); // ex: "2090370"
+    }
+  });
+
   const parsedContainers = [];
   const typePattern = /(?:20|40)\s*["']?\s*[\s|/]*\s*(?:DV|HC|DRY|REEFER|45G1|22G1|42G1|GP|HR)|(?:40"45G1|20"22G1|45G1|22G1|42G1)\b/i;
 
@@ -125,10 +139,20 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
       if (codeMatch) brand = codeMatch[1];
     }
 
-    // 3. Remove número do container e brand para evitar falsos positivos
+    // 3. Remove número do container, seriais e brand para evitar falsos positivos
     let cleanText = segment.substring(current.length);
     if (brand) {
       cleanText = cleanText.replace(brand, ' ');
+    }
+
+    const currentDigits = current.number.replace(/\D/g, '');
+    const currentSerial = currentDigits.slice(0, 6);
+    cleanText = cleanText.replace(new RegExp(`\\b${current.number}\\b`, 'gi'), ' ');
+    if (currentSerial.length >= 6) {
+      cleanText = cleanText.replace(new RegExp(`\\b${currentSerial}\\b`, 'gi'), ' ');
+    }
+    if (currentDigits.length >= 7) {
+      cleanText = cleanText.replace(new RegExp(`\\b${currentDigits}\\b`, 'gi'), ' ');
     }
 
     const parseVal = (str) => {
@@ -227,10 +251,26 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
       cand = cand.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').trim();
       const cleanCand = cand.replace(/[-\s]/g, '').toUpperCase();
       if (!cleanCand) continue;
-      if (cleanCand === current.number || current.number.includes(cleanCand)) continue;
-      if (/^(20"\/DV|40"\/HC|40"45G1|20"22G1|45G1|22G1|42G1|20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|TOTAIS|TARA|PESO|BRUTO|CARGA|QUANT)$/i.test(cand)) continue;
+
+      // 1. NUNCA aceitar container ou dígitos de container como lacre
+      if (cleanCand === current.number || current.number.includes(cleanCand) || cleanCand.includes(current.number)) continue;
+      if (allContainerFull.has(cleanCand)) continue;
+
+      const candDigits = cleanCand.replace(/\D/g, '');
+      if (candDigits && allContainerSerials.has(candDigits)) continue;
+      if (currentSerial && (candDigits === currentSerial || cleanCand.includes(currentSerial))) continue;
+      if (currentDigits && (candDigits === currentDigits || cleanCand.includes(currentDigits))) continue;
+
+      // 2. Palavras reservadas e cabeçalhos de tabela
+      if (/^(20"\/DV|40"\/HC|40"45G1|20"22G1|45G1|22G1|42G1|20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|TOTAIS|TARA|PESO|BRUTO|CARGA|QUANT|CONTEINER|CONTAINER|ROMANEIO|PAGINA|PÁGINA|LOTE|OIC|BOOKING|NAVIO|VIAGEM|DESTINO|EXPORTADOR|IMPORTADOR|ALPHA|BAGS|FITO)$/i.test(cand)) continue;
+
+      // 3. Marca / Lote / OIC
       if (brand && (cand === brand || brand.includes(cand) || cleanCand === brand.replace(/[^A-Z0-9]/gi, ''))) continue;
+
+      // 4. Métricas numéricas (Sacas, tara, pesos)
       if (metricTokens.includes(cand) || metricCleanTokens.includes(cleanCand)) continue;
+
+      // 5. Anos recentes (ex: 2026, 2025, 2024)
       if (/^202[0-9]$/.test(cleanCand)) continue;
 
       if (!collectedSeals.includes(cand)) {
