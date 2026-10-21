@@ -193,6 +193,7 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
         let booking;
         let fieldUpdates = {};
+        let updatedContainersCount = 0;
         if (current) {
           const changes = detectBookingFieldChanges(current, incoming);
           for (const change of changes) {
@@ -203,14 +204,86 @@ export function createBookingRepository({ listBookings, reference, newId, transa
             if (incoming.vesselVoyageNum) fieldUpdates.vesselVoyageNum = incoming.vesselVoyageNum;
           }
 
-          const hasContainerChanges = plan.added.length > 0;
+          const incomingByNumber = new Map(
+            (incoming.containers || []).map(c => [normalizeContainerNumber(c.containerNumber), c])
+          );
+
+          let containerFieldUpdated = false;
+          const mergedExistingContainers = (current.containers || []).map(prev => {
+            const key = normalizeContainerNumber(prev.containerNumber);
+            const inc = incomingByNumber.get(key);
+            if (!inc) return prev;
+
+            const updated = { ...prev };
+            let changed = false;
+
+            const isBuggySeal = prev.definiteSeal && key.includes(prev.definiteSeal.replace(/[-\s]/g, ''));
+
+            // Peso Carga (Net Weight)
+            if (inc.netWeight !== undefined && inc.netWeight !== '' && inc.netWeight !== null) {
+              if (!prev.netWeight || prev.netWeight === '' || prev.netWeight !== inc.netWeight) {
+                updated.netWeight = inc.netWeight;
+                changed = true;
+              }
+            }
+            // Peso Bruto (Gross Weight)
+            if (inc.grossWeight !== undefined && inc.grossWeight !== '' && inc.grossWeight !== null) {
+              if (!prev.grossWeight || prev.grossWeight === '' || prev.grossWeight !== inc.grossWeight) {
+                updated.grossWeight = inc.grossWeight;
+                changed = true;
+              }
+            }
+            // Tara
+            if (inc.tara !== undefined && inc.tara !== '' && inc.tara !== null) {
+              if (!prev.tara || prev.tara === '' || prev.tara !== inc.tara) {
+                updated.tara = inc.tara;
+                changed = true;
+              }
+            }
+            // Lacre Definitivo
+            if (inc.definiteSeal !== undefined && inc.definiteSeal !== '' && inc.definiteSeal !== null) {
+              const cleanIncSeal = String(inc.definiteSeal).trim();
+              const prevSeal = String(typeof prev.definiteSeal === 'object' && prev.definiteSeal !== null
+                ? (prev.definiteSeal.sealNumber || prev.definiteSeal.seal || prev.definiteSeal.number || '')
+                : (prev.definiteSeal || '')).trim();
+
+              if (!prevSeal || isBuggySeal || prevSeal !== cleanIncSeal) {
+                updated.definiteSeal = cleanIncSeal;
+                changed = true;
+              }
+            }
+            // Marca / Lote / OIC
+            if (inc.brand && (!prev.brand || prev.brand === '' || prev.brand !== inc.brand)) {
+              updated.brand = inc.brand;
+              changed = true;
+            }
+            // Quantidade de sacas
+            if (inc.bagsQuantity && (!prev.bagsQuantity || prev.bagsQuantity === 0 || String(prev.bagsQuantity) !== String(inc.bagsQuantity))) {
+              updated.bagsQuantity = inc.bagsQuantity;
+              changed = true;
+            }
+            // Tipo de container
+            if (inc.containerType && (!prev.containerType || prev.containerType === '40"/HC' || prev.containerType !== inc.containerType) && inc.containerType !== '40"/HC') {
+              updated.containerType = inc.containerType;
+              changed = true;
+            }
+
+            if (changed) {
+              containerFieldUpdated = true;
+              updatedContainersCount++;
+              return updated;
+            }
+            return prev;
+          });
+
+          const hasContainerChanges = plan.added.length > 0 || containerFieldUpdated;
           const hasFieldChanges = Object.keys(fieldUpdates).length > 0;
 
           booking = {
             ...current,
             ...fieldUpdates,
             containers: [
-              ...(current.containers || []),
+              ...mergedExistingContainers,
               ...plan.added.map(c => ({ ...c, id: newId('container') }))
             ],
             _revision: (current._revision || 0) + (hasContainerChanges || hasFieldChanges ? 1 : 0)
@@ -246,7 +319,7 @@ export function createBookingRepository({ listBookings, reference, newId, transa
           existing: plan.preserved.map(c => normalizeContainerNumber(c.containerNumber)), repeated: plan.repeated,
           conflicts: plan.conflicts, fieldLinked: attached.linked.map(f => ({ number: f.id, sourceContainerId: f.sourceContainerId, containerId: f.linkedContainerId })),
           updatedFields: Object.keys(fieldUpdates), before: current?.containers?.length || 0, after: booking.containers.length });
-        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, fieldLinkedCount: attached.linked.length, updatedFields: Object.keys(fieldUpdates), operationId };
+        return { booking, addedCount: plan.added.length, preservedCount: plan.preserved.length, updatedContainersCount, fieldLinkedCount: attached.linked.length, updatedFields: Object.keys(fieldUpdates), operationId };
       });
     },
 

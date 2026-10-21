@@ -93,6 +93,7 @@ export default function App() {
   const [isParsingPickerPdf, setIsParsingPickerPdf] = useState(false);
   const [pickerPdfError, setPickerPdfError] = useState('');
   const [initialOpenUpdateRomaneio, setInitialOpenUpdateRomaneio] = useState(false);
+  const [initialUpdateRomaneioFile, setInitialUpdateRomaneioFile] = useState(null);
 
   const handlePickerPdfUpload = async (file) => {
     if (!file) return;
@@ -108,6 +109,7 @@ export default function App() {
       if (match) {
         setShowUpdateRomaneioPicker(false);
         setInitialOpenUpdateRomaneio(true);
+        setInitialUpdateRomaneioFile(file);
         setSelectedBookingId(match.id);
       } else {
         setPickerPdfError(`O Booking "${parsed.bookingNumber}" identificado no PDF não existe no sistema. Utilize "+ Novo romaneio" para cadastrá-lo.`);
@@ -1259,9 +1261,11 @@ export default function App() {
         <BookingManagementModal
           bookingId={selectedBookingId}
           initialOpenUpdateRomaneio={initialOpenUpdateRomaneio}
+          initialUpdateRomaneioFile={initialUpdateRomaneioFile}
           onClose={() => {
             setSelectedBookingId(null);
             setInitialOpenUpdateRomaneio(false);
+            setInitialUpdateRomaneioFile(null);
             handleRefreshData();
           }}
           user={user}

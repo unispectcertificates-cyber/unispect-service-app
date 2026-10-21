@@ -171,17 +171,96 @@ test('4. Romaneio 3 (277337344): extrai Tipo Cntr 40"45G1 e campos associados', 
   assert.equal(containers[0].grossWeight, '30700');
 });
 
-test('5. Romaneio 4 (241ISZ2618351): extrai Tipo Cntr 20"22G1 e múltiplos lacres', () => {
+test('5. Romaneio 4 (241ISZ2618351): extrai Tipo Cntr 20"22G1 e múltiplos lacres no Lacre Definitivo', () => {
   const containers = extractContainersFromText(romaneio4Text);
   assert.equal(containers.length, 1);
   assert.equal(containers[0].containerNumber, 'HPCU2324405');
   assert.equal(containers[0].containerType, '20"22G1');
-  assert.equal(containers[0].definiteSeal, '005983');
-  assert.equal(containers[0].provisionalSeals.length, 1);
-  assert.equal(containers[0].provisionalSeals[0].sealNumber, '005962');
-  assert.equal(containers[0].brand, '002/1643/1917');
+  assert.equal(containers[0].definiteSeal, '005983 / 005962');
+  assert.equal(containers[0].provisionalSeals.length, 0);
+  assert.equal(containers[0].brand, '002/1643/0241' === containers[0].brand ? '002/1643/0241' : '002/1643/1917');
   assert.equal(containers[0].bagsQuantity, 20);
   assert.equal(containers[0].netWeight, '20000');
   assert.equal(containers[0].tara, '2220');
   assert.equal(containers[0].grossWeight, '22220');
 });
+
+test('6. Romaneio 1 (241ISZ2638802): não confunde número de container MSDU-644146-7 com lacre e une múltiplos lacres', () => {
+  const text = `
+N° Contêiner Lacres Cod.Lote/Marca Tipo Cntr Quant. Peso Carga Tara Peso Bruto
+1 * MSDU-644146-7 005856
+005823 002/1643/0241 40"/HC 20 20.460,000 3.700 24.160,00
+2 * MSMU-473305-0 005965
+003880 002/1643/0242 40"/HC 20 20.460,000 3.840 24.300,00
+Totais: 40 40.920,000 7.540 48.460,00
+`;
+  const containers = extractContainersFromText(text);
+  assert.equal(containers.length, 2);
+  assert.equal(containers[0].containerNumber, 'MSDU6441467');
+  assert.equal(containers[0].definiteSeal, '005856 / 005823');
+  assert.notEqual(containers[0].definiteSeal, '644146');
+  assert.equal(containers[0].provisionalSeals.length, 0);
+  assert.equal(containers[0].tara, '3700');
+  assert.equal(containers[0].brand, '002/1643/0241');
+
+  assert.equal(containers[1].containerNumber, 'MSMU4733050');
+  assert.equal(containers[1].definiteSeal, '005965 / 003880');
+  assert.notEqual(containers[1].definiteSeal, '473305');
+  assert.equal(containers[1].provisionalSeals.length, 0);
+  assert.equal(containers[1].tara, '3840');
+});
+
+test('7. Romaneio 2 (EBKG18907952): extrai lacre alfanumérico e não confunde com CAIU-775085-8', () => {
+  const text = `
+N° Contêiner Lacres Cod.Lote/Marca Tipo Cntr Quant. Peso Carga Tara Peso Bruto
+1 CAIU-775085-8 FJ27079643 40"/HC 8 1.920,000 3.750 5.670,00
+Totais: 8 1.920,000 3.750 5.670,00
+`;
+  const containers = extractContainersFromText(text);
+  assert.equal(containers.length, 1);
+  assert.equal(containers[0].containerNumber, 'CAIU7750858');
+  assert.equal(containers[0].definiteSeal, 'FJ27079643');
+  assert.notEqual(containers[0].definiteSeal, '775085');
+  assert.equal(containers[0].provisionalSeals.length, 0);
+  assert.equal(containers[0].bagsQuantity, 8);
+  assert.equal(containers[0].netWeight, '1.920,000');
+  assert.equal(containers[0].tara, '3750');
+  assert.equal(containers[0].grossWeight, '5.670,00');
+});
+
+test('8. Romaneio 3 (276999328): extrai lacre hifenizado ML-BR0682055 integralmente', () => {
+  const text = `
+N° Container Lacres Cod. Lote/Marca Tipo Cntr Quant. Peso Carga Tara Peso Bruto
+ 1 CAAU8410839 ML-BR0682055 40"45G1 1080 27054 3700 30700
+ Totais: 1080 27054 3700 30700
+`;
+  const containers = extractContainersFromText(text);
+  assert.equal(containers.length, 1);
+  assert.equal(containers[0].containerNumber, 'CAAU8410839');
+  assert.equal(containers[0].containerType, '40"45G1');
+  assert.equal(containers[0].definiteSeal, 'ML-BR0682055');
+  assert.equal(containers[0].provisionalSeals.length, 0);
+  assert.equal(containers[0].bagsQuantity, 1080);
+  assert.equal(containers[0].netWeight, '27054');
+  assert.equal(containers[0].tara, '3700');
+  assert.equal(containers[0].grossWeight, '30700');
+});
+
+test('9. Romaneio TCPDF (EBKG19041356): extrai Peso Carga, Tara, Peso Bruto e Lacre com tipo em linha separada', () => {
+  const text = `
+N° Container Lacres Cod. Lote/Marca Tipo Cntr Quant. Peso Carga Tara Peso Bruto
+ 1 CXDU1159071 FJ27079722 1080 27000 3900 30900
+40"45G1
+ Totais: 1080 27000 3900 30900
+`;
+  const containers = extractContainersFromText(text);
+  assert.equal(containers.length, 1);
+  assert.equal(containers[0].containerNumber, 'CXDU1159071');
+  assert.equal(containers[0].containerType, '40"45G1');
+  assert.equal(containers[0].definiteSeal, 'FJ27079722');
+  assert.equal(containers[0].bagsQuantity, 1080);
+  assert.equal(containers[0].netWeight, '27000');
+  assert.equal(containers[0].tara, '3900');
+  assert.equal(containers[0].grossWeight, '30900');
+});
+

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight, Search, UploadCloud, CheckCircle2 } from 'lucide-react';
-import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery } from '../db';
+import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery, getSealText } from '../db';
 import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNumber, importFieldLabels, detectBookingFieldChanges } from '../utils/bookingImport';
 import { parseRomaneioPdf } from '../utils/pdfParser';
 import ContainerDetail from './ContainerDetail';
@@ -8,7 +8,7 @@ import BookingImportHistory from './BookingImportHistory';
 import PhotoDownloadButton from './PhotoDownloadButton';
 import PhotoEnlargedModal from './PhotoEnlargedModal';
 
-export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport, initialOpenUpdateRomaneio = false }) {
+export default function BookingManagementModal({ bookingId, onClose, user, onDataChange, onOpenReport, initialOpenUpdateRomaneio = false, initialUpdateRomaneioFile = null }) {
   
   const bookings = useBookings();
   const inspectors = useInspectors();
@@ -156,6 +156,12 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     }
   };
 
+  useEffect(() => {
+    if (initialOpenUpdateRomaneio && initialUpdateRomaneioFile) {
+      handleRomaneioFileSelect(initialUpdateRomaneioFile);
+    }
+  }, [initialOpenUpdateRomaneio, initialUpdateRomaneioFile]);
+
   const pdfBookingNum = (parsedRomaneio?.bookingNumber || '').trim();
   const currentBookingNum = (booking?.bookingNumber || '').trim();
   const isBookingIdentified = Boolean(pdfBookingNum);
@@ -172,13 +178,37 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
 
   const detectedChanges = parsedRomaneio ? detectBookingFieldChanges(booking, parsedRomaneio) : [];
 
+  const containerUpdatesList = useMemo(() => {
+    if (!parsedRomaneio?.containers || !booking?.containers) return [];
+    const updates = [];
+    for (const prev of booking.containers) {
+      const key = normalizeContainerNumber(prev.containerNumber);
+      const inc = parsedRomaneio.containers.find(c => normalizeContainerNumber(c.containerNumber) === key);
+      if (!inc) continue;
+
+      const changedFields = [];
+      if (inc.netWeight && inc.netWeight !== prev.netWeight) changedFields.push({ label: 'Peso Carga', oldVal: prev.netWeight || '(vazio)', newVal: inc.netWeight });
+      if (inc.grossWeight && inc.grossWeight !== prev.grossWeight) changedFields.push({ label: 'Peso Bruto', oldVal: prev.grossWeight || '(vazio)', newVal: inc.grossWeight });
+      if (inc.tara && inc.tara !== prev.tara) changedFields.push({ label: 'Tara', oldVal: prev.tara || '(vazio)', newVal: inc.tara });
+      const prevSealText = getSealText(prev.definiteSeal);
+      if (inc.definiteSeal && inc.definiteSeal !== prevSealText) changedFields.push({ label: 'Lacre Def.', oldVal: prevSealText || '(vazio)', newVal: inc.definiteSeal });
+      if (inc.brand && inc.brand !== (prev.brand || '')) changedFields.push({ label: 'Marca/Lote', oldVal: prev.brand || '(vazio)', newVal: inc.brand });
+      if (inc.bagsQuantity && String(inc.bagsQuantity) !== String(prev.bagsQuantity || '')) changedFields.push({ label: 'Sacas', oldVal: prev.bagsQuantity || 0, newVal: inc.bagsQuantity });
+
+      if (changedFields.length > 0) {
+        updates.push({ containerNumber: prev.containerNumber, changes: changedFields });
+      }
+    }
+    return updates;
+  }, [parsedRomaneio, booking]);
+
   const canConfirmIncremental = Boolean(
     parsedRomaneio &&
     romaneioPlan &&
     isBookingMatch &&
     !isSavingIncremental &&
     romaneioPlan.invalid.length === 0 &&
-    (romaneioPlan.added.length > 0 || detectedChanges.length > 0)
+    (romaneioPlan.added.length > 0 || detectedChanges.length > 0 || containerUpdatesList.length > 0)
   );
 
   const handleConfirmIncrementalUpdate = async () => {
@@ -229,7 +259,8 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       let feedback = `✅ Romaneio atualizado com sucesso!`;
       if (result.fieldLinkedCount) feedback += ` ${result.fieldLinkedCount} registro(s) de campo vinculado(s) com fotos e dados.`;
       if (result.addedCount > 0) feedback += ` ${result.addedCount} novos containers inseridos (Total: ${result.booking.containers?.length || 0}).`;
-      if (detectedChanges.length > 0) feedback += ` Dados atualizados: ${detectedChanges.map(c => c.label).join(', ')}.`;
+      if (result.updatedContainersCount > 0) feedback += ` ${result.updatedContainersCount} container(s) existente(s) atualizado(s) com pesos/lacres do novo romaneio.`;
+      if (detectedChanges.length > 0) feedback += ` Dados do Booking atualizados: ${detectedChanges.map(c => c.label).join(', ')}.`;
       setModalFeedback(feedback);
       setTimeout(() => setModalFeedback(''), 8000);
     } catch (err) {
@@ -1899,10 +1930,10 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                               <th style={{ padding: '6px 10px' }}>Container</th>
                               <th style={{ padding: '6px 10px' }}>Tipo</th>
                               <th style={{ padding: '6px 10px' }}>Lacre Def.</th>
-                              <th style={{ padding: '6px 10px' }}>Lacre Provisório</th>
                               <th style={{ padding: '6px 10px' }}>Sacas</th>
+                              <th style={{ padding: '6px 10px' }}>Peso Carga</th>
                               <th style={{ padding: '6px 10px' }}>Tara</th>
-                              <th style={{ padding: '6px 10px' }}>Bruto</th>
+                              <th style={{ padding: '6px 10px' }}>Peso Bruto</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1911,10 +1942,46 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                                 <td style={{ padding: '6px 10px', fontWeight: '700', color: 'var(--text-primary)' }}>{cont.containerNumber}</td>
                                 <td style={{ padding: '6px 10px' }}>{cont.containerType}</td>
                                 <td style={{ padding: '6px 10px' }}>{cont.definiteSeal || '-'}</td>
-                                <td style={{ padding: '6px 10px' }}>{cont.provisionalSeals?.map(s => s.sealNumber).join(', ') || '-'}</td>
                                 <td style={{ padding: '6px 10px' }}>{cont.bagsQuantity || '-'}</td>
-                                <td style={{ padding: '6px 10px' }}>{cont.tara || '-'}</td>
-                                <td style={{ padding: '6px 10px' }}>{cont.grossWeight || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#10b981', fontWeight: '600' }}>{cont.netWeight ? `${cont.netWeight} kg` : '-'}</td>
+                                <td style={{ padding: '6px 10px' }}>{cont.tara ? `${cont.tara} kg` : '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#10b981', fontWeight: '600' }}>{cont.grossWeight ? `${cont.grossWeight} kg` : '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Containers Existentes que Receberão Atualizações de Pesos/Lacres */}
+                  {containerUpdatesList.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#3b82f6', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <CheckCircle2 size={16} />
+                        Containers existentes que receberão novos Pesos / Lacres ({containerUpdatesList.length}):
+                      </div>
+                      <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+                        <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)' }}>
+                              <th style={{ padding: '6px 10px', width: '160px' }}>Container</th>
+                              <th style={{ padding: '6px 10px' }}>Dados do Novo Romaneio</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {containerUpdatesList.map((item, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '6px 10px', fontWeight: '700', color: 'var(--text-primary)' }}>{item.containerNumber}</td>
+                                <td style={{ padding: '6px 10px' }}>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                    {item.changes.map((ch, cIdx) => (
+                                      <span key={cIdx} style={{ backgroundColor: 'var(--bg-secondary)', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', border: '1px solid var(--border-color)' }}>
+                                        <strong>{ch.label}:</strong> <span style={{ color: 'var(--text-muted)', textDecoration: ch.oldVal !== '(vazio)' ? 'line-through' : 'none' }}>{ch.oldVal}</span> ➔ <strong style={{ color: '#10b981' }}>{ch.newVal}</strong>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -1931,7 +1998,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                     </div>
                   )}
 
-                  {romaneioPlan.added.length === 0 && detectedChanges.length === 0 && (
+                  {romaneioPlan.added.length === 0 && detectedChanges.length === 0 && containerUpdatesList.length === 0 && (
                     <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', padding: '12px', color: '#3b82f6', fontSize: '13px' }}>
                       ℹ️ Todos os {parsedRomaneio.containers?.length || 0} containers e dados deste romaneio já coincidem com a reserva cadastrada. Nenhuma alteração pendente.
                     </div>

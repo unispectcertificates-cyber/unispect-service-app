@@ -100,7 +100,7 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
     let endIndex = next ? next.index : fullText.length;
 
     if (!next) {
-      const stopMatch = fullText.substring(startIndex).match(/\n\s*(?:Totais|Observaç[ãa]o|Observacao|Faturamento):/i);
+      const stopMatch = fullText.substring(startIndex).match(/\n\s*(?:Totais|Total|Observaç[õoa]es?|Observacoes?|Faturamento|Retirada|Estufagem|Booking|Romaneio):/i);
       if (stopMatch) {
         endIndex = startIndex + stopMatch.index;
       }
@@ -115,28 +115,9 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
       containerType = normalizeContainerType(typeMatch[0]);
     }
 
-    // 2. Definite Seal e Provisional Seals
-    let definiteSeal = '';
-    const provSeals = [];
-    const sealRegex = /\b((?:LINE\s*|MLBR\s*|[A-Z]{1,4}\s*)?[A-Z0-9]{6,12})\b/gi;
-    let sMatch;
-    while ((sMatch = sealRegex.exec(segment)) !== null) {
-      const cand = sMatch[1].trim();
-      if (cand === current.number) continue;
-      if (/^(20"\/DV|40"\/HC|40"45G1|20"22G1|45G1|22G1|42G1|20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|TOTAIS)$/i.test(cand)) continue;
-      if (!definiteSeal) {
-        definiteSeal = cand;
-      } else if (!provSeals.some(p => (typeof p === 'string' ? p : p.sealNumber) === cand) && cand !== definiteSeal) {
-        provSeals.push({
-          id: 'seal_' + Date.now() + '_' + provSeals.length,
-          sealNumber: cand
-        });
-      }
-    }
-
-    // 3. Marca / Lote / OIC
+    // 2. Marca / Lote / OIC
     let brand = '';
-    const oicMatch = segment.match(/\b(\d{3}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
+    const oicMatch = segment.match(/\b(\d{2,4}\/\d{3,4}\/\d{3,4}|(?:MAC|GRV|LOTE|OIC|COD\.?\s*LOTE)[.\w\/-]+(?:\s*-\s*[A-Z0-9\/-]+)?)\b/i);
     if (oicMatch) {
       brand = oicMatch[1].trim();
     } else {
@@ -144,19 +125,15 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
       if (codeMatch) brand = codeMatch[1];
     }
 
-    // 4. Tokens numéricos (tara, peso, sacas)
-    let tokensSection = segment;
-    if (typeMatch) {
-      const typeIdx = segment.indexOf(typeMatch[0]);
-      if (typeIdx !== -1) {
-        tokensSection = segment.substring(typeIdx + typeMatch[0].length);
-      }
+    // 3. Remove número do container e brand para evitar falsos positivos
+    let cleanText = segment.substring(current.length);
+    if (brand) {
+      cleanText = cleanText.replace(brand, ' ');
     }
 
-    const rawNumTokens = tokensSection.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
     const parseVal = (str) => {
       if (!str) return 0;
-      let s = str.trim();
+      let s = String(str).trim();
       if (s.includes(',')) {
         s = s.replace(/\./g, '').replace(/,/g, '.');
       } else if (/\.\d{3}$/.test(s)) {
@@ -165,39 +142,104 @@ export function extractContainersFromText(fullText, defaultContainerType = '40"/
       return parseFloat(s) || 0;
     };
 
+    // 4. Tokens numéricos (Sacas, Peso Carga/Net Weight, Tara, Peso Bruto/Gross Weight)
+    const rawNumTokens = cleanText.match(/[0-9]+(?:[.,][0-9]+)*/g) || [];
+    const numTokens = rawNumTokens.filter(t => {
+      const cl = t.replace(/[-\s]/g, '');
+      return cl !== current.number;
+    });
+
     let rowBags = 0;
     let netWeight = '';
     let tara = '';
     let grossWeight = '';
+    let metricTokens = [];
 
-    const weightTokens = rawNumTokens.filter(t => t !== current.number && !current.number.includes(t));
-    if (weightTokens.length >= 4) {
-      rowBags = parseInt(weightTokens[0].replace(/[.,]/g, ''), 10) || 0;
-      netWeight = weightTokens[1];
-      tara = weightTokens[2].replace(/[.,]/g, '');
-      grossWeight = weightTokens[3];
-    } else if (weightTokens.length >= 3) {
-      netWeight = weightTokens[0];
-      tara = weightTokens[1].replace(/[.,]/g, '');
-      grossWeight = weightTokens[2];
-    } else {
-      const taraCand = weightTokens.find(t => {
-        const v = parseVal(t);
-        return v >= 1800 && v <= 4900;
-      });
-      if (taraCand) {
-        tara = taraCand.replace(/[.,]/g, '');
+    // Busca da direita para a esquerda sequência válida de [netWeight, tara, grossWeight]
+    // onde tara fica entre 1800 e 4900 e netWeight + tara ~= grossWeight
+    for (let j = numTokens.length - 1; j >= 2; j--) {
+      const gVal = parseVal(numTokens[j]);
+      const tVal = parseVal(numTokens[j - 1]);
+      const nVal = parseVal(numTokens[j - 2]);
+
+      const taraValid = (tVal >= 1800 && tVal <= 4900) || numTokens[j - 1].replace(/[.,]/g, '').length === 4;
+      const sumValid = Math.abs((nVal + tVal) - gVal) <= 1 || (nVal === 0 && Math.abs(tVal - gVal) <= 1);
+
+      if (taraValid && sumValid) {
+        grossWeight = numTokens[j];
+        tara = numTokens[j - 1].replace(/[.,]/g, '');
+        netWeight = numTokens[j - 2];
+        metricTokens = [numTokens[j - 2], numTokens[j - 1], numTokens[j]];
+
+        if (j >= 3) {
+          const bVal = parseInt(numTokens[j - 3].replace(/[.,]/g, ''), 10);
+          if (!isNaN(bVal) && bVal >= 0 && bVal <= 100000) {
+            rowBags = bVal;
+            metricTokens.unshift(numTokens[j - 3]);
+          }
+        }
+        break;
       }
     }
 
-    if (!tara) {
-      const allTokens = (segment.match(/[0-9]+(?:[.,][0-9]+)*/g) || []).filter(t => t !== current.number && !current.number.includes(t));
-      const taraCand = allTokens.find(t => {
+    // Fallback caso a soma tenha pequenas variações ou haja 4/3 tokens finais
+    if (!tara && numTokens.length >= 4) {
+      const last4 = numTokens.slice(-4);
+      const tCand = parseVal(last4[2]);
+      if (tCand >= 1800 && tCand <= 4900) {
+        rowBags = parseInt(last4[0].replace(/[.,]/g, ''), 10) || 0;
+        netWeight = last4[1];
+        tara = last4[2].replace(/[.,]/g, '');
+        grossWeight = last4[3];
+        metricTokens = last4;
+      }
+    } else if (!tara && numTokens.length >= 3) {
+      const last3 = numTokens.slice(-3);
+      const tCand = parseVal(last3[1]);
+      if (tCand >= 1800 && tCand <= 4900) {
+        netWeight = last3[0];
+        tara = last3[1].replace(/[.,]/g, '');
+        grossWeight = last3[2];
+        metricTokens = last3;
+      }
+    } else if (!tara) {
+      const taraCand = numTokens.find(t => {
         const v = parseVal(t);
-        return v >= 1800 && v <= 4900 && t !== netWeight && t !== grossWeight && t !== brand;
+        return v >= 1800 && v <= 4900;
       });
       if (taraCand) tara = taraCand.replace(/[.,]/g, '');
     }
+
+    // 5. Lacres (Lacre Definitivo)
+    // No Romaneio, a coluna "Lacres" / "Lacre" corresponde ao Lacre Definitivo.
+    // Suporta múltiplos lacres (alfanuméricos do armador e numéricos de 4-12 dígitos como 1168, 1163)
+    const collectedSeals = [];
+    const metricCleanTokens = metricTokens.map(m => String(m).replace(/[.,]/g, ''));
+    if (tara) metricCleanTokens.push(String(tara).replace(/[.,]/g, ''));
+    if (rowBags) metricCleanTokens.push(String(rowBags).replace(/[.,]/g, ''));
+    if (netWeight) metricCleanTokens.push(String(netWeight).replace(/[.,]/g, ''));
+    if (grossWeight) metricCleanTokens.push(String(grossWeight).replace(/[.,]/g, ''));
+
+    const sealRegex = /\b((?:LINE\s*|MLBR\s*|ML-BR\s*|[A-Z]{1,4}[-\s]*)?[A-Z0-9]{4,12})\b/gi;
+    let sMatch;
+    while ((sMatch = sealRegex.exec(cleanText)) !== null) {
+      let cand = sMatch[1].trim();
+      cand = cand.replace(/^[:\s\-.]+/, '').replace(/[:\-.\s]+$/, '').trim();
+      const cleanCand = cand.replace(/[-\s]/g, '').toUpperCase();
+      if (!cleanCand) continue;
+      if (cleanCand === current.number || current.number.includes(cleanCand)) continue;
+      if (/^(20"\/DV|40"\/HC|40"45G1|20"22G1|45G1|22G1|42G1|20"|40"|DV|HC|DRY|REEFER|SACAS?|SACA|KG|KGS|TOTAIS|TARA|PESO|BRUTO|CARGA|QUANT)$/i.test(cand)) continue;
+      if (brand && (cand === brand || brand.includes(cand) || cleanCand === brand.replace(/[^A-Z0-9]/gi, ''))) continue;
+      if (metricTokens.includes(cand) || metricCleanTokens.includes(cleanCand)) continue;
+      if (/^202[0-9]$/.test(cleanCand)) continue;
+
+      if (!collectedSeals.includes(cand)) {
+        collectedSeals.push(cand);
+      }
+    }
+
+    const definiteSeal = collectedSeals.join(' / ');
+    const provSeals = [];
 
     parsedContainers.push({
       id: 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),

@@ -328,4 +328,50 @@ test('romaneio atualizado: altera sacas (60 para 180), navio, viagem, destino e 
   assert.equal(audit.after, 9);
 });
 
+test('romaneio atualizado: faz o push de Peso Carga (netWeight) e Peso Bruto (grossWeight) para cada container', async () => {
+  const old = {
+    ...b([
+      c(1, { photos: [{ id: 'p1', url: 'photo1.jpg' }], netWeight: '', grossWeight: '', tara: '3900' }),
+      c(2, { photos: [{ id: 'p2', url: 'photo2.jpg' }], netWeight: '', grossWeight: '', tara: '3700' })
+    ]),
+    bookingNumber: 'EBKG19041356'
+  };
+
+  const h = harness([old]);
+
+  const incoming = {
+    ...old,
+    containers: [
+      c(1, { netWeight: '27000', grossWeight: '30900', tara: '3900', definiteSeal: 'FJ27079722', bagsQuantity: 1080 }),
+      c(2, { netWeight: '27054', grossWeight: '30754', tara: '3700', definiteSeal: 'ML-BR0682055', bagsQuantity: 1080 })
+    ]
+  };
+
+  const plan = planImport(old, incoming.containers);
+  assert.equal(plan.added.length, 0);
+  assert.equal(plan.preserved.length, 2);
+
+  const result = await h.repo.importBooking(incoming, {
+    expectedPreview: previewToken(old, plan),
+    sourceName: 'novo_romaneio.pdf',
+    actor: { id: 'admin', name: 'Administrador' }
+  });
+
+  assert.equal(result.booking.containers.length, 2);
+  assert.equal(result.updatedContainersCount, 2);
+
+  // Peso Carga e Peso Bruto foram preenchidos em cada container
+  assert.equal(result.booking.containers[0].netWeight, '27000');
+  assert.equal(result.booking.containers[0].grossWeight, '30900');
+  assert.equal(result.booking.containers[0].definiteSeal, 'FJ27079722');
+  assert.equal(result.booking.containers[0].bagsQuantity, 1080);
+  assert.deepEqual(result.booking.containers[0].photos, [{ id: 'p1', url: 'photo1.jpg' }]);
+
+  assert.equal(result.booking.containers[1].netWeight, '27054');
+  assert.equal(result.booking.containers[1].grossWeight, '30754');
+  assert.equal(result.booking.containers[1].definiteSeal, 'ML-BR0682055');
+  assert.equal(result.booking.containers[1].bagsQuantity, 1080);
+  assert.deepEqual(result.booking.containers[1].photos, [{ id: 'p2', url: 'photo2.jpg' }]);
+});
+
 
