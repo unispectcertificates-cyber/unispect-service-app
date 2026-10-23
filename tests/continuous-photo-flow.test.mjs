@@ -72,6 +72,7 @@ Object.defineProperty(globalThis, 'navigator', {
 
 let uploadsCount = 0;
 let linkedPhotos = [];
+let deletedPhotos = [];
 let uploadFail = false;
 
 globalThis.continuousTestDb = {
@@ -80,11 +81,14 @@ globalThis.continuousTestDb = {
     if (uploadFail) throw new Error('Falha de rede transitória');
     uploadsCount++;
     await new Promise(r => setTimeout(r, 2));
-    return { id: photoId, url: 'https://storage.test/' + photoId, containerId: container };
+    return { id: photoId, url: 'https://storage.test/' + photoId, containerId: container, storagePath: 'containers/' + container + '/' + photoId + '.jpg' };
   },
   appendBookingPhoto: async (bookingId, containerId, photo) => {
     linkedPhotos.push({ bookingId, containerId, photoId: photo.id });
     return { id: bookingId, containers: [{ id: containerId, photos: [photo] }] };
+  },
+  deletePhoto: async (photoId, storagePath) => {
+    deletedPhotos.push({ photoId, storagePath });
   }
 };
 
@@ -213,6 +217,33 @@ test('5. Verificação separada e explícita da conclusão de uploads: upload ->
     assert.equal(savedEvents.length, 2, 'Evento unispect-booking-photo-saved disparado para cada upload');
     assert.equal(savedEvents[0].containerId, 'C_VERIFY');
     assert.equal(savedEvents[1].containerId, 'C_VERIFY');
+  } finally {
+    window.removeEventListener('unispect-booking-photo-saved', listener);
+  }
+});
+
+test('6. Cancelamento de foto durante envio em andamento não vincula ao Booking', async () => {
+  navigator.onLine = true;
+  stores.get('jobs')?.clear();
+  stores.get('blobs')?.clear();
+  linkedPhotos = [];
+  deletedPhotos = [];
+
+  const savedEvents = [];
+  const listener = ev => savedEvents.push(ev.detail);
+  window.addEventListener('unispect-booking-photo-saved', listener);
+
+  try {
+    const jobs = await q.enqueueBookingPhotos('B_RACE', 'C_RACE', [makePhoto('race_1')]);
+    const jobId = jobs[0].id;
+    // Usuário tocou na lixeira para excluir enquanto estava subindo
+    await q.cancelBookingPhoto(jobId);
+    await q.syncBookingPhotos();
+
+    // A foto cancelada NÃO foi vinculada ao Booking
+    assert.equal(linkedPhotos.filter(p => p.photoId === jobId).length, 0, 'Foto cancelada não deve ser vinculada ao booking');
+    // Nenhum evento foi disparado para ela
+    assert.equal(savedEvents.filter(e => e.photoId === jobId).length, 0, 'Evento não deve disparar para foto cancelada');
   } finally {
     window.removeEventListener('unispect-booking-photo-saved', listener);
   }

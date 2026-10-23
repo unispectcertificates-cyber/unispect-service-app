@@ -47,21 +47,6 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
     return () => { cancelled = true; };
   }, [container.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Atualização otimista de status
-  const handleStatusChange = (newStatus) => {
-    const updatedContainer = { ...localContainer, status: newStatus };
-    setLocalContainer(updatedContainer);
-    onUpdateContainer(updatedContainer);
-
-    setIsSaving(true);
-    setSaveSuccess(false);
-
-    setTimeout(() => {
-      setIsSaving(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-    }, 800);
-  };
 
   // Alterar campos genéricos
   const handleChange = (field, value) => {
@@ -132,12 +117,13 @@ export default function ContainerDetail({ container, user, onUpdateContainer, on
   // Remover Foto (Firestore + Firebase Storage)
   const handleDeletePhoto = (photoId) => {
     // Remove visualmente de imediato (otimista)
+    const photo = (localContainer.photos || []).find(p => p.id === photoId);
     const updatedPhotos = (localContainer.photos || []).filter(p => p.id !== photoId);
     const updated = { ...localContainer, photos: updatedPhotos };
     setLocalContainer(updated);
     onUpdateContainer(updated);
     // Apaga do Firestore e do Storage em background
-    db.deletePhoto(photoId).catch(err => console.warn('deletePhoto error:', err));
+    db.deletePhoto(photoId, photo?.storagePath || null).catch(err => console.warn('deletePhoto error:', err));
   };
 
   // Reordenação de fotos

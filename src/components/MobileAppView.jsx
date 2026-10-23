@@ -735,29 +735,38 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     const photo = displayedPhotos.find(p => p.id === id);
     if (!bookingId || !containerId) return;
 
-    // Se a foto é uma pendência local que ainda não concluiu o upload:
-    if (photo?.isPending || String(id).startsWith('bookingphoto_')) {
-      await cancelBookingPhoto(id);
-      if (isMountedRef.current) {
-        setSelectedContainer(prev => prev?.id === containerId
-          ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) }
-          : prev
-        );
-      }
-      return;
+    // 1. Cancela da fila local (cancela se pendente ou em upload e revoga URL local)
+    await cancelBookingPhoto(id);
+
+    // 2. Atualização otimista imediata na interface do aparelho (container e booking)
+    if (isMountedRef.current) {
+      setSelectedContainer(prev => prev?.id === containerId
+        ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) }
+        : prev
+      );
+      setSelectedBooking(prev => prev?.id === bookingId
+        ? {
+            ...prev,
+            containers: (prev.containers || []).map(c =>
+              c.id === containerId
+                ? { ...c, photos: (c.photos || []).filter(p => p.id !== id) }
+                : c
+            )
+          }
+        : prev
+      );
     }
 
+    // 3. Exclusão definitiva e atômica no Firestore e Firebase Storage
     try {
       await serializeEdit(() => db.removeBookingPhoto(bookingId, containerId, id));
-      if (isMountedRef.current) {
-        setSelectedContainer(prev => prev?.id === containerId
-          ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== id) }
-          : prev
-        );
-      }
       await db.deletePhoto(id, photo?.storagePath || null);
     } catch (error) {
-      if (isMountedRef.current) showToast('Não foi possível concluir a exclusão: ' + error.message, 'error');
+      console.warn('Exclusão remota da foto:', error);
+      // Notifica se a foto já havia sido confirmada remotamente e a rede falhou
+      if (!photo?.isPending && isMountedRef.current) {
+        showToast('Não foi possível concluir a exclusão: ' + error.message, 'error');
+      }
     }
   };
 

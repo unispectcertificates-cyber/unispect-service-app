@@ -17,6 +17,7 @@ let running;
 let timer;
 let wakeAgain = false;
 const localUrls = new Map();
+const cancelledJobIds = new Set();
 
 export const photoQueueOwner = () => String(db.getUser()?.id || db.getUser()?.login || db.getUser()?.username || '');
 const notify = () => window.dispatchEvent(new Event('unispect-booking-photo-queue'));
@@ -118,6 +119,8 @@ export async function enqueueBookingPhotos(bookingId,containerId,files) {
 }
 
 export async function cancelBookingPhoto(jobId) {
+  const idStr = String(jobId);
+  cancelledJobIds.add(idStr);
   const url = localUrls.get(jobId);
   if (url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
     try {
@@ -143,15 +146,33 @@ async function saveJob(job) {
 }
 
 async function processJob(job) {
+  const idStr = String(job.id);
   try {
+    if (cancelledJobIds.has(idStr)) return;
     if (photoQueueOwner()!==job.owner) return;
     let photo=job.photo;
     if (!photo) {
       const local=await get('blobs',job.id);
-      if (!local?.blob?.size) throw new Error('Foto local não encontrada. O registro foi mantido para revisão.');
+      if (!local?.blob?.size) {
+        if (cancelledJobIds.has(idStr)) return;
+        throw new Error('Foto local não encontrada. O registro foi mantido para revisão.');
+      }
       photo=await db.uploadPhoto(local.blob,job.containerId,{photoId:job.id});
+      if (cancelledJobIds.has(idStr)) {
+        await db.deletePhoto(photo.id, photo.storagePath).catch(() => {});
+        return;
+      }
       job={...job,photo};
       await saveJob(job); // Upload confirmado: retentar vínculo não reenvia o arquivo.
+    }
+    if (cancelledJobIds.has(idStr)) {
+      if (photo) await db.deletePhoto(photo.id, photo.storagePath).catch(() => {});
+      return;
+    }
+    const stillQueued = await get('jobs', job.id);
+    if (!stillQueued) {
+      if (photo) await db.deletePhoto(photo.id, photo.storagePath).catch(() => {});
+      return;
     }
     if (photoQueueOwner()!==job.owner) return;
     const booking=await db.appendBookingPhoto(job.bookingId,job.containerId,photo);
@@ -168,9 +189,13 @@ async function processJob(job) {
       }
     }
     localUrls.delete(job.id);
+    cancelledJobIds.delete(idStr);
     window.dispatchEvent(new CustomEvent('unispect-booking-photo-saved',{detail:{booking,containerId:job.containerId,photoId:job.id}}));
     notify();
   } catch(e) {
+    if (cancelledJobIds.has(idStr)) return;
+    const stillQueued = await get('jobs', job.id);
+    if (!stillQueued) return;
     const attempts=job.attempts+1;
     await saveJob({...job,attempts,error:e.message || String(e),nextAttempt:Date.now()+Math.min(300000,5000*2**Math.min(attempts-1,6))});
   }
