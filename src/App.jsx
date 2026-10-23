@@ -1259,6 +1259,7 @@ export default function App() {
       {/* JANELA MODAL DE GERENCIAMENTO (Screenshot 2 overlay) */}
       {selectedBookingId && (
         <BookingManagementModal
+          key={selectedBookingId}
           bookingId={selectedBookingId}
           initialOpenUpdateRomaneio={initialOpenUpdateRomaneio}
           initialUpdateRomaneioFile={initialUpdateRomaneioFile}

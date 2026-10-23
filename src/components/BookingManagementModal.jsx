@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight, Search, UploadCloud, CheckCircle2 } from 'lucide-react';
 import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery, getSealText } from '../db';
 import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNumber, importFieldLabels, detectBookingFieldChanges } from '../utils/bookingImport';
@@ -21,6 +21,15 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const bk = bookings.find(b => b.id === bookingId);
     return bk?.inspectorId || '';
   });
+
+  if (bookingId !== prevBookingId) {
+    setPrevBookingId(bookingId);
+    const bk = bookings.find(b => b.id === bookingId);
+    setBooking(bk);
+    setSelectedInspectorId(bk?.inspectorId || '');
+    setBookingStatus(bk?.status || 'Pendente');
+    setPendingItem(bk?.pendingItem || '');
+  }
   const [bookingStatus, setBookingStatus] = useState(() => {
     const bk = bookings.find(b => b.id === bookingId);
     return bk?.status || 'Pendente';
@@ -73,10 +82,10 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     definiteSealDate: ''
   });
 
-  if (!booking) return null;
+  const initialRomaneioProcessedRef = useRef(false);
 
-  const isInspector = user.role === 'Inspector';
-  const isAdm = user.role === 'ADM';
+  const isInspector = user?.role === 'Inspector';
+  const isAdm = user?.role === 'ADM';
   const canEdit = isAdm || isInspector;
 
   const handleInspectorChange = (e) => {
@@ -157,10 +166,11 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   };
 
   useEffect(() => {
-    if (initialOpenUpdateRomaneio && initialUpdateRomaneioFile) {
+    if (initialOpenUpdateRomaneio && initialUpdateRomaneioFile && booking && !initialRomaneioProcessedRef.current) {
+      initialRomaneioProcessedRef.current = true;
       handleRomaneioFileSelect(initialUpdateRomaneioFile);
     }
-  }, [initialOpenUpdateRomaneio, initialUpdateRomaneioFile]);
+  }, [initialOpenUpdateRomaneio, initialUpdateRomaneioFile, booking]);
 
   const pdfBookingNum = (parsedRomaneio?.bookingNumber || '').trim();
   const currentBookingNum = (booking?.bookingNumber || '').trim();
@@ -433,6 +443,8 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     // Apaga do Firestore e do Storage em background
     db.deletePhoto(photoId, photo?.storagePath || null).catch(err => console.warn('deletePhoto error:', err));
   };
+
+  if (!booking) return null;
 
   const expName = exportadores.find(e => e.id === booking.exporterId)?.name || '-';
   const locName = locais.find(l => l.id === booking.locationId)?.name || '-';
