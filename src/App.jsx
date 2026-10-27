@@ -16,8 +16,9 @@ import UsersList from './components/UsersList';
 import FieldContainersView from './components/FieldContainersView';
 import Sidebar from './components/Sidebar';
 import DesktopDashboardView from './components/DesktopDashboardView';
+import { subscribeAuthSession, logoutUser } from './utils/authService';
 
-export default function App() {
+function AuthenticatedApp({ user, onLogout }) {
   const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth <= 1024);
 
   useEffect(() => {
@@ -66,7 +67,6 @@ export default function App() {
   });
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [activeReport, setActiveReport] = useState(null); // { id, type }
-  const [user, setUser] = useState(db.getUser());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverIp, setServerIp] = useState(localStorage.getItem('containtrack_server_ip') || '');
   const bookings = useBookings();
@@ -433,9 +433,10 @@ export default function App() {
   };
 
   // Logout
-  const handleLogout = () => {
-    setUser(null);
-    db.setUser(null);
+  const handleLogout = async () => {
+    if (onLogout) {
+      await onLogout();
+    }
     setCurrentTab('bookings');
   };
 
@@ -449,7 +450,7 @@ export default function App() {
   };
 
   if (!user) {
-    return <Login onLogin={setUser} />;
+    return null;
   }
 
   return (
@@ -1919,4 +1920,45 @@ export default function App() {
       )}
     </div>
   );
+}
+
+export default function App() {
+  const [session, setSession] = useState({
+    status: 'checking',
+    user: db.getUser(),
+    message: null
+  });
+
+  useEffect(() => {
+    const unsub = subscribeAuthSession((sessionState) => {
+      setSession(sessionState);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setSession({ status: 'unauthenticated', user: null, message: null });
+  };
+
+  if (session.status === 'checking') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ width: '32px', height: '32px', border: '3px solid var(--border-color)', borderTopColor: 'var(--color-brand)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: '600' }}>Confirmando sessão segura...</span>
+        <style dangerouslySetInnerHTML={{__html: `@keyframes spin { to { transform: rotate(360deg); } }`}} />
+      </div>
+    );
+  }
+
+  if (session.status !== 'authenticated' || !session.user) {
+    return (
+      <Login
+        onLogin={(u) => setSession({ status: 'authenticated', user: u, message: null })}
+        initialMessage={session.message}
+      />
+    );
+  }
+
+  return <AuthenticatedApp user={session.user} onLogout={handleLogout} />;
 }

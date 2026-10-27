@@ -1,0 +1,119 @@
+{
+  "locais": {
+    "loc_1": { "id": "loc_1", "name": "Interport Logistica", "clientId": "client_interport" },
+    "loc_2": { "id": "loc_2", "name": "Terminal Vila Velha", "clientId": "client_interport" }
+  },
+  "exportadores": {
+    "exp_1": { "id": "exp_1", "name": "Café Atlântica Exportadora Ltda", "email": "contato@exemplo.com" },
+    "exp_2": { "id": "exp_2", "name": "Tristão Comércio Exterior", "email": "contato@exemplo.com" }
+  },
+  "inspectors": {
+    "ins_1": { "id": "ins_1", "name": "Carlos Santos", "phone": "27999999999" }
+  },
+  "usuarios": {
+    "usr_master": { "id": "usr_master", "name": "Master Unispect", "login": "admin", "password": "hash_secret_mock", "role": "ADM", "email": "master@unispect.com.br" },
+    "usr_interport_adm": { "id": "usr_interport_adm", "name": "Admin Interport", "login": "interport_adm", "password": "hash_secret_mock", "role": "CLIENT_ADMIN", "email": "admin@interport.com.br" },
+    "usr_insp": { "id": "usr_insp", "name": "Carlos Santos", "login": "carlos", "password": "hash_secret_mock", "role": "Inspector", "email": "carlos@unispect.com.br" },
+    "usr_invalid_no_email": { "id": "usr_invalid_no_email", "name": "Usuario Sem Email", "login": "sem_email", "password": "123", "role": "Inspector" },
+    "usr_duplicate_email": { "id": "usr_duplicate_email", "name": "Usuario Duplicado", "login": "dup", "password": "123", "role": "Inspector", "email": "carlos@unispect.com.br" }
+  },
+  "bookings": {
+    "bk_101": {
+      "id": "bk_101",
+      "clientId": "client_interport",
+      "bookingNumber": "MEDU992019",
+      "certificateNumber": "UN1042/2026",
+      "exporterId": "exp_1",
+      "locationId": "loc_1",
+      "status": "Finalizado",
+      "mercadoria": "café",
+      "embalagem": "sacaria",
+      "bagsQuantity": 640,
+      "vesselVoyage": "MSC ILONA / 2026",
+      "containers": [
+        {
+          "id": "c_1",
+          "containerNumber": "MSDU8821297",
+          "containerType": "20\"/DV",
+          "tara": "2200",
+          "grossWeight": "21600",
+          "definiteSeal": "SEAL-998811",
+          "photos": [
+            {
+              "id": "photo_01",
+              "storagePath": "containers/c_1/photo_01.jpg",
+              "url": "https://firebasestorage.googleapis.com/v0/b/unispect-service.firebasestorage.app/o/containers%2Fc_1%2Fphoto_01.jpg?alt=media"
+            },
+            {
+              "id": "photo_02",
+              "storagePath": "containers/c_1/photo_02.jpg",
+              "url": "https://firebasestorage.googleapis.com/v0/b/unispect-service.firebasestorage.app/o/containers%2Fc_1%2Fphoto_02.jpg?alt=media"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "containerPhotos": {
+    "photo_01": {
+      "id": "photo_01",
+      "containerId": "c_1",
+      "storagePath": "containers/c_1/photo_01.jpg",
+      "url": "https://firebasestorage.googleapis.com/v0/b/unispect-service.firebasestorage.app/o/containers%2Fc_1%2Fphoto_01.jpg?alt=media"
+    },
+    "photo_02": {
+      "id": "photo_02",
+      "containerId": "c_1",
+      "storagePath": "containers/c_1/photo_02.jpg",
+      "url": "https://firebasestorage.googleapis.com/v0/b/unispect-service.firebasestorage.app/o/containers%2Fc_1%2Fphoto_02.jpg?alt=media"
+    }
+  },
+  "bookingCounters": {
+    "certificate": {
+      "year": 2026,
+      "value": 1042
+    }
+  },
+  "bookingNumberKeys": {
+    "client_interport_MEDU992019": {
+      "bookingId": "bk_101",
+      "normalizedNumber": "MEDU992019",
+      "clientId": "client_interport"
+    }
+  },
+  "fieldContainers": {
+    "MSDU8821297": {
+      "id": "MSDU8821297",
+      "containerNumber": "MSDU8821297",
+      "clientId": "client_interport",
+      "status": "linked",
+      "linkedBookingId": "bk_101",
+      "linkedContainerId": "c_1"
+    }
+  },
+  "yardPassages": {
+    "yp_01": {
+      "id": "yp_01",
+      "clientId": "client_interport",
+      "normalizedNumber": "MSDU8821297",
+      "yardId": "loc_1",
+      "status": "active"
+    }
+  },
+  "yardActiveLocks": {
+    "lock_loc_1_MSDU8821297": {
+      "passageId": "yp_01",
+      "yardId": "loc_1",
+      "normalizedNumber": "MSDU8821297",
+      "clientId": "client_interport"
+    }
+  },
+  "yardAudits": {
+    "audit_01": {
+      "id": "audit_01",
+      "clientId": "client_interport",
+      "yardId": "loc_1",
+      "status": "completed"
+    }
+  }
+}

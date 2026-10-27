@@ -65,21 +65,38 @@ export async function getPhotoBlob(jobId) {
 }
 
 export async function listBookingPhotoJobs() {
-  const owner=photoQueueOwner();
-  return transaction(['jobs'],'readonly',(tx,done)=>{
-    const req=tx.objectStore('jobs').getAll();
-    req.onsuccess=()=>done((req.result || []).filter(j=>!owner || !j.owner || j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt).map(j=>({
-      ...j,
-      localUrl: localUrls.get(j.id) || null
-    })));
+  const user = db.getUser();
+  const owner = photoQueueOwner();
+  if (!owner) return []; // Se não houver usuário autenticado, não expõe nenhuma pendência
+  const isMaster = Boolean(user?.isUnispectMaster || user?.normalizedRole === 'MASTER');
+
+  return transaction(['jobs'], 'readonly', (tx, done) => {
+    const req = tx.objectStore('jobs').getAll();
+    req.onsuccess = () => done((req.result || [])
+      // Usuário B não visualiza pendências de A nem pendências órfãs.
+      // Master Unispect visualiza suas próprias ou pendências sinalizadas para reconciliação.
+      .filter(j => (j.owner && j.owner === owner) || (isMaster && (!j.owner || !j.clientId || j.status === 'requires_reconciliation')))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(j => ({
+        ...j,
+        localUrl: localUrls.get(j.id) || null
+      }))
+    );
   });
 }
 
-export async function enqueueBookingPhotos(bookingId,containerId,files) {
-  const owner=photoQueueOwner();
+export async function enqueueBookingPhotos(bookingId, containerId, files, options = {}) {
+  const user = db.getUser();
+  const owner = photoQueueOwner();
+  if (!owner) throw new Error('É necessário estar autenticado para capturar fotos.');
   if (!bookingId || !containerId) throw new Error('Selecione um container antes de fotografar.');
-  const jobs=Array.from(files).map(file=>{
-    const id='bookingphoto_'+generateUUID();
+
+  // Preserva de forma imutável o cliente e a autoria de origem no momento da captura
+  const clientId = options.clientId || user?.selectedClientId || user?.authorizedClients?.[0] || 'client_interport';
+  const authorEmail = user?.email || user?.login || 'usuario';
+
+  const jobs = Array.from(files).map(file => {
+    const id = 'bookingphoto_' + generateUUID();
     let localUrl = null;
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && file instanceof Blob) {
       try {
@@ -92,14 +109,16 @@ export async function enqueueBookingPhotos(bookingId,containerId,files) {
     return {
       id,
       owner,
+      authorEmail,
+      clientId,
       bookingId,
       containerId,
       file,
       localUrl,
-      createdAt:Date.now(),
-      attempts:0,
-      nextAttempt:0,
-      error:''
+      createdAt: Date.now(),
+      attempts: 0,
+      nextAttempt: 0,
+      error: ''
     };
   });
   if (!jobs.length || jobs.some(j=>!(j.file instanceof Blob) || !j.file.size)) throw new Error('Foto vazia ou inválida.');
@@ -149,20 +168,48 @@ async function processJob(job) {
   const idStr = String(job.id);
   try {
     if (cancelledJobIds.has(idStr)) return;
-    if (photoQueueOwner()!==job.owner) return;
-    let photo=job.photo;
+
+    // Registros legados sem owner ou clientId suficientes: não descarta nem atribui ao usuário atual
+    if (!job.owner || !job.clientId) {
+      if (job.status !== 'requires_reconciliation') {
+        await saveJob({
+          ...job,
+          status: 'requires_reconciliation',
+          error: 'Origem ou cliente não comprovados. Registro protegido aguardando reconciliação.'
+        });
+      }
+      return;
+    }
+
+    const currentOwner = photoQueueOwner();
+    // B não envia as pendências de A (e usuário desconectado não envia nada)
+    if (!currentOwner || currentOwner !== job.owner) return;
+
+    // Usuário deve ter autorização para o clientId de origem da foto
+    const currentUser = db.getUser();
+    const isMaster = Boolean(currentUser?.isUnispectMaster || currentUser?.normalizedRole === 'MASTER');
+    const hasAuthorizedList = Array.isArray(currentUser?.authorizedClients);
+    const isAuthorized = isMaster || !hasAuthorizedList || currentUser.authorizedClients.includes(job.clientId) || currentUser.authorizedClients.includes('*');
+    if (!isAuthorized) return;
+
+    let photo = job.photo;
     if (!photo) {
-      const local=await get('blobs',job.id);
+      const local = await get('blobs', job.id);
       if (!local?.blob?.size) {
         if (cancelledJobIds.has(idStr)) return;
         throw new Error('Foto local não encontrada. O registro foi mantido para revisão.');
       }
-      photo=await db.uploadPhoto(local.blob,job.containerId,{photoId:job.id});
+      // Envia com o clientId e authorEmail originais da captura, sem herdar a tela ativa
+      photo = await db.uploadPhoto(local.blob, job.containerId, {
+        photoId: job.id,
+        clientId: job.clientId,
+        authorEmail: job.authorEmail
+      });
       if (cancelledJobIds.has(idStr)) {
         await db.deletePhoto(photo.id, photo.storagePath).catch(() => {});
         return;
       }
-      job={...job,photo};
+      job = { ...job, photo };
       await saveJob(job); // Upload confirmado: retentar vínculo não reenvia o arquivo.
     }
     if (cancelledJobIds.has(idStr)) {

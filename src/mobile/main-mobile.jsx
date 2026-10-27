@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import '../firebase.js';
+import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css';
 import MobileAppView from '../components/MobileAppView';
@@ -32,33 +33,56 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Inicializar banco
+import { subscribeAuthSession, logoutUser } from '../utils/authService';
+
+// Inicializar banco apenas quando necessário
 db.init().catch(err => console.error('DB init error:', err));
 startBookingPhotoQueue();
 
 function MobileRoot() {
-  const [user, setUser] = useState(db.getUser());
+  const [session, setSession] = useState({
+    status: 'checking',
+    user: db.getUser(),
+    message: null
+  });
 
-  const handleLogin = (u) => {
-    db.setUser(u);
-    setUser(u);
+  useEffect(() => {
+    const unsubscribe = subscribeAuthSession(sessionState => {
+      setSession(sessionState);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await logoutUser();
   };
 
-  const handleLogout = () => {
-    db.setUser(null);
-    setUser(null);
-  };
+  if (session.status === 'checking') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ width: '32px', height: '32px', border: '3px solid var(--border-color)', borderTopColor: 'var(--color-brand)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: '600' }}>Confirmando sessão segura...</span>
+        <style dangerouslySetInnerHTML={{__html: `@keyframes spin { to { transform: rotate(360deg); } }`}} />
+      </div>
+    );
+  }
 
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
+  if (session.status !== 'authenticated' || !session.user) {
+    return (
+      <Login
+        onLogin={(u) => setSession({ status: 'authenticated', user: u, message: null })}
+        initialMessage={session.message}
+      />
+    );
   }
 
   return (
     <MobileAppView
-      user={user}
+      user={session.user}
       onLogout={handleLogout}
     />
   );
 }
 
 createRoot(document.getElementById('root')).render(<MobileRoot />);
+

@@ -1,6 +1,21 @@
 import { validateFieldCapture } from './fieldContainers.js';
 import { generateUUID } from './uuid.js';
 
+function getActiveSessionUser() {
+  if (typeof globalThis !== 'undefined' && globalThis.__unispectActiveUser) {
+    return globalThis.__unispectActiveUser;
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('containtrack_user');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 const DB_NAME = 'unispect-field-captures-v1';
 const STORES = ['drafts', 'outbox', 'photos'];
 const uid = prefix => prefix + '_' + generateUUID();
@@ -63,14 +78,20 @@ export const fieldQueue = {
     const timestamp = Date.now();
     const operationId = uid('capture');
     const photos = files.map(file => ({ id: uid('fieldphoto'), blob: file, name: file.name || '', number: fields.containerNumber }));
+    const currentUser = getActiveSessionUser();
+    const ownerId = context.ownerId || (typeof actor === 'object' && actor?.id) || currentUser?.id || currentUser?.uid || '';
+    const authorEmail = context.authorEmail || (typeof actor === 'object' && actor?.name) || currentUser?.email || (typeof actor === 'string' ? actor : '');
+    const clientId = context.clientId || currentUser?.selectedClientId || currentUser?.authorizedClients?.[0] || '';
     const result = await localTransaction(STORES, 'readwrite', (tx, finish) => {
       requestValue(tx, 'drafts', fields.containerNumber, previous => {
         const sourceContainerId = context.sourceContainerId || previous?.sourceContainerId || uid('fieldcontainer');
         const draft = { ...previous, number: fields.containerNumber, fields, sourceContainerId,
           photos: [...(previous?.photos || context.photos || []), ...photos.map(p => ({ id: p.id, name: '', local: true }))],
           pendingOperationIds: [...(previous?.pendingOperationIds || []), operationId], actor,
+          ownerId, authorEmail, clientId,
           createdAt: previous?.createdAt || timestamp, updatedAt: timestamp, remoteStatus: context.status || previous?.remoteStatus || 'pending' };
         const operation = { id: operationId, number: fields.containerNumber, fields, sourceContainerId, actor,
+          ownerId, authorEmail, clientId,
           createdAt: timestamp, photoIds: photos.map(p => p.id), uploaded: {}, attempts: 0, error: '' };
         tx.objectStore('drafts').put(draft);
         tx.objectStore('outbox').put(operation);
@@ -202,6 +223,38 @@ export function createFieldSync({ queue, remote, upload, isOnline = () => true, 
       for (const operation of operations) {
         if (!isOnline()) break;
         onState({ syncing: true, number: operation.number });
+
+        // Comprovação rigorosa de origem: Identidade estável do usuário E clientId de origem são OBRIGATÓRIOS.
+        // actor, inspectorName ou yardId isolados NÃO devem ser considerados prova suficiente de autorização.
+        const opOwnerId = operation.ownerId || (typeof operation.actor === 'object' ? operation.actor?.id : null);
+        const opClientId = operation.clientId;
+
+        if (!opOwnerId || !opClientId) {
+          await queue.fail(operation.id, new Error('Origem não comprovada (identidade estável ou clientId ausente). Registro mantido protegido para reconciliação.'));
+          continue;
+        }
+
+        // Validação do usuário atualmente autenticado:
+        const currentUser = getActiveSessionUser();
+        const currentUserId = currentUser?.id || currentUser?.uid;
+        if (!currentUser || !currentUserId) {
+          // Desconectado: encerra ciclo de sincronização
+          break;
+        }
+
+        const isMaster = Boolean(currentUser.isUnispectMaster || currentUser.normalizedRole === 'MASTER');
+        // B não envia as pendências de A
+        if (!isMaster && currentUserId !== opOwnerId) {
+          continue;
+        }
+
+        // Usuário deve ter autorização para o clientId de origem da operação
+        const hasAuthList = Array.isArray(currentUser.authorizedClients);
+        const isAuthorized = isMaster || !hasAuthList || currentUser.authorizedClients.includes(opClientId) || currentUser.authorizedClients.includes('*');
+        if (!isAuthorized) {
+          continue;
+        }
+
         if (operation.type === 'delete') {
           try {
             await remote.deleteFieldContainer(operation.number, operation.actor);

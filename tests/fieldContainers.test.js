@@ -5,8 +5,9 @@ import { createBookingRepository, planImport, previewToken } from '../src/utils/
 import { createFieldSync } from '../src/utils/fieldQueue.js';
 
 const number = 'ABCU0000001';
+globalThis.__unispectActiveUser = { id: 'inspector', role: 'Inspector', authorizedClients: ['client_interport'] };
 const fields = { containerNumber: number, tara: '3800', sealType: 'definitive', sealNumber: 'SEAL1' };
-const operation = (id = 'op1') => ({ id, number, fields, sourceContainerId: 'field-identity', actor: { id: 'inspector', name: 'Inspector' }, createdAt: 1000, photoIds: ['p1'], uploaded: {} });
+const operation = (id = 'op1') => ({ id, number, fields, sourceContainerId: 'field-identity', actor: { id: 'inspector', name: 'Inspector' }, ownerId: 'inspector', clientId: 'client_interport', createdAt: 1000, photoIds: ['p1'], uploaded: {} });
 const photo = id => ({ id, url: `https://example.test/${id}`, storagePath: `containers/field/${id}.jpg`, name: '' });
 const container = { id: 'existing', containerNumber: number, tara: '4000', definiteSeal: 'OLD', photos: [photo('old')], status: 'Pendente' };
 const booking = (containers = [container]) => ({ id: 'booking', bookingNumber: 'BK123', containers, status: 'Em andamento', exporterId: 'e', locationId: 'l', certificateNumber: 'UN1000/2026' });
@@ -320,7 +321,7 @@ test('envios antigos de outros aparelhos não recriam container excluído, mas n
 
 test('sincronizador executa operação de exclusão offline com sucesso', async () => {
   let deletedNumber = null;
-  const deleteOp = { id: 'del_1', type: 'delete', number, sourceContainerId: 'id1', actor: { id: 'adm', role: 'ADM' } };
+  const deleteOp = { id: 'del_1', type: 'delete', number, sourceContainerId: 'id1', actor: { id: 'adm', role: 'ADM' }, ownerId: 'inspector', clientId: 'client_interport' };
   const jobs = new Map([['del_1', deleteOp]]);
   let acknowledged = 0;
   const queue = {

@@ -81,10 +81,9 @@ export const db = {
   appendBookingPhoto: concurrent.appendPhoto,
   removeBookingPhoto: concurrent.removePhoto,
   async init() {
-    await initializeCollectionIfEmpty(LOCALS_COL, defaultLocais);
-    await initializeCollectionIfEmpty(EXPORTERS_COL, defaultExportadores);
-    await initializeCollectionIfEmpty(INSPECTORS_COL, defaultInspectors);
-    await initializeCollectionIfEmpty(USERS_COL, defaultUsers);
+    // A inicialização de dados padrão é uma operação administrativa de provisionamento.
+    // Não executa chamadas anônimas ao Firestore antes da confirmação da sessão de usuário.
+    return;
   },
 
   // Locais
