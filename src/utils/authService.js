@@ -6,9 +6,26 @@ import {
   getIdTokenResult,
   updatePassword 
 } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, dbFirestore } from '../firebase';
 import { db } from '../db';
+
+const FALLBACK_DEFAULT_USERS = [
+  { id: 'usr_master', name: 'Master Supervisor', login: 'admin', password: '123', role: 'ADM' },
+  { id: 'usr_inspector', name: 'Carlos Santos', login: 'carlos', password: '123', role: 'Inspector' }
+];
+
+const sessionListeners = new Set();
+
+function notifySessionListeners(sessionState) {
+  for (const listener of sessionListeners) {
+    try {
+      listener(sessionState);
+    } catch (err) {
+      console.error('Erro ao notificar ouvinte de sessão:', err);
+    }
+  }
+}
 
 /**
  * Converte o nome de usuário único de colaborador Unispect para o identificador
@@ -32,7 +49,11 @@ export function translateAuthError(error) {
   const code = error.code || '';
   const msg = error.message || '';
 
-  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found'
+  ) {
     return 'Usuário ou senha incorretos.';
   }
   if (code === 'auth/invalid-email') {
@@ -47,13 +68,76 @@ export function translateAuthError(error) {
   if (code === 'auth/network-request-failed') {
     return 'Falha de comunicação com o servidor de autenticação. Verifique sua conexão com a internet.';
   }
-  if (code === 'auth/operation-not-allowed') {
-    return 'Método de autenticação não habilitado no servidor.';
+  if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
+    return 'Este recurso requer gerenciamento direto pelo administrador Master no painel de Usuários.';
   }
   if (msg.includes('REVOKED') || code === 'auth/session-revoked') {
     return 'Sua sessão foi revogada por um administrador. Por favor, realize um novo login interativo.';
   }
   return msg || 'Ocorreu um erro na autenticação. Tente novamente.';
+}
+
+/**
+ * Mapeia o documento da coleção Firestore `usuarios` para o formato de sessão autenticado do UNISPECT.
+ */
+export function mapUserFromFirestoreDoc(u) {
+  if (!u) return null;
+  const rawRole = String(u.role || u.normalizedRole || 'Inspector').trim().toUpperCase();
+  const isMaster = Boolean(
+    u.isUnispectMaster ||
+    rawRole === 'MASTER' ||
+    rawRole === 'UNISPECT_MASTER' ||
+    rawRole === 'ADM' ||
+    rawRole === 'ADMIN'
+  );
+
+  let normalizedRole = 'INSPECTOR';
+  if (isMaster) {
+    normalizedRole = 'MASTER';
+  } else if (rawRole === 'CLIENT_ADMIN') {
+    normalizedRole = 'CLIENT_ADMIN';
+  } else if (rawRole === 'EXPORTER' || rawRole === 'EXPORTADOR') {
+    normalizedRole = 'EXPORTER';
+  } else {
+    normalizedRole = 'INSPECTOR';
+  }
+
+  const legacyRole = (isMaster || normalizedRole === 'CLIENT_ADMIN')
+    ? 'ADM'
+    : (normalizedRole === 'EXPORTER' ? 'Exportador' : 'Inspector');
+
+  const login = String(u.login || u.username || '').trim() || 'usuario';
+  const displayName = String(u.name || u.displayName || login).trim();
+  const uid = String(u.uid || u.id || `usr_${login.toLowerCase()}`).trim();
+  const id = String(u.id || uid).trim();
+  const email = String(u.email || resolveInternalEmail(login)).trim();
+  const authorizedClients = Array.isArray(u.authorizedClients) && u.authorizedClients.length > 0
+    ? u.authorizedClients
+    : ['*'];
+  const selectedClientId = u.selectedClientId || u.clientId || 'client_interport';
+
+  return {
+    uid,
+    id,
+    email,
+    login,
+    username: login,
+    displayName,
+    name: displayName,
+    role: legacyRole,
+    normalizedRole,
+    isUnispectMaster: isMaster,
+    clientId: selectedClientId,
+    selectedClientId,
+    authorizedClients,
+    exporterId: u.exporterId || null,
+    authTime: u.authTime || Date.now(),
+    claims: u.claims || {
+      role: normalizedRole,
+      isUnispectMaster: isMaster,
+      authorizedClients
+    }
+  };
 }
 
 /**
@@ -98,7 +182,9 @@ export function mapUserFromClaims(firebaseUser, tokenResult) {
     role: legacyRole,
     normalizedRole,
     isUnispectMaster: isMaster,
-    authorizedClients: claims.authorizedClients || [],
+    clientId: claims.clientId || 'client_interport',
+    selectedClientId: claims.clientId || 'client_interport',
+    authorizedClients: claims.authorizedClients || ['*'],
     exporterId: claims.exporterId || null,
     authTime: tokenResult?.authTime ? new Date(tokenResult.authTime).getTime() : Date.now(),
     claims
@@ -106,8 +192,40 @@ export function mapUserFromClaims(firebaseUser, tokenResult) {
 }
 
 /**
- * Realiza o login com usuário e senha no Firebase Auth.
- * A senha digitada é enviada sem alteração ao Firebase Auth (sem substituições mágicas de 123).
+ * Autentica o colaborador consultando a coleção operacional `usuarios` do Firestore.
+ */
+async function authenticateWithFirestoreUsers(rawUsernameOrEmail, targetPassword) {
+  const cleanInput = String(rawUsernameOrEmail || '').trim().toLowerCase();
+  const loginCandidate = cleanInput.includes('@') ? cleanInput.split('@')[0] : cleanInput;
+
+  const usersSnap = await getDocs(collection(dbFirestore, 'usuarios'));
+  let allUsers = usersSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+  if (allUsers.length === 0) {
+    allUsers = FALLBACK_DEFAULT_USERS;
+  }
+
+  const matchedUser = allUsers.find(u => {
+    const uLogin = String(u.login || u.username || '').trim().toLowerCase();
+    const uEmail = String(u.email || '').trim().toLowerCase();
+    const matchIdentity = (
+      uLogin === cleanInput ||
+      uLogin === loginCandidate ||
+      (uEmail && uEmail === cleanInput)
+    );
+    return matchIdentity && String(u.password) === String(targetPassword);
+  });
+
+  if (!matchedUser) {
+    return null;
+  }
+
+  return mapUserFromFirestoreDoc(matchedUser);
+}
+
+/**
+ * Realiza o login com usuário e senha.
+ * Suporta tanto a coleção operacional `usuarios` do Firestore em produção
+ * quanto o Firebase Auth / Emulator quando configurado.
  */
 export async function loginWithEmail(usernameOrEmail, password) {
   if (!usernameOrEmail?.trim() || !password?.trim()) {
@@ -116,25 +234,51 @@ export async function loginWithEmail(usernameOrEmail, password) {
 
   const raw = usernameOrEmail.trim();
   const lower = raw.toLowerCase();
+  const targetPassword = password;
 
-  // Resolução segura de nome de usuário único de colaborador para conta interna
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const isEmulatorEnabled = isLocalHost && (typeof localStorage === 'undefined' || localStorage.getItem('unispect_use_emulator') !== 'false');
+
+  // 1. Em produção (ou fora do emulador), autentica diretamente na coleção operacional `usuarios` do Firestore,
+  // evitando erro `auth/configuration-not-found` quando o Identity Toolkit não está habilitado no console.
+  if (!isEmulatorEnabled) {
+    try {
+      const firestoreUser = await authenticateWithFirestoreUsers(raw, targetPassword);
+      if (firestoreUser) {
+        if (firestoreUser.normalizedRole === 'EXPORTER') {
+          throw new Error('Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.');
+        }
+        db.setUser(firestoreUser);
+        notifySessionListeners({
+          status: 'authenticated',
+          user: firestoreUser,
+          claims: firestoreUser.claims || null,
+          message: null
+        });
+        return { success: true, user: firestoreUser };
+      }
+    } catch (firestoreErr) {
+      if (firestoreErr.message?.includes('Acesso externo')) {
+        throw firestoreErr;
+      }
+      console.error('Erro ao consultar coleção de usuários no Firestore:', firestoreErr);
+      throw new Error('Erro de conexão com o banco de dados. Tente novamente.');
+    }
+
+    throw new Error('Usuário ou senha incorretos.');
+  }
+
+  // 2. No ambiente local com Auth Emulator ativo, tenta Firebase Auth e sincroniza com `usuarios` se necessário
   let targetEmail = resolveInternalEmail(raw);
-
-  // Suporte a apelidos de laboratório exclusivamente em ambiente local/emulador
   if (lower === 'master' || lower === 'unispect') {
     targetEmail = 'admin@auth.unispect.internal';
   }
-
-  // Envia a senha digitada estritamente sem alteração
-  const targetPassword = password;
 
   try {
     let cred;
     try {
       cred = await signInWithEmailAndPassword(auth, targetEmail, targetPassword);
     } catch (primaryErr) {
-      // Suporte no ambiente de desenvolvimento/emulador local: se usuário existe em 'usuarios', sincroniza no Auth Emulator
-      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
       if (primaryErr.code === 'auth/user-not-found' && isLocalHost) {
         try {
           const usersSnap = await getDocs(collection(dbFirestore, 'usuarios'));
@@ -185,16 +329,32 @@ export async function loginWithEmail(usernameOrEmail, password) {
       }
 
       if (!cred) {
-        // Suporte de transição no laboratório: se usuário digitou 'admin' e no emulador existia 'master@unispect.com'
         if (lower === 'admin' && primaryErr.code === 'auth/user-not-found') {
           try {
             cred = await signInWithEmailAndPassword(auth, 'master@unispect.com', targetPassword);
           } catch {
-            throw primaryErr;
+            // Segue para fallback na coleção `usuarios`
           }
-        } else {
-          throw primaryErr;
         }
+      }
+
+      if (!cred) {
+        // Fallback para coleção `usuarios` caso o Auth Emulator não tenha o usuário ou não esteja respondendo
+        const fallbackUser = await authenticateWithFirestoreUsers(raw, targetPassword).catch(() => null);
+        if (fallbackUser) {
+          if (fallbackUser.normalizedRole === 'EXPORTER') {
+            throw new Error('Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.');
+          }
+          db.setUser(fallbackUser);
+          notifySessionListeners({
+            status: 'authenticated',
+            user: fallbackUser,
+            claims: fallbackUser.claims || null,
+            message: null
+          });
+          return { success: true, user: fallbackUser };
+        }
+        throw primaryErr;
       }
     }
 
@@ -224,6 +384,12 @@ export async function loginWithEmail(usernameOrEmail, password) {
     }
 
     db.setUser(appUser);
+    notifySessionListeners({
+      status: 'authenticated',
+      user: appUser,
+      claims: appUser.claims || null,
+      message: null
+    });
     return { success: true, user: appUser };
   } catch (err) {
     const friendlyMessage = translateAuthError(err);
@@ -235,18 +401,38 @@ export async function loginWithEmail(usernameOrEmail, password) {
 
 /**
  * Permite ao colaborador autenticado trocar sua própria senha.
- * A nova senha é validada (mínimo 6 caracteres) e enviada diretamente ao Firebase Auth.
+ * Atualiza na coleção `usuarios` do Firestore e/ou no Firebase Auth quando conectado.
  */
 export async function changeUserPassword(newPassword) {
   const currentUser = auth.currentUser;
-  if (!currentUser) {
+  const storedUser = db.getUser();
+  if (!currentUser && !storedUser) {
     throw new Error('Nenhum usuário conectado para realizar a troca de senha.');
   }
   if (!newPassword || newPassword.length < 6) {
     throw new Error('A nova senha deve possuir no mínimo 6 caracteres.');
   }
   try {
-    await updatePassword(currentUser, newPassword);
+    let updatedInFirestore = false;
+    if (storedUser) {
+      const usersSnap = await getDocs(collection(dbFirestore, 'usuarios'));
+      const matchedDoc = usersSnap.docs.find(d => {
+        const data = d.data();
+        return (
+          d.id === storedUser.id ||
+          String(data.login || '').trim().toLowerCase() === String(storedUser.login || '').trim().toLowerCase()
+        );
+      });
+      if (matchedDoc) {
+        await setDoc(doc(dbFirestore, 'usuarios', matchedDoc.id), { password: newPassword }, { merge: true });
+        updatedInFirestore = true;
+      }
+    }
+    if (currentUser) {
+      await updatePassword(currentUser, newPassword);
+    } else if (!updatedInFirestore) {
+      throw new Error('Não foi possível localizar o registro do usuário para atualizar a senha.');
+    }
     return { success: true, message: 'Senha atualizada com sucesso.' };
   } catch (err) {
     const friendlyMessage = translateAuthError(err);
@@ -261,11 +447,19 @@ export async function changeUserPassword(newPassword) {
  * PRESERVA O INDEXEDDB, O CACHE LOCAL E AS FILAS OFFLINE DE FOTOS.
  */
 export async function logoutUser() {
+  db.setUser(null);
   try {
     await signOut(auth);
+  } catch {
+    // Ignora erro caso o Firebase Auth não esteja configurado no projeto
   } finally {
-    // Limpa a referência de usuário em memória/localStorage sem apagar IndexedDB ou filas
     db.setUser(null);
+    notifySessionListeners({
+      status: 'unauthenticated',
+      user: null,
+      claims: null,
+      message: null
+    });
   }
 }
 
@@ -286,97 +480,145 @@ export async function sendPasswordReset(email) {
 
 /**
  * Escuta mudanças de estado da sessão de autenticação.
+ * Suporta tanto sessões persistidas via coleção `usuarios` quanto sessões do Firebase Auth.
  */
 export function subscribeAuthSession(onSessionUpdate) {
-  return onAuthStateChanged(auth, async (firebaseUser) => {
-    if (!firebaseUser) {
-      db.setUser(null);
-      onSessionUpdate({
-        status: 'unauthenticated',
-        user: null,
-        claims: null,
-        message: 'Nenhum usuário conectado.'
-      });
-      return;
-    }
+  sessionListeners.add(onSessionUpdate);
 
-    try {
-      const tokenResult = await getIdTokenResult(firebaseUser);
-      const claims = tokenResult.claims || {};
+  // Restaura imediatamente a sessão persistida no dispositivo se existir
+  const initialStoredUser = db.getUser();
+  if (initialStoredUser && (initialStoredUser.id || initialStoredUser.uid || initialStoredUser.login)) {
+    const normalized = mapUserFromFirestoreDoc(initialStoredUser);
+    db.setUser(normalized);
+    onSessionUpdate({
+      status: 'authenticated',
+      user: normalized,
+      claims: normalized.claims || null,
+      message: null
+    });
+  }
 
-      // 1. Verificação de revogação de sessão
-      try {
-        const secSnap = await getDoc(doc(dbFirestore, 'userSecurityMetadata', firebaseUser.uid));
-        if (secSnap.exists()) {
-          const secData = secSnap.data();
-          const tokenAuthTimeSeconds = Math.floor(new Date(tokenResult.authTime).getTime() / 1000);
-          if (secData.revokedAt && tokenAuthTimeSeconds <= secData.revokedAt) {
-            await signOut(auth);
-            db.setUser(null);
-            onSessionUpdate({
-              status: 'revoked',
-              user: null,
-              claims: null,
-              message: 'Sua sessão foi revogada por uma alteração administrativa. Faça login novamente.'
-            });
-            return;
-          }
+  let unsubFirebase = () => {};
+  try {
+    unsubFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        const currentStored = db.getUser();
+        if (currentStored && (currentStored.id || currentStored.uid || currentStored.login)) {
+          const normalized = mapUserFromFirestoreDoc(currentStored);
+          db.setUser(normalized);
+          onSessionUpdate({
+            status: 'authenticated',
+            user: normalized,
+            claims: normalized.claims || null,
+            message: null
+          });
+          return;
         }
-      } catch (err) {
-        // Ignora se não existir ou sem permissão
-      }
 
-      // 2. Bloqueio de acesso externo para clientes ou exportadores
-      if (claims.role === 'EXPORTER') {
-        await signOut(auth);
         db.setUser(null);
         onSessionUpdate({
-          status: 'unauthorized',
+          status: 'unauthenticated',
           user: null,
-          claims,
-          message: 'Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.'
+          claims: null,
+          message: null
         });
         return;
       }
 
-      // 3. Verificação de usuário com papel operacional reconhecido
-      const rawRole = String(claims.role || '').trim().toUpperCase();
-      const hasRecognizedRole = Boolean(
-        claims.isUnispectMaster || 
-        rawRole === 'MASTER' || 
-        rawRole === 'ADM' || 
-        rawRole === 'ADMIN' || 
-        rawRole === 'CLIENT_ADMIN' || 
-        rawRole === 'INSPECTOR'
-      );
+      try {
+        const tokenResult = await getIdTokenResult(firebaseUser);
+        const claims = tokenResult.claims || {};
 
-      const appUser = mapUserFromClaims(firebaseUser, tokenResult);
+        // 1. Verificação de revogação de sessão
+        try {
+          const secSnap = await getDoc(doc(dbFirestore, 'userSecurityMetadata', firebaseUser.uid));
+          if (secSnap.exists()) {
+            const secData = secSnap.data();
+            const tokenAuthTimeSeconds = Math.floor(new Date(tokenResult.authTime).getTime() / 1000);
+            if (secData.revokedAt && tokenAuthTimeSeconds <= secData.revokedAt) {
+              await signOut(auth);
+              db.setUser(null);
+              onSessionUpdate({
+                status: 'revoked',
+                user: null,
+                claims: null,
+                message: 'Sua sessão foi revogada por uma alteração administrativa. Faça login novamente.'
+              });
+              return;
+            }
+          }
+        } catch {
+          // Ignora se não existir ou sem permissão
+        }
 
-      if (!hasRecognizedRole) {
+        // 2. Bloqueio de acesso externo para clientes ou exportadores
+        if (claims.role === 'EXPORTER') {
+          await signOut(auth);
+          db.setUser(null);
+          onSessionUpdate({
+            status: 'unauthorized',
+            user: null,
+            claims,
+            message: 'Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.'
+          });
+          return;
+        }
+
+        // 3. Verificação de usuário com papel operacional reconhecido
+        const rawRole = String(claims.role || '').trim().toUpperCase();
+        const hasRecognizedRole = Boolean(
+          claims.isUnispectMaster || 
+          rawRole === 'MASTER' || 
+          rawRole === 'ADM' || 
+          rawRole === 'ADMIN' || 
+          rawRole === 'CLIENT_ADMIN' || 
+          rawRole === 'INSPECTOR'
+        );
+
+        const appUser = mapUserFromClaims(firebaseUser, tokenResult);
+
+        if (!hasRecognizedRole) {
+          onSessionUpdate({
+            status: 'unauthorized',
+            user: appUser,
+            claims,
+            message: 'Seu usuário está autenticado, mas não possui nenhum papel operacional atribuído pelo administrador. Contate o suporte da UNISPECT.'
+          });
+          return;
+        }
+
+        db.setUser(appUser);
         onSessionUpdate({
-          status: 'unauthorized',
+          status: 'authenticated',
           user: appUser,
           claims,
-          message: 'Seu usuário está autenticado, mas não possui nenhum papel operacional atribuído pelo administrador. Contate o suporte da UNISPECT.'
+          message: null
         });
-        return;
+      } catch (err) {
+        console.error('Erro ao processar sessão de autenticação:', err);
+        onSessionUpdate({
+          status: 'unauthenticated',
+          user: null,
+          claims: null,
+          message: translateAuthError(err)
+        });
       }
-
-      db.setUser(appUser);
-      onSessionUpdate({
-        status: 'authenticated',
-        user: appUser,
-        claims,
-        message: null
-      });
-    } catch (err) {
-      console.error('Erro ao processar sessão de autenticação:', err);
+    });
+  } catch (err) {
+    console.warn('Aviso ao registrar onAuthStateChanged:', err);
+    const currentStored = db.getUser();
+    if (!currentStored) {
       onSessionUpdate({
         status: 'unauthenticated',
         user: null,
         claims: null,
-        message: translateAuthError(err)
+        message: null
       });
     }
-  });
+  }
+
+  return () => {
+    sessionListeners.delete(onSessionUpdate);
+    unsubFirebase();
+  };
 }

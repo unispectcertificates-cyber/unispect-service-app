@@ -8,7 +8,7 @@ import { db } from './db'
 import { registerSW } from 'virtual:pwa-register'
 
 // Controle de versão do build para invalidar caches antigos no navegador do usuário
-const CURRENT_APP_BUILD = '2026.10.19.r3';
+const CURRENT_APP_BUILD = '2026.11.01.r1';
 try {
   const cachedBuild = localStorage.getItem('unispect_app_build');
   if (cachedBuild !== CURRENT_APP_BUILD) {
