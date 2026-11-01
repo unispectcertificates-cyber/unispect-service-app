@@ -1,11 +1,20 @@
-import { useState } from 'react';
-import { ChevronLeft, Download, Printer } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ChevronLeft, Download, Printer, FileCheck } from 'lucide-react';
 import { db, useLocais, useExportadores, useBookings, getSealText } from '../db';
+import {
+  getResponsibleInspectorInfo,
+  isAuthorizedAdminRole,
+  signInspectionCertificate,
+  recordReportAuditAction,
+  formatAuditTimestampSp
+} from '../utils/inspectionAudit';
 
-export default function ReportView({ bookingId, reportType, onBack }) {
+export default function ReportView({ bookingId, reportType, onBack, user }) {
   const exporters = useExportadores();
   const locations = useLocais();
   const bookings = useBookings();
+  const activeUser = user || db.getUser();
+  const loggedGenerationRef = useRef(null);
   
   const booking = reportType === 'operational' && bookingId 
     ? bookings.find(b => b.id === bookingId) 
@@ -15,8 +24,86 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     ? bookings 
     : [];
 
+  const primaryContainer = (booking?.containers || []).find(c => c?.responsibleInspector?.id || c?.responsibleInspector?.uid) || (booking?.containers || [])[0] || {};
+  const bookingRespInfo = getResponsibleInspectorInfo(primaryContainer, booking || {});
+  const bookingCertSig = booking?.certificateSignature || primaryContainer?.certificateSignature || null;
+  const canSignCert = Boolean(
+    activeUser &&
+    bookingRespInfo.isIdentified &&
+    (String(activeUser.uid || activeUser.id) === String(bookingRespInfo.id) || isAuthorizedAdminRole(activeUser))
+  );
+
+  // Registra geração do relatório na linha do tempo ao abrir a visualização operacional
+  useEffect(() => {
+    if (reportType !== 'operational' || !booking?.id || !activeUser) return;
+    const genKey = `${booking.id}::${activeUser.uid || activeUser.id}`;
+    if (loggedGenerationRef.current === genKey) return;
+    loggedGenerationRef.current = genKey;
+
+    const firstCont = (booking.containers || [])[0];
+    if (firstCont?.id && db.recordContainerReportAction) {
+      void db.recordContainerReportAction(booking.id, firstCont.id, {
+        authenticatedUser: activeUser,
+        actionType: 'report_generated',
+        format: 'PREVIEW'
+      }).catch(() => {});
+    }
+  }, [reportType, booking?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSignCertificateHere = async () => {
+    if (!booking || !activeUser) return;
+    try {
+      const targetCont = primaryContainer?.id
+        ? primaryContainer
+        : { id: 'booking_cert', containerNumber: booking.bookingNumber || booking.id, responsibleInspector: booking.responsibleInspector };
+      const res = signInspectionCertificate({
+        container: targetCont,
+        booking,
+        authenticatedUser: activeUser,
+        clientId: booking.clientId || 'client_interport',
+        bookingId: booking.id
+      });
+      const updatedContainers = (booking.containers || []).map(c =>
+        c.id === targetCont.id ? res.container : { ...c, certificateSignature: res.certificateSignature }
+      );
+      await db.saveBooking({
+        ...booking,
+        certificateSignature: res.certificateSignature,
+        containers: updatedContainers
+      });
+    } catch (err) {
+      alert(err.message || 'Não foi possível assinar digitalmente o certificado.');
+    }
+  };
+
+  const logReportDownload = (format) => {
+    if (reportType !== 'operational' || !booking?.id || !activeUser) return;
+    const firstCont = (booking.containers || [])[0];
+    if (firstCont?.id && db.recordContainerReportAction) {
+      void db.recordContainerReportAction(booking.id, firstCont.id, {
+        authenticatedUser: activeUser,
+        actionType: 'report_downloaded',
+        format
+      }).catch(() => {});
+    } else if (firstCont) {
+      try {
+        recordReportAuditAction({
+          container: firstCont,
+          authenticatedUser: activeUser,
+          actionType: 'report_downloaded',
+          format,
+          clientId: booking.clientId || 'client_interport',
+          bookingId: booking.id
+        });
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   // Exportar Word (.docx) via Blob HTML de forma robusta e compatível com Word
   const handleExportWord = () => {
+    logReportDownload('WORD');
     let htmlContent;
     const filename = reportType === 'operational' 
       ? `Certificado_Estufagem_${booking?.certificateNumber.replace('/', '_')}.doc`
@@ -468,6 +555,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
 
   const handlePrint = async () => {
     if (isExportingPdf) return;
+    logReportDownload('PDF');
 
     if (window.html2pdf) {
       const element = document.getElementById('printable-content');
@@ -521,7 +609,27 @@ export default function ReportView({ bookingId, reportType, onBack }) {
           <ChevronLeft size={16} /> Back
         </button>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {reportType === 'operational' && booking && (
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginRight: '8px' }}>
+              Inspetor responsável: <strong style={{ color: bookingRespInfo.isIdentified ? '#10b981' : '#f59e0b' }}>{bookingRespInfo.displayLabel}</strong>
+              {' • '}
+              {bookingCertSig?.isSigned
+                ? <span style={{ color: '#22d3ee', fontWeight: 700 }}>Assinado por {bookingCertSig.signedBy?.name}</span>
+                : <span style={{ color: '#94a3b8' }}>Certificado ainda não assinado</span>}
+            </div>
+          )}
+          {reportType === 'operational' && canSignCert && (
+            <button
+              type="button"
+              onClick={handleSignCertificateHere}
+              className="btn btn-primary"
+              style={{ backgroundColor: '#0284c7', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700' }}
+            >
+              <FileCheck size={16} />
+              {bookingCertSig?.isSigned ? 'Revalidar Assinatura Digital' : 'Assinar Digitalmente'}
+            </button>
+          )}
           {reportType === 'administrative' && (
             <button onClick={handleExportExcel} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700' }}>
               📊 Exportar Excel
@@ -858,13 +966,24 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                       <span>Page {pageNum} of {totalPages}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
-                      {/* Bloco de Assinatura Bruno O. G. Lobo */}
-                      <div className="signature-block">
-                        <img
-                          src="/assinatura.jpg"
-                          alt="Assinatura Bruno O. G. Lobo"
-                          style={{ width: '140px', height: 'auto', display: 'block', objectFit: 'contain' }}
-                        />
+                      {/* Bloco de Assinatura Digital do Certificado: distingue responsabilidade da inspeção de assinatura do certificado (Regra 3) */}
+                      <div className="signature-block" style={{ textAlign: 'right', fontSize: '9.5px', lineHeight: 1.35, color: '#1e293b' }}>
+                        <div>
+                          <strong>Inspetor Responsável:</strong> {bookingRespInfo.displayLabel}
+                        </div>
+                        {bookingCertSig?.isSigned && bookingCertSig?.signedBy?.name ? (
+                          <div style={{ color: '#0f766e', fontWeight: 'bold', marginTop: '2px' }}>
+                            Assinado digitalmente por: {bookingCertSig.signedBy.name}
+                            <br />
+                            <span style={{ fontSize: '8.5px', fontWeight: 'normal' }}>
+                              Em: {formatAuditTimestampSp(bookingCertSig.signedAt)} (BRT)
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ color: '#64748b', fontStyle: 'italic', marginTop: '2px' }}>
+                            Documento pendente de assinatura digital
+                          </div>
+                        )}
                       </div>
                       <img src="/stamp.jpg" alt="Unispect Stamp" style={{ width: '75px', height: '75px', objectFit: 'contain', flexShrink: 0 }} />
                     </div>

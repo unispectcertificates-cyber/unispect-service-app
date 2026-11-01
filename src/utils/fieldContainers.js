@@ -12,9 +12,12 @@ export function validateFieldCapture(input, photoCount) {
 }
 
 export const activeBooking = booking => !['finalizado', 'estufado', 'finished'].includes(String(booking.status || '').trim().toLowerCase());
-export function findFieldTarget(bookings, number) {
+export function findFieldTarget(bookings, number, clientId = null) {
   const key = normalizeContainerNumber(number);
-  const matches = bookings.filter(activeBooking).flatMap(booking => (booking.containers || [])
+  const targetList = clientId
+    ? bookings.filter(b => (b.clientId || 'client_interport') === clientId)
+    : bookings;
+  const matches = targetList.filter(activeBooking).flatMap(booking => (booking.containers || [])
     .filter(container => normalizeContainerNumber(container.containerNumber) === key).map(container => ({ booking, container })));
   if (matches.length > 1) throw new Error('Este container aparece em mais de um Booking ativo. Peça ao administrador para revisar antes de sincronizar.');
   return matches[0] || null;
@@ -78,14 +81,30 @@ export function attachPendingFields(booking, records, oldContainerIds = new Set(
 
 export function createFieldRepository({ listBookings, reference, transaction, now }) {
   const read = async (tx, ref) => { const snapshot = await tx.get(ref); return snapshot.exists() ? snapshot.data() : null; };
-  const fieldRef = number => reference('fieldContainers', number);
+  const resolveFieldId = (number, clientId = 'client_interport') => {
+    const cid = clientId || 'client_interport';
+    return `${cid}__${number}`;
+  };
+  const legacyFieldRef = number => reference('fieldContainers', number);
+  const fieldRef = (number, clientId = 'client_interport') => reference('fieldContainers', resolveFieldId(number, clientId));
   const opRef = id => reference('fieldOperations', id);
-  const delRef = id => reference('fieldContainerDeletions', id);
+  const delRef = (id, clientId = 'client_interport') => {
+    const cid = clientId || 'client_interport';
+    return reference('fieldContainerDeletions', `${cid}__${id}`);
+  };
+  const legacyDelRef = id => reference('fieldContainerDeletions', id);
+
   return {
-    async deleteFieldContainer(rawNumber, actor) {
+    async deleteFieldContainer(rawNumber, actor, clientId = 'client_interport') {
       const key = normalizeContainerNumber(rawNumber);
+      const targetClientId = clientId || 'client_interport';
       return transaction(async tx => {
-        const field = await read(tx, fieldRef(key));
+        let field = await read(tx, fieldRef(key, targetClientId));
+        let usedLegacyDoc = false;
+        if (!field && targetClientId === 'client_interport') {
+          field = await read(tx, legacyFieldRef(key));
+          if (field) usedLegacyDoc = true;
+        }
         if (!field) return { success: true, alreadyDeleted: true };
         if (field.status === 'linked' || field.bookingId) {
           throw new Error(`Este container já foi vinculado ao Booking ${field.bookingId || 'ativo'}. A exclusão não é permitida.`);
@@ -101,9 +120,10 @@ export function createFieldRepository({ listBookings, reference, transaction, no
         if (!isAdm && !isCreator) {
           throw new Error('Permissão negada. O inspetor pode excluir apenas seus próprios cadastros.');
         }
-        const deletionId = `${key}_${field.sourceContainerId}_${now()}`;
+        const deletionId = `${targetClientId}_${key}_${field.sourceContainerId}_${now()}`;
         const deletionRecord = {
           id: deletionId,
+          clientId: targetClientId,
           containerNumber: key,
           sourceContainerId: field.sourceContainerId,
           status: 'deleted',
@@ -116,8 +136,14 @@ export function createFieldRepository({ listBookings, reference, transaction, no
           photoCount: (field.container?.photos || []).length,
           container: field.container
         };
-        tx.set(delRef(field.sourceContainerId), deletionRecord);
-        tx.delete(fieldRef(key));
+        tx.set(delRef(field.sourceContainerId, targetClientId), deletionRecord);
+        if (targetClientId === 'client_interport') {
+          tx.set(legacyDelRef(field.sourceContainerId), deletionRecord);
+        }
+        tx.delete(fieldRef(key, targetClientId));
+        if (usedLegacyDoc || targetClientId === 'client_interport') {
+          tx.delete(legacyFieldRef(key));
+        }
         for (const p of field.container?.photos || []) {
           tx.delete(reference('containerPhotos', p.id));
         }
@@ -132,38 +158,81 @@ export function createFieldRepository({ listBookings, reference, transaction, no
       return transaction(async tx => {
         const photoRef = reference('containerPhotos', photoId);
         const photo = await read(tx, photoRef);
-        const field = photo?.fieldNumber ? await read(tx, fieldRef(photo.fieldNumber)) : null;
+        const targetClientId = photo?.clientId || 'client_interport';
+        let field = null;
+        if (photo?.fieldNumber) {
+          field = await read(tx, fieldRef(photo.fieldNumber, targetClientId));
+          if (!field && targetClientId === 'client_interport') {
+            field = await read(tx, legacyFieldRef(photo.fieldNumber));
+          }
+        }
         tx.delete(photoRef);
-        if (field) tx.update(fieldRef(photo.fieldNumber), { container: { ...field.container,
-          photos: (field.container.photos || []).filter(p => p.id !== photoId) }, updatedAt: now() });
+        if (field) {
+          const updatedContainer = {
+            ...field.container,
+            photos: (field.container.photos || []).filter(p => p.id !== photoId)
+          };
+          tx.update(fieldRef(photo.fieldNumber, targetClientId), { container: updatedContainer, updatedAt: now() });
+          if (targetClientId === 'client_interport') {
+            try {
+              tx.update(legacyFieldRef(photo.fieldNumber), { container: updatedContainer, updatedAt: now() });
+            } catch {
+              // ignore
+            }
+          }
+        }
         return photo?.storagePath || null;
       });
     },
     async prepare(operation) {
+      const targetClientId = operation.clientId || 'client_interport';
       return transaction(async tx => {
-        const deleted = await read(tx, delRef(operation.sourceContainerId));
+        let deleted = await read(tx, delRef(operation.sourceContainerId, targetClientId));
+        if (!deleted && targetClientId === 'client_interport') {
+          deleted = await read(tx, legacyDelRef(operation.sourceContainerId));
+        }
         if (deleted) return { completed: true, result: { discarded: true, deleted: true } };
         const completed = await read(tx, opRef(operation.id));
         if (completed) return { completed: true, result: completed.result };
-        const existing = await read(tx, fieldRef(operation.number));
+
+        let existing = await read(tx, fieldRef(operation.number, targetClientId));
+        if (!existing && targetClientId === 'client_interport') {
+          existing = await read(tx, legacyFieldRef(operation.number));
+        }
         if (existing) return { completed: false, record: existing };
-        const record = { id: operation.number, normalizedNumber: operation.number, sourceContainerId: operation.sourceContainerId,
+
+        const docId = resolveFieldId(operation.number, targetClientId);
+        const record = { id: docId, clientId: targetClientId, normalizedNumber: operation.number, sourceContainerId: operation.sourceContainerId,
           container: captureContainer(operation.fields, operation.sourceContainerId, operation.actor, operation.createdAt),
           status: 'pending', bookingId: '', linkedContainerId: '', createdAt: operation.createdAt, updatedAt: now() };
-        tx.set(fieldRef(operation.number), record);
+        tx.set(fieldRef(operation.number, targetClientId), record);
+        if (targetClientId === 'client_interport') {
+          tx.set(legacyFieldRef(operation.number), record);
+        }
         return { completed: false, record };
       });
     },
     async complete(operation, photos) {
+      const targetClientId = operation.clientId || 'client_interport';
       const bookings = await listBookings();
       return transaction(async tx => {
-        const deleted = await read(tx, delRef(operation.sourceContainerId));
+        let deleted = await read(tx, delRef(operation.sourceContainerId, targetClientId));
+        if (!deleted && targetClientId === 'client_interport') {
+          deleted = await read(tx, legacyDelRef(operation.sourceContainerId));
+        }
         if (deleted) return { discarded: true, deleted: true };
         const completed = await read(tx, opRef(operation.id));
         if (completed) return completed.result;
-        const field = await read(tx, fieldRef(operation.number));
+
+        let field = await read(tx, fieldRef(operation.number, targetClientId));
+        let usedLegacy = false;
+        if (!field && targetClientId === 'client_interport') {
+          field = await read(tx, legacyFieldRef(operation.number));
+          if (field) usedLegacy = true;
+        }
         if (!field) throw new Error('Registro de campo não encontrado. Tente sincronizar novamente.');
-        const candidate = field.status === 'linked' ? null : findFieldTarget(bookings, operation.number);
+
+        const candidate = field.status === 'linked' ? null : findFieldTarget(bookings, operation.number, targetClientId);
         const targetId = field.status === 'linked' ? field.bookingId : candidate?.booking.id;
         const targetRef = targetId ? reference('bookings', targetId) : null;
         const booking = targetRef ? await read(tx, targetRef) : null;
@@ -172,17 +241,20 @@ export function createFieldRepository({ listBookings, reference, transaction, no
         const target = booking?.containers?.find(c => field.status === 'linked' ? c.id === field.linkedContainerId : normalizeContainerNumber(c.containerNumber) === operation.number);
         if (booking && !target) throw new Error('O container foi removido ou alterado no Booking. Revise antes de sincronizar.');
         const container = { ...field.container, photos: mergePhotos(field.container.photos, photos) };
-        const record = { ...field, container, updatedAt: now() };
+        const record = { ...field, clientId: targetClientId, container, updatedAt: now() };
         if (target) {
           const attached = attachFieldContainer(target, record);
           tx.update(targetRef, { containers: booking.containers.map(c => c.id === target.id ? attached : c), _revision: (booking._revision || 0) + 1 });
           record.status = 'linked'; record.bookingId = targetId; record.linkedContainerId = target.id;
         }
-        for (const photo of photos) tx.set(reference('containerPhotos', photo.id), { ...photo, containerId: record.sourceContainerId, fieldNumber: operation.number, createdAt: operation.createdAt });
-        tx.set(fieldRef(operation.number), record);
+        for (const photo of photos) tx.set(reference('containerPhotos', photo.id), { ...photo, clientId: targetClientId, containerId: record.sourceContainerId, fieldNumber: operation.number, createdAt: operation.createdAt });
+        tx.set(fieldRef(operation.number, targetClientId), record);
+        if (usedLegacy || targetClientId === 'client_interport') {
+          tx.set(legacyFieldRef(operation.number), record);
+        }
         const result = { status: record.status, bookingId: record.bookingId, linkedContainerId: record.linkedContainerId,
           sourceContainerId: record.sourceContainerId, photos };
-        tx.set(opRef(operation.id), { id: operation.id, number: operation.number, actor: operation.actor, createdAt: now(),
+        tx.set(opRef(operation.id), { id: operation.id, clientId: targetClientId, number: operation.number, actor: operation.actor, createdAt: now(),
           capturedAt: operation.createdAt, submittedFields: operation.fields, photoIds: photos.map(p => p.id), result });
         return result;
       });

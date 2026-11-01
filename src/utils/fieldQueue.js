@@ -257,7 +257,7 @@ export function createFieldSync({ queue, remote, upload, isOnline = () => true, 
 
         if (operation.type === 'delete') {
           try {
-            await remote.deleteFieldContainer(operation.number, operation.actor);
+            await remote.deleteFieldContainer(operation.number, operation.actor, operation.clientId);
             await queue.acknowledgeDeletion(operation);
           } catch (error) {
             await queue.fail(operation.id, formatError(error));

@@ -615,6 +615,7 @@ export default function BookingDetail({ bookingId, user, onBack, onOpenReport, o
               key={cont.id}
               container={cont}
               bookingId={booking.id}
+              clientId={booking.clientId || 'client_interport'}
               user={user}
               onUpdateContainer={handleUpdateContainer}
               onDeleteContainer={handleDeleteContainer}

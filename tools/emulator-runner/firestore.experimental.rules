@@ -153,5 +153,10 @@ service cloud.firestore {
         isUnispectMaster() || isClientAdmin(request.resource.data.clientId) || isInspector(request.resource.data.clientId)
       );
     }
+
+    match /clients/{clientId} {
+      allow read: if isAuthenticated();
+      allow write: if isUnispectMaster();
+    }
   }
 }

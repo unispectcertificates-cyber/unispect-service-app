@@ -1,8 +1,21 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Trash2, Camera, Image, ArrowLeft, ArrowRight, Search, UploadCloud, CheckCircle2 } from 'lucide-react';
-import { db, useBookings, useInspectors, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery, getSealText } from '../db';
+import { db, useBookings, useInspectors, useUsers, useLocais, useExportadores, isBookingNumberDuplicate, matchesContainerQuery, getSealText } from '../db';
 import { planImport, previewToken, normalizeContainerNumber, normalizeBookingNumber, importFieldLabels, detectBookingFieldChanges } from '../utils/bookingImport';
 import { parseRomaneioPdf } from '../utils/pdfParser';
+import { processContainerProvisionalSeals } from '../utils/provisionalSealQueue';
+import {
+  LEGACY_AUTHORSHIP_LABEL,
+  resolveAuthenticatedActor,
+  getResponsibleInspectorInfo,
+  isAuthorizedAdminRole,
+  assignOrPreserveResponsibleInspector,
+  createAuditEvent,
+  appendTimelineEvents,
+  transferContainerResponsibility,
+  signInspectionCertificate,
+  formatAuditTimestampSp
+} from '../utils/inspectionAudit';
 import ContainerDetail from './ContainerDetail';
 import BookingImportHistory from './BookingImportHistory';
 import PhotoDownloadButton from './PhotoDownloadButton';
@@ -12,21 +25,21 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   
   const bookings = useBookings();
   const inspectors = useInspectors();
+  const usersList = useUsers();
   const exportadores = useExportadores();
   const locais = useLocais();
   const [prevBookingId, setPrevBookingId] = useState(bookingId);
   const [booking, setBooking] = useState(() => bookings.find(b => b.id === bookingId));
   const [containerSearch, setContainerSearch] = useState('');
-  const [selectedInspectorId, setSelectedInspectorId] = useState(() => {
-    const bk = bookings.find(b => b.id === bookingId);
-    return bk?.inspectorId || '';
-  });
+  const [showTransferBookingResp, setShowTransferBookingResp] = useState(false);
+  const [transferNewUserId, setTransferNewUserId] = useState('');
+  const [transferReasonText, setTransferReasonText] = useState('');
+  const [transferBookingError, setTransferBookingError] = useState('');
 
   if (bookingId !== prevBookingId) {
     setPrevBookingId(bookingId);
     const bk = bookings.find(b => b.id === bookingId);
     setBooking(bk);
-    setSelectedInspectorId(bk?.inspectorId || '');
     setBookingStatus(bk?.status || 'Pendente');
     setPendingItem(bk?.pendingItem || '');
   }
@@ -43,7 +56,6 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     const bk = bookings.find(b => b.id === bookingId);
     if (bk) {
       setBooking(bk);
-      setSelectedInspectorId(bk.inspectorId || '');
       setBookingStatus(bk.status || 'Pendente');
       setPendingItem(bk.pendingItem || '');
     }
@@ -85,11 +97,101 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   const initialRomaneioProcessedRef = useRef(false);
 
   const isInspector = user?.role === 'Inspector';
-  const isAdm = user?.role === 'ADM';
+  const isAdm = isAuthorizedAdminRole(user);
   const canEdit = isAdm || isInspector;
 
-  const handleInspectorChange = (e) => {
-    setSelectedInspectorId(e.target.value);
+  // Identifica automaticamente o inspetor responsável do Booking / Containers (Regra 2 e Regra 3)
+  const primaryResponsibleContainer = (booking?.containers || []).find(c => c?.responsibleInspector?.id || c?.responsibleInspector?.uid) || (booking?.containers || [])[0] || {};
+  const bookingRespInfo = getResponsibleInspectorInfo(primaryResponsibleContainer, booking);
+  const bookingCertSig = booking?.certificateSignature || primaryResponsibleContainer?.certificateSignature || null;
+  const collaboratorOptions = useMemo(() => {
+    const merged = new Map();
+    for (const u of usersList || []) {
+      if (u && (u.id || u.uid) && u.name) merged.set(String(u.id || u.uid), u);
+    }
+    for (const ins of inspectors || []) {
+      if (ins && ins.id && ins.name && !merged.has(String(ins.id))) {
+        merged.set(String(ins.id), { ...ins, role: 'Inspector' });
+      }
+    }
+    return [...merged.values()];
+  }, [usersList, inspectors]);
+
+  const handleSignBookingCertificate = async () => {
+    try {
+      const targetCont = primaryResponsibleContainer?.id
+        ? primaryResponsibleContainer
+        : { id: 'booking_cert', containerNumber: booking.bookingNumber || booking.id, responsibleInspector: booking.responsibleInspector };
+      const signedRes = signInspectionCertificate({
+        container: targetCont,
+        booking,
+        authenticatedUser: user,
+        clientId: booking.clientId || 'client_interport',
+        bookingId: booking.id
+      });
+      const updatedContainers = (booking.containers || []).map(c =>
+        c.id === targetCont.id ? signedRes.container : { ...c, certificateSignature: signedRes.certificateSignature }
+      );
+      const updatedBooking = {
+        ...booking,
+        certificateSignature: signedRes.certificateSignature,
+        containers: updatedContainers
+      };
+      const saved = await db.saveBooking(updatedBooking);
+      setBooking(saved);
+      if (onDataChange) onDataChange();
+    } catch (err) {
+      alert(err.message || 'Não foi possível assinar digitalmente o certificado.');
+    }
+  };
+
+  const handleTransferBookingResponsibility = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setTransferBookingError('');
+    const targetUser = collaboratorOptions.find(c => String(c.id || c.uid) === String(transferNewUserId));
+    if (!targetUser) {
+      setTransferBookingError('Selecione o novo inspetor responsável.');
+      return;
+    }
+    try {
+      const targetCont = primaryResponsibleContainer?.id
+        ? primaryResponsibleContainer
+        : { id: 'booking_resp', containerNumber: booking.bookingNumber || booking.id, responsibleInspector: booking.responsibleInspector };
+      const res = transferContainerResponsibility({
+        container: targetCont,
+        authenticatedUser: user,
+        newResponsibleUser: targetUser,
+        reason: transferReasonText,
+        clientId: booking.clientId || 'client_interport',
+        bookingId: booking.id
+      });
+      const updatedContainers = (booking.containers || []).map(c => {
+        if (c.id === targetCont.id) return res.container;
+        const r = transferContainerResponsibility({
+          container: c,
+          authenticatedUser: user,
+          newResponsibleUser: targetUser,
+          reason: transferReasonText,
+          clientId: booking.clientId || 'client_interport',
+          bookingId: booking.id
+        });
+        return r.container;
+      });
+      const updatedBooking = {
+        ...booking,
+        responsibleInspector: res.container.responsibleInspector,
+        inspectorId: res.container.responsibleInspector.id,
+        containers: updatedContainers
+      };
+      const saved = await db.saveBooking(updatedBooking);
+      setBooking(saved);
+      setShowTransferBookingResp(false);
+      setTransferReasonText('');
+      setTransferNewUserId('');
+      if (onDataChange) onDataChange();
+    } catch (err) {
+      setTransferBookingError(err.message || 'Erro ao transferir responsabilidade.');
+    }
   };
 
   const handleSaveBooking = async () => {
@@ -99,11 +201,13 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         return;
       }
 
+      const authActor = resolveAuthenticatedActor(user);
       const nowIso = new Date().toISOString();
-      const userName = user?.name || user?.login || 'Usuário';
+      const userName = authActor.name;
       let finalizationHistory = [...(booking.finalizationHistory || [])];
       let finalizedAt = booking.finalizedAt || null;
       let finalizedBy = booking.finalizedBy || null;
+      let updatedContainers = [...(booking.containers || [])];
 
       if (bookingStatus === 'Finalizado' && booking.status !== 'Finalizado') {
         finalizedAt = nowIso;
@@ -111,19 +215,57 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
         finalizationHistory.push({
           action: 'finalized',
           timestamp: nowIso,
-          user: { id: user?.id || '', name: userName }
+          user: { id: authActor.id, name: userName }
+        });
+        updatedContainers = updatedContainers.map(c => {
+          const ev = createAuditEvent({
+            action: 'inspection_finalized',
+            actor: authActor,
+            clientId: booking.clientId || 'client_interport',
+            bookingId: booking.id,
+            containerId: c.id,
+            containerNumber: c.containerNumber || c.id,
+            targetItem: 'Inspeção do Booking/Container',
+            oldValue: booking.status || 'Pendente',
+            newValue: 'Finalizado',
+            deviceTimestamp: nowIso,
+            serverTimestamp: nowIso
+          });
+          return {
+            ...c,
+            auditTimeline: appendTimelineEvents(c.auditTimeline || [], [ev], { serverNow: nowIso })
+          };
         });
       } else if (booking.status === 'Finalizado' && bookingStatus !== 'Finalizado') {
         finalizationHistory.push({
           action: 'reopened',
           timestamp: nowIso,
-          user: { id: user?.id || '', name: userName }
+          user: { id: authActor.id, name: userName }
+        });
+        updatedContainers = updatedContainers.map(c => {
+          const ev = createAuditEvent({
+            action: 'inspection_reopened',
+            actor: authActor,
+            clientId: booking.clientId || 'client_interport',
+            bookingId: booking.id,
+            containerId: c.id,
+            containerNumber: c.containerNumber || c.id,
+            targetItem: 'Inspeção do Booking/Container',
+            oldValue: 'Finalizado',
+            newValue: bookingStatus,
+            deviceTimestamp: nowIso,
+            serverTimestamp: nowIso
+          });
+          return {
+            ...c,
+            auditTimeline: appendTimelineEvents(c.auditTimeline || [], [ev], { serverNow: nowIso })
+          };
         });
       }
 
       const updated = {
         ...booking,
-        inspectorId: selectedInspectorId,
+        containers: updatedContainers,
         status: bookingStatus,
         pendingItem: pendingItem,
         finalizedAt,
@@ -285,14 +427,24 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     e.preventDefault();
     if (!newContainer.containerNumber.trim()) return;
 
+    let authActor;
+    try {
+      authActor = resolveAuthenticatedActor(user);
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+
     // Constrói array de lacres provisórios
     const provSeals = [];
     if (newContainer.provisional1.trim()) provSeals.push(newContainer.provisional1.trim());
     if (newContainer.provisional2.trim()) provSeals.push(newContainer.provisional2.trim());
     if (newContainer.provisional3.trim()) provSeals.push(newContainer.provisional3.trim());
 
-    const containerObj = {
-      id: 'cont_' + Date.now(),
+    const nowIso = new Date().toISOString();
+    const contId = 'cont_' + Date.now();
+    const baseCont = {
+      id: contId,
       containerNumber: newContainer.containerNumber.trim().toUpperCase(),
       containerType: newContainer.containerType,
       status: newContainer.status,
@@ -310,8 +462,47 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       brand: ''
     };
 
+    const respResult = assignOrPreserveResponsibleInspector({
+      container: baseCont,
+      actor: authActor,
+      isTechnicalAction: true,
+      clientId: booking.clientId || 'client_interport',
+      bookingId: booking.id,
+      deviceTimestamp: nowIso,
+      serverTimestamp: nowIso
+    });
+
+    const events = [];
+    if (respResult.startedEvent) events.push(respResult.startedEvent);
+    for (const s of provSeals) {
+      events.push(
+        createAuditEvent({
+          action: 'seal_added',
+          actor: authActor,
+          clientId: booking.clientId || 'client_interport',
+          bookingId: booking.id,
+          containerId: contId,
+          containerNumber: baseCont.containerNumber,
+          targetItem: `Lacre provisório ${s}`,
+          newValue: s,
+          deviceTimestamp: nowIso,
+          serverTimestamp: nowIso
+        })
+      );
+    }
+
+    const containerObj = {
+      ...baseCont,
+      responsibleInspector: respResult.responsibleInspector,
+      auditTimeline: appendTimelineEvents([], events, { serverNow: nowIso })
+    };
+
     const updatedContainers = [...(booking.containers || []), containerObj];
-    const updatedBooking = { ...booking, containers: updatedContainers };
+    const updatedBooking = {
+      ...booking,
+      responsibleInspector: booking.responsibleInspector || respResult.responsibleInspector,
+      containers: updatedContainers
+    };
     
     try {
       const saved = await db.saveBooking(updatedBooking);
@@ -367,14 +558,24 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
       const photoMap = {};
       storedPhotos.forEach(p => { photoMap[p.id] = p; });
 
-      // Merge: prioriza URL do Storage; mantém ordem das referências no booking
       const mergedPhotos = (cont.photos || []).map(ref => ({
         ...ref,
         url: photoMap[ref.id]?.url || ref.url || null,
-        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null
+        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null,
+        sizeBytes: photoMap[ref.id]?.sizeBytes || ref.sizeBytes || 0,
+        compressionVersion: photoMap[ref.id]?.compressionVersion || ref.compressionVersion || '1'
       }));
 
-      setShowPhotoManager({ ...cont, photos: mergedPhotos });
+      const nextCont = { ...cont, photos: mergedPhotos };
+      setShowPhotoManager(nextCont);
+      if (mergedPhotos.some(p => p.url || p.dataUrl)) {
+        void processContainerProvisionalSeals({
+          container: nextCont,
+          bookingId: booking.id,
+          clientId: booking.clientId || 'client_interport',
+          photos: mergedPhotos
+        });
+      }
     } catch (err) {
       console.warn('openPhotoManager: erro ao carregar fotos', err);
       setShowPhotoManager(cont); // fallback: abre sem URLs
@@ -390,30 +591,89 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
     e.target.value = '';
 
     try {
+      const authActor = resolveAuthenticatedActor(user);
+      const nowIso = new Date().toISOString();
       const containerId = showPhotoManager.id;
       const newPhotoRefs = [];
+      const photosWithLocalFiles = [];
 
       for (const file of files) {
         // db.uploadPhoto comprime + envia para Firebase Storage
         // Retorna { id, name, url } onde url é a URL pública do Storage
-        const result = await db.uploadPhoto(file, containerId);
-        newPhotoRefs.push({
+        const result = await db.uploadPhoto(file, containerId, {
+          authorId: authActor.id,
+          authorName: authActor.name,
+          authorEmail: authActor.email,
+          clientId: booking.clientId || 'client_interport',
+          deviceTimestamp: nowIso
+        });
+        const refObj = {
           id: result.id,
           name: result.name,
           url: result.url,
           storagePath: result.storagePath,
+          authorId: authActor.id,
+          authorName: authActor.name,
+          capturedBy: { id: authActor.id, uid: authActor.uid, name: authActor.name, role: authActor.role },
+          deviceTimestamp: nowIso,
+          serverTimestamp: nowIso,
           width: result.width,
           height: result.height,
           sizeBytes: result.sizeBytes,
           compressionVersion: result.compressionVersion
-        });
+        };
+        newPhotoRefs.push(refObj);
+        photosWithLocalFiles.push({ ...refObj, file });
       }
 
+      const respResult = assignOrPreserveResponsibleInspector({
+        container: showPhotoManager,
+        actor: authActor,
+        isTechnicalAction: true,
+        clientId: booking.clientId || 'client_interport',
+        bookingId: booking.id,
+        deviceTimestamp: nowIso,
+        serverTimestamp: nowIso
+      });
+
+      const events = [];
+      if (respResult.startedEvent) events.push(respResult.startedEvent);
+      events.push(
+        createAuditEvent({
+          action: 'photo_added',
+          actor: authActor,
+          clientId: booking.clientId || 'client_interport',
+          bookingId: booking.id,
+          containerId,
+          containerNumber: showPhotoManager.containerNumber || containerId,
+          targetItem: `${newPhotoRefs.length} foto(s)`,
+          newValue: newPhotoRefs.map(p => p.id).join(', '),
+          deviceTimestamp: nowIso,
+          serverTimestamp: nowIso,
+          metadata: {
+            photoCount: newPhotoRefs.length,
+            photoIds: newPhotoRefs.map(p => p.id)
+          }
+        })
+      );
+
       const updatedPhotos = [...(showPhotoManager.photos || []), ...newPhotoRefs];
-      const updatedCont = { ...showPhotoManager, photos: updatedPhotos };
+      const updatedCont = {
+        ...showPhotoManager,
+        photos: updatedPhotos,
+        responsibleInspector: respResult.responsibleInspector,
+        auditTimeline: appendTimelineEvents(showPhotoManager.auditTimeline || [], events, { serverNow: nowIso })
+      };
       
       setShowPhotoManager(updatedCont);
       await handleUpdateContainerPhotos(updatedCont);
+      void processContainerProvisionalSeals({
+        container: updatedCont,
+        bookingId: booking.id,
+        clientId: booking.clientId || 'client_interport',
+        requestedBy: authActor,
+        photos: [...(showPhotoManager.photos || []), ...photosWithLocalFiles]
+      });
     } catch (error) {
       console.error("Error uploading photo", error);
       alert(error.message || "Ocorreu um erro ao enviar/salvar as fotos no sistema.");
@@ -435,9 +695,35 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
   };
 
   const handleDeletePhoto = (photoId) => {
+    let authActor = null;
+    try {
+      authActor = resolveAuthenticatedActor(user);
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    const nowIso = new Date().toISOString();
     const photo = (showPhotoManager.photos || []).find(p => p.id === photoId);
     const photos = (showPhotoManager.photos || []).filter(p => p.id !== photoId);
-    const updatedCont = { ...showPhotoManager, photos };
+    const delEvent = createAuditEvent({
+      action: 'photo_deleted',
+      actor: authActor,
+      clientId: booking.clientId || 'client_interport',
+      bookingId: booking.id,
+      containerId: showPhotoManager.id,
+      containerNumber: showPhotoManager.containerNumber || showPhotoManager.id,
+      targetItem: photo?.name || photoId,
+      oldValue: photoId,
+      newValue: null,
+      deviceTimestamp: nowIso,
+      serverTimestamp: nowIso,
+      metadata: { photoId }
+    });
+    const updatedCont = {
+      ...showPhotoManager,
+      photos,
+      auditTimeline: appendTimelineEvents(showPhotoManager.auditTimeline || [], [delEvent], { serverNow: nowIso })
+    };
     setShowPhotoManager(updatedCont);
     handleUpdateContainerPhotos(updatedCont);
     // Apaga do Firestore e do Storage em background
@@ -1113,39 +1399,129 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
           </div>
         </div>
 
-        {/* Banner Assinatura Inspetor (Screenshot 2) */}
+        {/* Banner Inspetor Responsável e Assinatura Digital do Certificado (Regra 2 e Regra 3) */}
         <div style={{
           backgroundColor: 'var(--bg-tertiary)',
           border: '1px dashed var(--border-color)',
           borderRadius: '4px',
           padding: '14px 20px',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px'
+          flexDirection: 'column',
+          gap: '10px'
         }}>
-          <div>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '800', letterSpacing: '0.5px' }}>
-              INSPETOR E ASSINATURA DIGITAL DO CERTIFICADO
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '800', letterSpacing: '0.5px' }}>
+                INSPETOR E ASSINATURA DIGITAL DO CERTIFICADO
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '700', marginTop: '4px' }}>
+                Inspetor responsável pela inspeção:{' '}
+                <span style={{ color: bookingRespInfo.isIdentified ? '#10b981' : '#f59e0b' }}>
+                  {bookingRespInfo.isIdentified ? bookingRespInfo.name : LEGACY_AUTHORSHIP_LABEL}
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                {bookingCertSig?.isSigned && bookingCertSig?.signedBy?.name
+                  ? `Certificado assinado digitalmente por: ${bookingCertSig.signedBy.name} em ${formatAuditTimestampSp(bookingCertSig.signedAt)}`
+                  : 'Assinatura digital do certificado: Pendente de assinatura (o preenchimento automático do responsável não assina o documento)'}
+              </div>
             </div>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              {selectedInspectorId 
-                ? `Assinado por: ${inspectors.find(i => i.id === selectedInspectorId)?.name}` 
-                : 'Nenhum inspetor selecionado para assinar este relatório. (Será usado o padrão)'}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {bookingRespInfo.isIdentified && (
+                (String(user?.uid || user?.id) === String(bookingRespInfo.id) || isAdm) && (
+                  <button
+                    type="button"
+                    onClick={handleSignBookingCertificate}
+                    className="btn btn-primary"
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      backgroundColor: bookingCertSig?.isSigned ? '#0f766e' : '#0284c7',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {bookingCertSig?.isSigned ? '✍️ Revalidar Assinatura Digital' : '✍️ Assinar Digitalmente o Certificado'}
+                  </button>
+                )
+              )}
+
+              {isAdm && (
+                <button
+                  type="button"
+                  onClick={() => setShowTransferBookingResp(prev => !prev)}
+                  className="btn btn-secondary"
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                    color: '#c084fc',
+                    border: '1px solid rgba(168, 85, 247, 0.35)',
+                    borderRadius: '6px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔄 Transferir Responsabilidade
+                </button>
+              )}
             </div>
           </div>
-          <select 
-            disabled={!canEdit}
-            value={selectedInspectorId} 
-            onChange={handleInspectorChange}
-            style={{ width: 'auto', padding: '8px 12px', fontSize: '13px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontWeight: '600', color: 'var(--text-primary)' }}
-          >
-            <option value="">-- Escolha o Inspetor --</option>
-            {inspectors.map(ins => (
-              <option key={ins.id} value={ins.id}>{ins.name}</option>
-            ))}
-          </select>
+
+          {isAdm && showTransferBookingResp && (
+            <form
+              onSubmit={handleTransferBookingResponsibility}
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: 'var(--bg-secondary)',
+                border: '1px solid rgba(168, 85, 247, 0.4)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
+            >
+              <div style={{ fontSize: '12px', fontWeight: '700', color: '#c084fc' }}>
+                Transferência Autorizada de Responsabilidade (Justificativa Obrigatória)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
+                <select
+                  value={transferNewUserId}
+                  onChange={e => setTransferNewUserId(e.target.value)}
+                  style={{ padding: '8px 10px', fontSize: '12px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                >
+                  <option value="">-- Selecione o Novo Inspetor Responsável --</option>
+                  {collaboratorOptions.map(col => (
+                    <option key={col.id || col.uid} value={col.id || col.uid}>
+                      {col.name} ({col.role || 'Inspector'})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={transferReasonText}
+                  onChange={e => setTransferReasonText(e.target.value)}
+                  placeholder="Informe o motivo / justificativa obrigatória..."
+                  style={{ padding: '8px 10px', fontSize: '12px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                />
+              </div>
+              {transferBookingError && (
+                <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: '600' }}>{transferBookingError}</div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button type="button" onClick={() => setShowTransferBookingResp(false)} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '12px', backgroundColor: '#9333ea', color: '#fff' }}>
+                  Confirmar Transferência
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         {/* Quatro botões de Ações Principais (Screenshot 2) */}
@@ -1288,11 +1664,18 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
                 'Finalizado': 'badge-success'
               };
 
+              const contRespInfo = getResponsibleInspectorInfo(cont, booking);
+
               return (
                 <div key={cont.id} className="container-row-item">
                   <div>
                     <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>{cont.containerNumber}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{cont.containerType || 'Tipo não definido'}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {cont.containerType || 'Tipo não definido'} • Inspetor responsável:{' '}
+                      <strong style={{ color: contRespInfo.isIdentified ? '#10b981' : '#f59e0b' }}>
+                        {contRespInfo.displayLabel}
+                      </strong>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -1646,6 +2029,7 @@ export default function BookingManagementModal({ bookingId, onClose, user, onDat
               <ContainerDetail 
                 container={selectedContainerToManage}
                 bookingId={booking.id}
+                clientId={booking.clientId || 'client_interport'}
                 user={user}
                 onUpdateContainer={(updatedCont) => {
                   setSelectedContainerToManage(updatedCont);

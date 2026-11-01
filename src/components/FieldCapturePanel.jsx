@@ -5,6 +5,7 @@ import { fieldSyncState, subscribePendingFieldContainers, syncFieldNow, deleteFi
 import { findFieldTarget, mergePhotos, validateFieldCapture } from '../utils/fieldContainers';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
 import { generateUUID } from '../utils/uuid';
+import { resolveAuthenticatedActor } from '../utils/inspectionAudit';
 import PhotoDownloadButton from './PhotoDownloadButton';
 
 const sealText = seal => typeof seal === 'string' ? seal : (seal?.sealNumber || seal?.seal || seal?.number || '');
@@ -274,9 +275,10 @@ export default function FieldCapturePanel({ user, bookings, initialCapture, onCl
         };
       }
 
+      const authActor = resolveAuthenticatedActor(user);
       savingRef.current = true; setSaving(true); setError('');
       await fieldQueue.save({ containerNumber: number, tara, sealType, sealNumber }, newPhotos.map(p => p.file),
-        { id: user?.id || '', name: user?.name || user?.username || 'Inspetor' }, effectiveContext);
+        { id: authActor.id, uid: authActor.uid, name: authActor.name, role: authActor.role }, effectiveContext);
       // Return to the main screen immediately after local commit; uploads run independently.
       releasePhotos(); setOpen(false); setMessage(`✓ ${key} salvo no aparelho. ${navigator.onLine ? 'Envio iniciado em segundo plano.' : 'Aguardando sinal para enviar automaticamente.'}`);
       syncFieldNow();

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Lock, Mail, AlertCircle, CheckCircle2, Loader2, ArrowLeft, Shield } from 'lucide-react';
+import { Lock, User, AlertCircle, CheckCircle2, Loader2, ArrowLeft, Shield, HelpCircle, Mail } from 'lucide-react';
 import { loginWithEmail, sendPasswordReset } from '../utils/authService';
 
 export default function Login({ onLogin, initialMessage = null }) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(initialMessage || '');
   const [infoMessage, setInfoMessage] = useState('');
@@ -13,34 +13,10 @@ export default function Login({ onLogin, initialMessage = null }) {
 
   const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-  // Mapeamento explícito de contas fictícias EXCLUSIVO do laboratório local (Emulador).
-  // Não presume e-mails dos quatro usuários reais de produção.
-  const LAB_DEMO_ACCOUNTS = {
-    'master': 'master@unispect.com',
-    'carlos': 'carlos@interport.com.br',
-    'admin-interport': 'admin@interport.com.br',
-    'exportador-atlantica': 'exportador@cafeatlantica.com.br',
-    'sem-cargo': 'semcargo@interport.com.br'
-  };
-
-  const resolveEmail = (input) => {
-    const trimmed = input.trim();
-    if (trimmed.includes('@')) {
-      return trimmed.toLowerCase();
-    }
-    // Atalho exclusivo para facilitar testes no emulador local
-    const key = trimmed.toLowerCase();
-    if (isLocal && LAB_DEMO_ACCOUNTS[key]) {
-      return LAB_DEMO_ACCOUNTS[key];
-    }
-    // Não presume domínio: exige e-mail completo
-    throw new Error('Informe um endereço de e-mail completo (exemplo: usuario@empresa.com.br).');
-  };
-
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      setError('Preencha todos os campos.');
+    if (!username.trim() || !password.trim()) {
+      setError('Preencha o usuário e a senha.');
       return;
     }
 
@@ -49,8 +25,8 @@ export default function Login({ onLogin, initialMessage = null }) {
     setIsLoading(true);
 
     try {
-      const targetEmail = resolveEmail(email);
-      const result = await loginWithEmail(targetEmail, password);
+      // Envia o usuário e a senha digitada diretamente (sem alterações ou substituições no frontend)
+      const result = await loginWithEmail(username, password);
       if (result.success && onLogin) {
         onLogin(result.user);
       }
@@ -73,8 +49,7 @@ export default function Login({ onLogin, initialMessage = null }) {
     setIsLoading(true);
 
     try {
-      const targetEmail = resolveEmail(forgotEmail);
-      const res = await sendPasswordReset(targetEmail);
+      const res = await sendPasswordReset(forgotEmail.trim());
       setInfoMessage(res.message);
     } catch (err) {
       setError(err.message || 'Não foi possível enviar o e-mail de recuperação.');
@@ -181,7 +156,7 @@ export default function Login({ onLogin, initialMessage = null }) {
                 letterSpacing: '1px',
               }}
             >
-              Autenticação Segura
+              Acesso Corporativo Interno
             </span>
           </div>
         </div>
@@ -232,14 +207,14 @@ export default function Login({ onLogin, initialMessage = null }) {
         )}
 
         {!showForgot ? (
-          /* Formulário de Login Principal */
+          /* Formulário de Login: Usuário e Senha */
           <form onSubmit={handleLoginSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
               <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                E-mail ou Usuário
+                Usuário
               </label>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <Mail
+                <User
                   size={16}
                   style={{
                     position: 'absolute',
@@ -249,9 +224,9 @@ export default function Login({ onLogin, initialMessage = null }) {
                 />
                 <input
                   type="text"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ex: admin@interport.com.br ou admin"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Digite seu usuário Unispect (ex: admin)"
                   disabled={isLoading}
                   autoComplete="username"
                   required
@@ -360,76 +335,99 @@ export default function Login({ onLogin, initialMessage = null }) {
             </button>
           </form>
         ) : (
-          /* Formulário de Recuperação de Senha */
-          <form onSubmit={handleForgotSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          /* Recuperação de Acesso e Procedimento Administrativo */
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ textAlign: 'left', width: '100%' }}>
               <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 6px 0', color: 'var(--text-primary)' }}>
                 Recuperação de Acesso
               </h3>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0, lineHeight: '1.4' }}>
-                Digite o e-mail cadastrado para receber as instruções de redefinição de senha.
+                Colaboradores internos da Unispect possuem identificação corporativa única.
               </p>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                E-mail Cadastrado
-              </label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <Mail size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-                <input
-                  type="email"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="ex: seuemail@interport.com.br"
-                  disabled={isLoading}
-                  required
-                  style={{
-                    width: '100%',
-                    paddingLeft: '38px',
-                    paddingRight: '12px',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    borderColor: 'var(--border-color)',
-                    color: 'var(--text-primary)',
-                    height: '42px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-color)',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
+            {/* Caixa Informativa do Procedimento Administrativo */}
+            <div style={{
+              backgroundColor: 'rgba(226, 178, 62, 0.08)',
+              border: '1px solid rgba(226, 178, 62, 0.3)',
+              borderRadius: '8px',
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-brand)', fontSize: '12px', fontWeight: '700' }}>
+                <HelpCircle size={15} />
+                <span>Procedimento Administrativo (Sem e-mail cadastrado):</span>
               </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.5' }}>
+                Como o acesso é interno e gerenciado pela Unispect, caso tenha esquecido sua senha ou necessite de primeiro acesso:
+              </p>
+              <ol style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 0 16px', padding: 0, lineHeight: '1.4' }}>
+                <li>Contate o Administrador/Supervisor Unispect ou setor de TI.</li>
+                <li>Solicite a redefinição de acesso ou definição de senha provisória.</li>
+                <li>Após efetuar login, altere sua senha no menu do sistema.</li>
+              </ol>
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={isLoading}
-              style={{
-                height: '44px',
-                fontSize: '14px',
-                fontWeight: '700',
-                marginTop: '6px',
-                backgroundColor: 'var(--color-brand)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-              }}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 size={16} className="rotating" />
-                  <span>Enviando...</span>
-                </>
-              ) : (
-                'Enviar Link de Redefinição'
-              )}
-            </button>
+            {/* Envio por E-mail (caso o usuário possua recuperação configurada) */}
+            <form onSubmit={handleForgotSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Ou informe seu e-mail de recuperação cadastrado:
+                </label>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Mail size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="ex: seu.email@empresa.com"
+                    disabled={isLoading}
+                    style={{
+                      width: '100%',
+                      paddingLeft: '38px',
+                      paddingRight: '12px',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      borderColor: 'var(--border-color)',
+                      color: 'var(--text-primary)',
+                      height: '40px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                disabled={isLoading || !forgotEmail.trim()}
+                style={{
+                  height: '38px',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  borderRadius: '6px',
+                  cursor: forgotEmail.trim() ? 'pointer' : 'not-allowed',
+                  opacity: forgotEmail.trim() ? 1 : 0.6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 size={15} className="rotating" />
+                    <span>Enviando...</span>
+                  </>
+                ) : (
+                  'Enviar Link por E-mail'
+                )}
+              </button>
+            </form>
 
             <button
               type="button"
@@ -450,7 +448,7 @@ export default function Login({ onLogin, initialMessage = null }) {
               <ArrowLeft size={14} />
               <span>Voltar para o Login</span>
             </button>
-          </form>
+          </div>
         )}
       </div>
 

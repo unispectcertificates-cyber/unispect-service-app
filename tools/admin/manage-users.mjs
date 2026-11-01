@@ -59,10 +59,16 @@ export async function provisionUser({ email, password, displayName, claims }) {
     const lookupUrl = `http://${AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:lookup?key=fake-api-key`;
     const lookupRes = await fetch(lookupUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer owner'
+      },
       body: JSON.stringify({ email: [email] })
     });
     const lookupData = await lookupRes.json();
+    if (!lookupData.users || lookupData.users.length === 0) {
+      throw new Error(`Usuário ${email} não encontrado no lookup: ` + JSON.stringify(lookupData));
+    }
     localId = lookupData.users[0].localId;
   } else {
     throw new Error(`Falha ao provisionar usuário ${email}: ` + JSON.stringify(createData.error));
@@ -99,21 +105,22 @@ export const TEST_USERS = [
     }
   },
   {
-    email: 'admin@interport.com.br',
+    email: 'admin@unispect.com.br',
     password: 'Password123!',
-    displayName: 'Administrador Interport',
+    displayName: 'Administrador Unispect Master',
     claims: {
-      role: 'CLIENT_ADMIN',
-      authorizedClients: ['client_interport']
+      role: 'MASTER',
+      isUnispectMaster: true,
+      authorizedClients: ['*']
     }
   },
   {
-    email: 'carlos@interport.com.br',
+    email: 'carlos@unispect.com',
     password: 'Password123!',
-    displayName: 'Carlos Santos (Inspetor Interport)',
+    displayName: 'Carlos Santos (Inspetor Unispect)',
     claims: {
       role: 'INSPECTOR',
-      authorizedClients: ['client_interport']
+      authorizedClients: ['*']
     }
   },
   {
@@ -125,12 +132,6 @@ export const TEST_USERS = [
       authorizedClients: ['client_interport'],
       exporterId: 'exp_atlantica'
     }
-  },
-  {
-    email: 'semcargo@interport.com.br',
-    password: 'Password123!',
-    displayName: 'Usuário Sem Papel Operacional',
-    claims: {}
   },
   {
     email: 'admin@terminalb.com.br',

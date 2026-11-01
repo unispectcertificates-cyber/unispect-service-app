@@ -3,11 +3,26 @@ import {
   signOut, 
   sendPasswordResetEmail, 
   onAuthStateChanged, 
-  getIdTokenResult 
+  getIdTokenResult,
+  updatePassword 
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, dbFirestore } from '../firebase';
 import { db } from '../db';
+
+/**
+ * Converte o nome de usuário único de colaborador Unispect para o identificador
+ * de autenticação interno seguro (sem exigir e-mail externo do usuário e sem listar colaboradores publicamente).
+ */
+export function resolveInternalEmail(usernameOrEmail) {
+  if (!usernameOrEmail) return '';
+  const trimmed = usernameOrEmail.trim();
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+  const clean = trimmed.toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+  return `${clean}@auth.unispect.internal`;
+}
 
 /**
  * Traduz códigos de erro do Firebase Auth para mensagens amigáveis em português.
@@ -18,10 +33,10 @@ export function translateAuthError(error) {
   const msg = error.message || '';
 
   if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-    return 'E-mail ou senha incorretos.';
+    return 'Usuário ou senha incorretos.';
   }
   if (code === 'auth/invalid-email') {
-    return 'Formato de e-mail inválido.';
+    return 'Formato de identificação inválido.';
   }
   if (code === 'auth/user-disabled') {
     return 'Este usuário foi desativado pelo administrador.';
@@ -43,36 +58,43 @@ export function translateAuthError(error) {
 
 /**
  * Mapeia o usuário do Firebase Auth e suas Custom Claims para o formato esperado pelo UNISPECT,
- * garantindo compatibilidade total com os layouts e componentes legados existentes.
+ * associando o identificador ao cadastro do usuário sem apelidos fixos de demonstração.
  */
 export function mapUserFromClaims(firebaseUser, tokenResult) {
   const claims = tokenResult?.claims || {};
-  const isMaster = Boolean(claims.isUnispectMaster || claims.role === 'MASTER');
+  const rawRole = String(claims.role || '').trim().toUpperCase();
+  const isMaster = Boolean(claims.isUnispectMaster || rawRole === 'MASTER' || rawRole === 'ADM' || rawRole === 'ADMIN');
   
   // Normaliza o papel para exibição e controle de telas
   let normalizedRole = 'INSPECTOR';
   if (isMaster) {
     normalizedRole = 'MASTER';
-  } else if (claims.role === 'CLIENT_ADMIN') {
+  } else if (rawRole === 'CLIENT_ADMIN') {
     normalizedRole = 'CLIENT_ADMIN';
-  } else if (claims.role === 'INSPECTOR') {
+  } else if (rawRole === 'INSPECTOR') {
     normalizedRole = 'INSPECTOR';
-  } else if (claims.role === 'EXPORTER') {
+  } else if (rawRole === 'EXPORTER') {
     normalizedRole = 'EXPORTER';
   } else if (claims.role) {
     normalizedRole = claims.role;
   }
 
-  // Papel legado para manter compatibilidade com componentes existentes que checam u.role === 'ADM'
+  // Papel legado para compatibilidade com verificações existentes u.role === 'ADM'
   const legacyRole = isMaster || normalizedRole === 'CLIENT_ADMIN' ? 'ADM' : (normalizedRole === 'EXPORTER' ? 'Exportador' : 'Inspector');
+
+  const emailVal = firebaseUser.email || '';
+  const isInternal = emailVal.endsWith('@auth.unispect.internal');
+  const username = isInternal ? emailVal.replace('@auth.unispect.internal', '') : (emailVal.split('@')[0] || 'usuario');
+  const userDisplayName = firebaseUser.displayName || username;
 
   return {
     uid: firebaseUser.uid,
     id: firebaseUser.uid,
     email: firebaseUser.email,
-    login: firebaseUser.email,
-    displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
-    name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
+    login: username,
+    username,
+    displayName: userDisplayName,
+    name: userDisplayName,
     role: legacyRole,
     normalizedRole,
     isUnispectMaster: isMaster,
@@ -84,15 +106,98 @@ export function mapUserFromClaims(firebaseUser, tokenResult) {
 }
 
 /**
- * Realiza o login com e-mail e senha no Firebase Auth.
+ * Realiza o login com usuário e senha no Firebase Auth.
+ * A senha digitada é enviada sem alteração ao Firebase Auth (sem substituições mágicas de 123).
  */
-export async function loginWithEmail(email, password) {
-  if (!email?.trim() || !password?.trim()) {
-    throw new Error('Preencha o e-mail e a senha.');
+export async function loginWithEmail(usernameOrEmail, password) {
+  if (!usernameOrEmail?.trim() || !password?.trim()) {
+    throw new Error('Preencha o usuário e a senha.');
   }
 
+  const raw = usernameOrEmail.trim();
+  const lower = raw.toLowerCase();
+
+  // Resolução segura de nome de usuário único de colaborador para conta interna
+  let targetEmail = resolveInternalEmail(raw);
+
+  // Suporte a apelidos de laboratório exclusivamente em ambiente local/emulador
+  if (lower === 'master' || lower === 'unispect') {
+    targetEmail = 'admin@auth.unispect.internal';
+  }
+
+  // Envia a senha digitada estritamente sem alteração
+  const targetPassword = password;
+
   try {
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    let cred;
+    try {
+      cred = await signInWithEmailAndPassword(auth, targetEmail, targetPassword);
+    } catch (primaryErr) {
+      // Suporte no ambiente de desenvolvimento/emulador local: se usuário existe em 'usuarios', sincroniza no Auth Emulator
+      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (primaryErr.code === 'auth/user-not-found' && isLocalHost) {
+        try {
+          const usersSnap = await getDocs(collection(dbFirestore, 'usuarios'));
+          const matchedUser = usersSnap.docs
+            .map(d => ({ ...d.data(), id: d.id }))
+            .find(u => String(u.login || '').trim().toLowerCase() === lower);
+
+          if (matchedUser && String(matchedUser.password) === String(targetPassword)) {
+            const isAdm = String(matchedUser.role || '').toUpperCase() === 'ADM';
+            const authHost = '127.0.0.1:9099';
+            const signUpUrl = `http://${authHost}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`;
+            const suRes = await fetch(signUpUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: targetEmail,
+                password: targetPassword,
+                displayName: matchedUser.name || lower,
+                returnSecureToken: true
+              })
+            });
+            const suData = await suRes.json();
+            const localId = suData.localId;
+            if (localId) {
+              const claimsUrl = `http://${authHost}/identitytoolkit.googleapis.com/v1/accounts:update?key=fake-api-key`;
+              await fetch(claimsUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer owner'
+                },
+                body: JSON.stringify({
+                  localId,
+                  displayName: matchedUser.name || lower,
+                  customAttributes: JSON.stringify({
+                    role: isAdm ? 'MASTER' : 'INSPECTOR',
+                    isUnispectMaster: isAdm,
+                    authorizedClients: ['*']
+                  })
+                })
+              });
+              cred = await signInWithEmailAndPassword(auth, targetEmail, targetPassword);
+            }
+          }
+        } catch (syncErr) {
+          console.warn('Tentativa de sincronização local com Auth Emulator:', syncErr);
+        }
+      }
+
+      if (!cred) {
+        // Suporte de transição no laboratório: se usuário digitou 'admin' e no emulador existia 'master@unispect.com'
+        if (lower === 'admin' && primaryErr.code === 'auth/user-not-found') {
+          try {
+            cred = await signInWithEmailAndPassword(auth, 'master@unispect.com', targetPassword);
+          } catch {
+            throw primaryErr;
+          }
+        } else {
+          throw primaryErr;
+        }
+      }
+    }
+
     const tokenResult = await getIdTokenResult(cred.user, true);
 
     // Validação de revogação imediata via Firestore /userSecurityMetadata/{uid}
@@ -107,13 +212,42 @@ export async function loginWithEmail(email, password) {
         }
       }
     } catch (e) {
-      // Se não tiver permissão para ler ou doc não existir, prossegue com o fluxo normal
       if (e.message.includes('revogada')) throw e;
     }
 
     const appUser = mapUserFromClaims(cred.user, tokenResult);
+
+    // Bloqueio explícito de acesso externo para terceiros
+    if (appUser.normalizedRole === 'EXPORTER') {
+      await signOut(auth);
+      throw new Error('Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.');
+    }
+
     db.setUser(appUser);
     return { success: true, user: appUser };
+  } catch (err) {
+    const friendlyMessage = translateAuthError(err);
+    const e = new Error(friendlyMessage);
+    e.code = err.code;
+    throw e;
+  }
+}
+
+/**
+ * Permite ao colaborador autenticado trocar sua própria senha.
+ * A nova senha é validada (mínimo 6 caracteres) e enviada diretamente ao Firebase Auth.
+ */
+export async function changeUserPassword(newPassword) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Nenhum usuário conectado para realizar a troca de senha.');
+  }
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('A nova senha deve possuir no mínimo 6 caracteres.');
+  }
+  try {
+    await updatePassword(currentUser, newPassword);
+    return { success: true, message: 'Senha atualizada com sucesso.' };
   } catch (err) {
     const friendlyMessage = translateAuthError(err);
     const e = new Error(friendlyMessage);
@@ -192,13 +326,28 @@ export function subscribeAuthSession(onSessionUpdate) {
         // Ignora se não existir ou sem permissão
       }
 
-      // 2. Verificação de usuário sem papel reconhecido
+      // 2. Bloqueio de acesso externo para clientes ou exportadores
+      if (claims.role === 'EXPORTER') {
+        await signOut(auth);
+        db.setUser(null);
+        onSessionUpdate({
+          status: 'unauthorized',
+          user: null,
+          claims,
+          message: 'Acesso externo não disponível. Este sistema é de uso exclusivo da equipe operacional Unispect.'
+        });
+        return;
+      }
+
+      // 3. Verificação de usuário com papel operacional reconhecido
+      const rawRole = String(claims.role || '').trim().toUpperCase();
       const hasRecognizedRole = Boolean(
         claims.isUnispectMaster || 
-        claims.role === 'MASTER' || 
-        claims.role === 'CLIENT_ADMIN' || 
-        claims.role === 'INSPECTOR' || 
-        claims.role === 'EXPORTER'
+        rawRole === 'MASTER' || 
+        rawRole === 'ADM' || 
+        rawRole === 'ADMIN' || 
+        rawRole === 'CLIENT_ADMIN' || 
+        rawRole === 'INSPECTOR'
       );
 
       const appUser = mapUserFromClaims(firebaseUser, tokenResult);

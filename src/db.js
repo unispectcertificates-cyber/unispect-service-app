@@ -1,4 +1,6 @@
 import { createConcurrentRepository } from './utils/bookingConcurrent.js';
+import { setDefaultSealMutator, startProvisionalSealQueueListener } from './utils/provisionalSealQueue.js';
+import { setAuthenticatedUserProvider } from './utils/inspectionAudit.js';
 import { createBookingRepository, normalizeBookingNumber } from './utils/bookingImport';
 import { removeFieldPhotoMetadata } from './utils/fieldService';
 import { compressImage } from './utils/imageCompression';
@@ -14,8 +16,22 @@ const EXPORTERS_COL    = 'exportadores';
 const BOOKINGS_COL     = 'bookings';
 const INSPECTORS_COL   = 'inspectors';
 const USERS_COL        = 'usuarios';
+const CLIENTS_COL      = 'clients';
 const PHOTOS_COL       = 'containerPhotos'; // ← Metadados das fotos (URL do Storage)
 const USER_KEY         = 'containtrack_user';
+
+export const defaultClients = [
+  {
+    id: 'client_interport',
+    name: 'INTERPORT Logística',
+    code: 'INTERPORT',
+    description: 'Terminal e Operador Logístico Principal',
+    cnpj: '08.123.456/0001-78',
+    active: true,
+    isDefault: true,
+    createdAt: 1704067200000
+  }
+];
 
 const defaultLocais = [
   { id: '1', name: 'Interport Logistica' },
@@ -69,10 +85,26 @@ const bookingRepository = createBookingRepository({
   now: () => Date.now()
 });
 
+const getStoredAuthenticatedUser = () => {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const usr = localStorage.getItem(USER_KEY);
+    return usr ? JSON.parse(usr) : null;
+  } catch {
+    return null;
+  }
+};
+
+setAuthenticatedUserProvider(getStoredAuthenticatedUser);
+
 const concurrent = createConcurrentRepository({
   reference: (col, id) => doc(dbFirestore, col, id),
-  transaction: callback => runTransaction(dbFirestore, callback)
+  transaction: callback => runTransaction(dbFirestore, callback),
+  getAuthenticatedUser: getStoredAuthenticatedUser
 });
+
+setDefaultSealMutator(concurrent.mutateProvisionalSeals);
+startProvisionalSealQueueListener();
 
 export const db = {
   subscribeBooking: (id, next, error) => onSnapshot(doc(dbFirestore, BOOKINGS_COL, id), snap => next(snap.exists() ? {...snap.data(),id:snap.id} : null), error),
@@ -80,6 +112,11 @@ export const db = {
   patchBookingFields: concurrent.patchBooking,
   appendBookingPhoto: concurrent.appendPhoto,
   removeBookingPhoto: concurrent.removePhoto,
+  mutateContainerProvisionalSeals: concurrent.mutateProvisionalSeals,
+  recordContainerAccess: concurrent.recordContainerAccess,
+  transferContainerResponsibility: concurrent.transferResponsibility,
+  signContainerCertificate: concurrent.signCertificate,
+  recordContainerReportAction: concurrent.recordReportAction,
   async init() {
     // A inicialização de dados padrão é uma operação administrativa de provisionamento.
     // Não executa chamadas anônimas ao Firestore antes da confirmação da sessão de usuário.
@@ -129,6 +166,47 @@ export const db = {
   },
   async deleteInspector(id) {
     await deleteDoc(doc(dbFirestore, INSPECTORS_COL, id));
+  },
+
+  // Clientes Operacionais
+  async getClients() {
+    try {
+      const snap = await getDocs(collection(dbFirestore, CLIENTS_COL));
+      if (snap.empty) {
+        return defaultClients;
+      }
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!list.some(c => c.id === 'client_interport')) {
+        return [...defaultClients, ...list];
+      }
+      return list;
+    } catch (e) {
+      return defaultClients;
+    }
+  },
+  async saveClient(client) {
+    const rawCode = (client.code || client.name || 'CLIENT').trim().toUpperCase();
+    const cleanCode = rawCode.replace(/[^A-Z0-9]/g, '') || 'CLI';
+    const id = client.id || ('client_' + cleanCode.toLowerCase() + '_' + Date.now());
+    const clientData = {
+      ...client,
+      id,
+      code: cleanCode,
+      name: client.name?.trim() || 'Novo Cliente',
+      active: client.active !== false,
+      updatedAt: Date.now()
+    };
+    if (!clientData.createdAt) {
+      clientData.createdAt = Date.now();
+    }
+    await setDoc(doc(dbFirestore, CLIENTS_COL, id), clientData, { merge: true });
+    return clientData;
+  },
+  async deleteClient(id) {
+    if (id === 'client_interport') {
+      throw new Error('O cliente INTERPORT é o cliente operacional principal e não pode ser excluído.');
+    }
+    await deleteDoc(doc(dbFirestore, CLIENTS_COL, id));
   },
 
   // Bookings
@@ -241,14 +319,27 @@ export const db = {
     // 5. Obtém a URL pública permanente do Storage
     const downloadUrl = await getDownloadURL(storageRef);
 
-    // 6. Salva metadados no Firestore com informações de resolução e versão da compressão
+    // 6. Salva metadados no Firestore com informações de resolução, versão da compressão e autoria autenticada
+    const activeUser = getStoredAuthenticatedUser();
+    const authorId = options.authorId || activeUser?.uid || activeUser?.id || '';
+    const authorName = options.authorName || activeUser?.name || activeUser?.displayName || '';
+    const authorEmail = options.authorEmail || activeUser?.email || '';
+    const clientId = options.clientId || activeUser?.clientId || 'client_interport';
+    const nowMs = Date.now();
+    const deviceTimestamp = options.deviceTimestamp || new Date(nowMs).toISOString();
+
     await setDoc(doc(dbFirestore, PHOTOS_COL, photoId), {
       id:                  photoId,
       containerId:         containerId,
+      clientId:            clientId,
+      authorId:            authorId,
+      authorName:          authorName,
+      authorEmail:         authorEmail,
+      deviceTimestamp:     deviceTimestamp,
       storagePath:         storagePath,
       url:                 downloadUrl,
       name:                '',
-      createdAt:           Date.now(),
+      createdAt:           nowMs,
       width:               compressed.width,
       height:              compressed.height,
       sizeBytes:           compressed.sizeBytes,
@@ -263,6 +354,9 @@ export const db = {
       name:                '',
       url:                 downloadUrl,
       storagePath:         storagePath,
+      authorId:            authorId,
+      authorName:          authorName,
+      deviceTimestamp:     deviceTimestamp,
       width:               compressed.width,
       height:              compressed.height,
       sizeBytes:           compressed.sizeBytes,
@@ -349,6 +443,16 @@ export function useExportadores() { return useCollectionRealtime(EXPORTERS_COL);
 export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
 export function useUsers() { return useCollectionRealtime(USERS_COL); }
+export function useClients() {
+  const clients = useCollectionRealtime(CLIENTS_COL);
+  if (!clients || clients.length === 0) {
+    return defaultClients;
+  }
+  if (!clients.some(c => c.id === 'client_interport')) {
+    return [...defaultClients, ...clients];
+  }
+  return clients;
+}
 
 import { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers } from './utils/searchUtils';
 

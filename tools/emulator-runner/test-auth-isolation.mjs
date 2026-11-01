@@ -203,6 +203,33 @@ try {
   await testEnv.withSecurityRulesDisabled(async (adminContext) => {
     const db = adminContext.firestore();
 
+    // Cliente Operacional Principal INTERPORT
+    await setDoc(doc(db, 'clients', 'client_interport'), {
+      id: 'client_interport',
+      name: 'INTERPORT Logística',
+      code: 'INTERPORT',
+      description: 'Terminal e Operador Logístico Principal',
+      cnpj: '08.123.456/0001-78',
+      active: true,
+      isDefault: true,
+      createdAt: 1704067200000
+    });
+
+    // Booking Demo Interport (com containers históricos)
+    await setDoc(doc(db, 'bookings', 'bk_demo_interport'), {
+      id: 'bk_demo_interport',
+      clientId: 'client_interport',
+      bookingNumber: 'BKG-INT-DEMO-01',
+      certificateNumber: 'CERT-2026-DEMO',
+      exporterId: 'exp_atlantica',
+      status: 'Em andamento',
+      containers: [
+        { id: 'cntr_demo_1', containerNumber: 'MSDU1234567', status: 'Vistoriado' },
+        { id: 'cntr_demo_2', containerNumber: 'TGHU7654321', status: 'Pendente' }
+      ],
+      createdAt: 1704067200000
+    });
+
     // Booking Interport (Exportador Atlântica)
     await setDoc(doc(db, 'bookings', 'bk_interport'), {
       id: 'bk_interport',

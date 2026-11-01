@@ -34,6 +34,23 @@ function getActiveSessionUser() {
   }
   return null;
 }
+
+function matchesYardOwner(user, ownerId) {
+  if (!user || !ownerId) return false;
+  const target = String(ownerId).trim().toLowerCase();
+  const candidates = [
+    user.id,
+    user.uid,
+    user.login,
+    user.username,
+    user.email,
+    user.email?.split('@')[0],
+    user.displayName,
+    user.name
+  ].filter(Boolean).map(s => String(s).trim().toLowerCase());
+  return candidates.includes(target);
+}
+
 import {
   normalizeContainerCode,
   generateYardPassageId,
@@ -161,8 +178,11 @@ export async function submitYardReading({
 
   const timestamp = Date.now();
   const currentUser = getActiveSessionUser();
-  const ownerId = actor?.id || currentUser?.id || currentUser?.uid || '';
-  const resolvedClientId = currentUser?.selectedClientId || currentUser?.authorizedClients?.[0] || '';
+  const resolvedClientId = (typeof localStorage !== 'undefined' && localStorage.getItem('unispect_active_client_id')) ||
+    currentUser?.selectedClientId ||
+    (currentUser?.authorizedClients?.[0] !== '*' ? currentUser?.authorizedClients?.[0] : null) ||
+    'client_interport';
+  const ownerId = String(actor?.id || currentUser?.login || currentUser?.username || currentUser?.id || currentUser?.uid || 'inspetor');
   const item = {
     id: `read_${normalizedNumber}_${timestamp}`,
     auditId,
@@ -171,7 +191,7 @@ export async function submitYardReading({
     ownerId,
     containerNumber: containerNumber.trim(),
     normalizedNumber,
-    actor: { id: ownerId || 'sys', name: actor?.name || currentUser?.displayName || 'Inspetor', role: actor?.role || 'Inspector' },
+    actor: { id: ownerId || 'sys', name: actor?.name || currentUser?.displayName || currentUser?.name || 'Inspetor', role: actor?.role || 'Inspector' },
     notes,
     timestamp,
     photoData: photo || null,
@@ -318,16 +338,16 @@ export async function syncYardQueueNow() {
 
     // Validação do usuário atualmente autenticado:
     const currentUser = getActiveSessionUser();
-    const currentUserId = currentUser?.id || currentUser?.uid;
-    if (!currentUser || !currentUserId) {
+    if (!currentUser) {
       // Desconectado: mantém pendente sem enviar
       remaining.push(item);
       continue;
     }
 
     const isMaster = Boolean(currentUser.isUnispectMaster || currentUser.normalizedRole === 'MASTER');
+    const isOwner = matchesYardOwner(currentUser, itemOwnerId);
     // B não envia as pendências de A
-    if (!isMaster && currentUserId !== itemOwnerId) {
+    if (!isMaster && !isOwner) {
       remaining.push(item);
       continue;
     }

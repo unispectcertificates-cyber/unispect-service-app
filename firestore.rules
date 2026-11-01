@@ -2,9 +2,41 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Funções auxiliares de autenticação e validação
+    // Funções auxiliares de autenticação, isolamento por cliente e integridade de auditoria
     function isAuthenticated() {
       return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'ADM' ||
+        request.auth.token.role == 'MASTER' ||
+        request.auth.token.admin == true
+      );
+    }
+
+    function hasClientAccess(targetClientId) {
+      return isAuthenticated() && (
+        isAdmin() ||
+        targetClientId == null ||
+        request.auth.token.clientId == null ||
+        request.auth.token.clientId == targetClientId
+      );
+    }
+
+    function preservesAuditHistory() {
+      return !('auditTimeline' in resource.data) || (
+        ('auditTimeline' in request.resource.data) &&
+        request.resource.data.auditTimeline.size() >= resource.data.auditTimeline.size()
+      );
+    }
+
+    function validResponsibleInspectorChange() {
+      // Se já existia um responsibleInspector no booking e ele mudou, exige perfil ADM/MASTER
+      return !('responsibleInspector' in resource.data) ||
+        resource.data.responsibleInspector == null ||
+        request.resource.data.responsibleInspector == resource.data.responsibleInspector ||
+        isAdmin();
     }
 
     // Coleções existentes do UNISPECT
@@ -29,9 +61,27 @@ service cloud.firestore {
     }
 
     match /bookings/{bookingId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated() && hasClientAccess(resource.data.clientId);
+      allow create: if isAuthenticated() && hasClientAccess(request.resource.data.clientId);
+      allow update: if isAuthenticated()
+        && hasClientAccess(resource.data.clientId)
+        && preservesAuditHistory()
+        && validResponsibleInspectorChange();
+      allow delete: if isAdmin();
+    }
+
+    // Coleção imutável de eventos de auditoria de inspeções/containers (append-only)
+    match /inspectionAuditEvents/{eventId} {
+      allow read: if isAuthenticated() && hasClientAccess(resource.data.clientId);
+      allow create: if isAuthenticated()
+        && hasClientAccess(request.resource.data.clientId)
+        && (
+          request.resource.data.actorType == 'system' ||
+          request.resource.data.userId == request.auth.uid ||
+          request.resource.data.actor.uid == request.auth.uid ||
+          isAdmin()
+        );
+      allow update, delete: if false; // Histórico estritamente protegido contra edição ou exclusão
     }
 
     match /bookingImports/{importId} {
@@ -80,10 +130,6 @@ service cloud.firestore {
     // MÓDULO: INVENTÁRIO DO PÁTIO
     // ─────────────────────────────────────────────────────────────
 
-    function isAdmin() {
-      return isAuthenticated() && (request.auth.token.role == 'ADM' || request.auth.token.admin == true);
-    }
-
     // Passagens de containers pelo pátio
     match /yardPassages/{passageId} {
       allow read: if isAuthenticated();
@@ -106,6 +152,12 @@ service cloud.firestore {
     match /yardAudits/{auditId} {
       allow read, create, update: if isAuthenticated();
       allow delete: if false; // Preserva auditorias
+    }
+
+    // Clientes Operacionais
+    match /clients/{clientId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
   }
 }
