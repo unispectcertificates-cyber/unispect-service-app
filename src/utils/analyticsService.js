@@ -726,7 +726,11 @@ export function generateAnalyticsCsv({
   exportadores = [],
   locais = []
 }) {
-  const getExpName = id => exportadores.find(e => e.id === id)?.name || id || '-';
+  const getExpName = id => {
+    const exp = exportadores.find(e => e.id === id);
+    if (!exp) return id || '-';
+    return exp.omitNameInDocuments ? (exp.code || exp.name) : (exp.name || exp.code || '-');
+  };
   const getLocName = id => locais.find(l => l.id === id)?.name || id || '-';
 
   const rows = [];

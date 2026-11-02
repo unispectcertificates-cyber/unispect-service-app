@@ -188,8 +188,12 @@ export default function AnalyticsReportsView({
     return list;
   }, [dashboard.openBookings.list, sortField, sortOrder]);
 
-  // Auxiliares de nomes
-  const getExporterName = (id) => exportadores.find(e => e.id === id)?.name || id || '-';
+  // Auxiliares de nomes (respeita opção de omitir nome do exportador e exibir apenas Código de Cadastro)
+  const getExporterName = (id) => {
+    const exp = exportadores.find(e => e.id === id);
+    if (!exp) return id || '-';
+    return exp.omitNameInDocuments ? (exp.code || exp.name) : (exp.name || exp.code || '-');
+  };
   const getLocationName = (id) => locais.find(l => l.id === id)?.name || id || '-';
 
   return (
@@ -340,7 +344,7 @@ export default function AnalyticsReportsView({
               <option value="">Todos os Exportadores</option>
               {exportadores.map(exp => (
                 <option key={exp.id} value={exp.id}>
-                  {exp.name}
+                  {exp.code ? `${exp.code} - ${exp.name}` : exp.name}
                 </option>
               ))}
             </select>

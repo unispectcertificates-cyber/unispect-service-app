@@ -3,7 +3,15 @@ import { createBookingRepository, normalizeBookingNumber } from './utils/booking
 import { removeFieldPhotoMetadata } from './utils/fieldService';
 import { compressImage } from './utils/imageCompression';
 import { generateUUID } from './utils/uuid';
-import { useState, useEffect } from 'react';
+import {
+  formatExporterCnpj,
+  inferExporterRegistrationDate,
+  formatExporterDateBr,
+  generateNextExporterCode,
+  normalizeExportadoresWithCodes,
+  getExporterDocumentLabel
+} from './utils/exporterUtils';
+import { useState, useEffect, useMemo } from 'react';
 import { dbFirestore, storage } from './firebase';
 import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -26,9 +34,9 @@ const defaultLocais = [
 ];
 
 const defaultExportadores = [
-  { id: '1', name: 'Café Atlântica Exportadora Ltda', email: 'contato@cafeatlantica.com.br', phone: '(27) 3322-1100' },
-  { id: '2', name: 'Tristão Companhia de Comércio Exterior', email: 'tristao@tristao.com.br', phone: '(27) 3200-5500' },
-  { id: '3', name: 'Terra Forte Exportação de Café', email: 'terraforte@terraforte.com.br', phone: '(27) 3199-8800' }
+  { id: '1', code: 'EXP-0001', name: 'Café Atlântica Exportadora Ltda', cnpj: '', registrationDate: '2026-01-10', email: 'contato@cafeatlantica.com.br', phone: '(27) 3322-1100', omitNameInDocuments: false },
+  { id: '2', code: 'EXP-0002', name: 'Tristão Companhia de Comércio Exterior', cnpj: '', registrationDate: '2026-01-10', email: 'tristao@tristao.com.br', phone: '(27) 3200-5500', omitNameInDocuments: false },
+  { id: '3', code: 'EXP-0003', name: 'Terra Forte Exportação de Café', cnpj: '', registrationDate: '2026-01-10', email: 'terraforte@terraforte.com.br', phone: '(27) 3199-8800', omitNameInDocuments: false }
 ];
 
 const defaultInspectors = [
@@ -105,13 +113,29 @@ export const db = {
   // Exportadores
   async getExportadores() {
     const snap = await getDocs(collection(dbFirestore, EXPORTERS_COL));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return normalizeExportadoresWithCodes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   },
   async saveExportador(exporter) {
     const id = exporter.id || 'exp_' + Date.now();
-    exporter.id = id;
-    await setDoc(doc(dbFirestore, EXPORTERS_COL, id), exporter);
-    return exporter;
+    let code = String(exporter.code || '').trim().toUpperCase();
+    if (!code) {
+      const existing = await this.getExportadores();
+      code = generateNextExporterCode(existing);
+    }
+    const payload = {
+      ...exporter,
+      id,
+      code,
+      registrationDate: inferExporterRegistrationDate(exporter),
+      cnpj: formatExporterCnpj(exporter.cnpj || ''),
+      omitNameInDocuments: Boolean(exporter.omitNameInDocuments),
+      updatedAt: Date.now()
+    };
+    if (!payload.createdAt) {
+      payload.createdAt = Date.now();
+    }
+    await setDoc(doc(dbFirestore, EXPORTERS_COL, id), payload, { merge: true });
+    return payload;
   },
   async deleteExportador(id) {
     await deleteDoc(doc(dbFirestore, EXPORTERS_COL, id));
@@ -346,14 +370,29 @@ export function useCollectionRealtime(colName) {
 }
 
 export function useLocais() { return useCollectionRealtime(LOCALS_COL); }
-export function useExportadores() { return useCollectionRealtime(EXPORTERS_COL); }
+export function useExportadores() {
+  const raw = useCollectionRealtime(EXPORTERS_COL);
+  return useMemo(() => normalizeExportadoresWithCodes(raw), [raw]);
+}
 export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
 export function useUsers() { return useCollectionRealtime(USERS_COL); }
 
 import { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers } from './utils/searchUtils';
 
-export { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers };
+export {
+  normalizeText,
+  normalizeCode,
+  matchesContainerQuery,
+  matchesBooking,
+  getMatchedContainers,
+  formatExporterCnpj,
+  inferExporterRegistrationDate,
+  formatExporterDateBr,
+  generateNextExporterCode,
+  normalizeExportadoresWithCodes,
+  getExporterDocumentLabel
+};
 
 export function isBookingNumberDuplicate(bookings, bookingNumber, currentBookingId = null) {
   const key = normalizeBookingNumber(bookingNumber);
@@ -374,4 +413,3 @@ export function getSealText(seal) {
   }
   return String(seal);
 }
-

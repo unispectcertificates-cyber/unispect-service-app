@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { ChevronLeft, Download, Printer } from 'lucide-react';
-import { db, useLocais, useExportadores, useBookings, getSealText } from '../db';
+import { useLocais, useExportadores, useBookings, getSealText, getExporterDocumentLabel } from '../db';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
   const exporters = useExportadores();
   const locations = useLocais();
   const bookings = useBookings();
+  const [forceCodeOnly, setForceCodeOnly] = useState(null); // null = segue configuração do exportador | true = só código | false = nome
   
   const booking = reportType === 'operational' && bookingId 
     ? bookings.find(b => b.id === bookingId) 
@@ -15,6 +16,19 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     ? bookings 
     : [];
 
+  const currentExporterObj = booking ? exporters.find(e => e.id === booking.exporterId) : null;
+  const isOmitActive = forceCodeOnly !== null
+    ? forceCodeOnly
+    : Boolean(currentExporterObj?.omitNameInDocuments);
+
+  const resolveBookingExporterLabel = (exporterId) => {
+    const expObj = exporters.find(e => e.id === exporterId);
+    if (!expObj) return 'N/A';
+    if (forceCodeOnly === true) return expObj.code || expObj.name || 'N/A';
+    if (forceCodeOnly === false) return expObj.name || expObj.code || 'N/A';
+    return getExporterDocumentLabel(expObj);
+  };
+
   // Exportar Word (.docx) via Blob HTML de forma robusta e compatível com Word
   const handleExportWord = () => {
     let htmlContent;
@@ -23,7 +37,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       : `Relatorio_Geral_Administrativo.doc`;
 
     if (reportType === 'operational' && booking) {
-      const exp = exporters.find(e => e.id === booking.exporterId)?.name || 'N/A';
+      const exp = resolveBookingExporterLabel(booking.exporterId);
       const loc = locations.find(l => l.id === booking.locationId)?.name || 'N/A';
       
       // Build container tables HTML
@@ -173,7 +187,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               <td class="value-cell" style="width: 25%;">${booking.bookingNumber}</td>
             </tr>
             <tr>
-              <td class="label-cell">EXPORTER</td>
+              <td class="label-cell">${isOmitActive ? 'EXPORTER (REG. CODE)' : 'EXPORTER'}</td>
               <td class="value-cell">${exp}</td>
               <td class="label-cell">OPERATIONAL SITE</td>
               <td class="value-cell">${loc}</td>
@@ -244,7 +258,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       // Administrative Report Word
       let rowsHtml = '';
       bookingsList.forEach(b => {
-        const exp = exporters.find(e => e.id === b.exporterId)?.name || 'N/A';
+        const exp = resolveBookingExporterLabel(b.exporterId);
         const loc = locations.find(l => l.id === b.locationId)?.name || 'N/A';
         rowsHtml += `
           <tr>
@@ -314,11 +328,13 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     let csvContent = "sep=;\n";
     
     // Cabeçalho
-    csvContent += "Certificado;Booking;Exportador;Lançamento;Navio / Viagem;Local de Operação;Qtd. Containers;Qtd. Sacas;Status\n";
+    csvContent += "Certificado;Booking;Codigo Exportador;Exportador;Lançamento;Navio / Viagem;Local de Operação;Qtd. Containers;Qtd. Sacas;Status\n";
     
     // Linhas
     bookingsList.forEach(b => {
-      const exp = exporters.find(e => e.id === b.exporterId)?.name || 'N/A';
+      const expObj = exporters.find(e => e.id === b.exporterId);
+      const expCode = expObj?.code || '-';
+      const exp = resolveBookingExporterLabel(b.exporterId);
       const loc = locations.find(l => l.id === b.locationId)?.name || 'N/A';
       
       // Sanitiza strings para não quebrar o CSV
@@ -332,7 +348,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
       const bags = b.bagsQuantity || 0;
       const status = (b.status || 'Pendente').toUpperCase();
       
-      csvContent += `${cert};${book};${expName};${launch};${vessel};${locName};${containersCount};${bags};${status}\n`;
+      csvContent += `${cert};${book};${expCode};${expName};${launch};${vessel};${locName};${containersCount};${bags};${status}\n`;
     });
     
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -376,7 +392,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     const pages = [];
     if (!booking) return pages;
 
-    const expName = exporters.find(e => e.id === booking.exporterId)?.name || 'N/A';
+    const expName = resolveBookingExporterLabel(booking.exporterId);
     const locName = locations.find(l => l.id === booking.locationId)?.name || 'N/A';
 
     // Página 1: Dados Operacionais Gerais da Reserva
@@ -521,7 +537,26 @@ export default function ReportView({ bookingId, reportType, onBack }) {
           <ChevronLeft size={16} /> Back
         </button>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Alternador Rápido: Omitir Nome do Exportador e deixar apenas Código de Cadastro */}
+          <button
+            type="button"
+            onClick={() => setForceCodeOnly(!isOmitActive)}
+            className="btn btn-secondary"
+            style={{
+              backgroundColor: isOmitActive ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-tertiary)',
+              border: isOmitActive ? '1px solid #10b981' : '1px solid var(--border-color)',
+              color: isOmitActive ? '#059669' : 'var(--text-primary)',
+              fontSize: '12px',
+              fontWeight: '700'
+            }}
+            title="Alternar entre exibir o Nome do Exportador ou apenas o Código de Cadastro no documento"
+          >
+            {isOmitActive
+              ? `Exibindo Apenas Código (${currentExporterObj?.code || 'Cadastro'})`
+              : `Omitir Nome do Exportador (${currentExporterObj?.code || 'Usar Código'})`}
+          </button>
+
           {reportType === 'administrative' && (
             <button onClick={handleExportExcel} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700' }}>
               📊 Exportar Excel
@@ -618,7 +653,9 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', width: '25%', fontWeight: 'bold' }}>{booking.bookingNumber}</td>
                             </tr>
                             <tr>
-                              <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9.5px' }}>EXPORTER</td>
+                              <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9.5px' }}>
+                                {isOmitActive ? 'EXPORTER (REG. CODE)' : 'EXPORTER'}
+                              </td>
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{page.expName}</td>
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9.5px' }}>OPERATIONAL SITE</td>
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{page.locName}</td>
@@ -639,7 +676,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9.5px' }}>QTY. OF CONTAINERS</td>
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{booking.containers?.length || 0} Cts</td>
                               <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', backgroundColor: '#f0f4f8', color: '#4a607a', fontWeight: 'bold', fontSize: '9.5px' }}>QTY. OF BAGS / PACKAGING</td>
-                              <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{booking.bagsQuantity} Bags ({booking.embalagem || 'sacaria'})</td>
+                              <td style={{ border: '1px solid #c2d1e0', padding: '6px 8px', fontWeight: 'bold' }}>{booking.bagsQuantity} Bags (${booking.embalagem || 'sacaria'})</td>
                             </tr>
                           </tbody>
                         </table>
@@ -903,7 +940,7 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               </thead>
               <tbody>
                 {bookingsList.map(b => {
-                  const exp = exporters.find(e => e.id === b.exporterId)?.name || 'N/A';
+                  const exp = resolveBookingExporterLabel(b.exporterId);
                   const loc = locations.find(l => l.id === b.locationId)?.name || 'N/A';
                   return (
                     <tr key={b.id} style={{ borderBottom: '1px solid #eee' }}>

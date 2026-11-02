@@ -140,6 +140,8 @@ export function matchesBooking(booking, query, { exportadores = [], locais = [] 
   // 2. Resolução de nomes de entidades relacionadas
   const exporter = (exportadores || []).find(e => e.id === booking.exporterId);
   const exporterName = exporter?.name || booking.exporterName || '';
+  const exporterCode = exporter?.code || '';
+  const exporterCnpj = exporter?.cnpj || '';
 
   const local = (locais || []).find(l => l.id === booking.locationId);
   const localName = local?.name || booking.locationName || '';
@@ -158,6 +160,8 @@ export function matchesBooking(booking, query, { exportadores = [], locais = [] 
     booking.status,
     booking.pendingItem,
     exporterName,
+    exporterCode,
+    exporterCnpj,
     localName,
     ...(booking.containers || []).map(c => c?.containerNumber || ''),
     ...(booking.containers || []).flatMap(c => [

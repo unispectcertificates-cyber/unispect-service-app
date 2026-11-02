@@ -1,5 +1,6 @@
 // Utilitário de extração e interpretação de Romaneios em PDF
 // Suporta leitura via window.pdfjsLib no browser e buffers em testes/scripts
+import { formatExporterCnpj, generateNextExporterCode } from './exporterUtils';
 
 export const parseBrazilianOrStandardFloat = (str) => {
   if (!str) return 0;
@@ -509,10 +510,14 @@ export async function parseRomaneioPdf(fileOrBuffer, { exportadores = [], locais
         const newId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
         const newExp = {
           id: newId,
+          code: generateNextExporterCode(exportadores),
           name: exporterNameExtracted,
-          cnpj: cnpjExtracted || '',
+          cnpj: formatExporterCnpj(cnpjExtracted || ''),
+          registrationDate: new Date().toISOString().split('T')[0],
           email: '',
-          phone: ''
+          phone: '',
+          omitNameInDocuments: false,
+          createdAt: Date.now()
         };
         pendingReferences.push({ collection: 'exportadores', data: newExp });
         exporterId = newId;
