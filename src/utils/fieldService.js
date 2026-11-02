@@ -16,8 +16,8 @@ const repository = createFieldRepository({
 });
 export const removeFieldPhotoMetadata = photoId => repository.removePhotoMetadata(photoId);
 
-export async function deleteFieldContainer(number, actor, clientId = 'client_interport') {
-  const result = await repository.deleteFieldContainer(number, actor, clientId);
+export async function deleteFieldContainer(number, actor) {
+  const result = await repository.deleteFieldContainer(number, actor);
   if (result.photosToDelete?.length) {
     await Promise.allSettled(result.photosToDelete.map(async photo => {
       if (photo.storagePath) {
@@ -37,24 +37,9 @@ export async function deleteFieldContainer(number, actor, clientId = 'client_int
   return result;
 }
 
-export function subscribePendingFieldContainers(clientIdOrNext, nextOrError, errorCallback) {
-  let clientId = null;
-  let next = clientIdOrNext;
-  let error = nextOrError;
-  if (typeof clientIdOrNext === 'string') {
-    clientId = clientIdOrNext;
-    next = nextOrError;
-    error = errorCallback;
-  }
-
+export function subscribePendingFieldContainers(next, error) {
   return onSnapshot(query(collection(dbFirestore, 'fieldContainers'), where('status', '==', 'pending')),
-    snapshot => {
-      let docs = snapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-      if (clientId) {
-        docs = docs.filter(d => (d.clientId || 'client_interport') === clientId);
-      }
-      if (next) next(docs);
-    }, error);
+    snapshot => next(snapshot.docs.map(item => ({ ...item.data(), id: item.id }))), error);
 }
 
 async function compressPhoto(blob) {

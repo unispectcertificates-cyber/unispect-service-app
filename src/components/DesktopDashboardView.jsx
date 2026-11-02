@@ -15,11 +15,9 @@ import {
   ChevronUp,
   ChevronDown,
   FileText,
-  RotateCcw,
-  Building2
+  RotateCcw
 } from 'lucide-react';
-import { matchesBooking, getMatchedContainers, useClients } from '../db';
-import ClientsList from './ClientsList';
+import { matchesBooking, getMatchedContainers } from '../db';
 import ExportadoresList from './ExportadoresList';
 import LocaisList from './LocaisList';
 import InspectorsList from './InspectorsList';
@@ -29,7 +27,6 @@ import FieldContainersView from './FieldContainersView';
 import YardInventoryView from './YardInventoryView';
 import AnalyticsReportsView from './AnalyticsReportsView';
 import MobileAppView from './MobileAppView';
-import UnispectGeneralDashboard from './UnispectGeneralDashboard';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
 
 export default function DesktopDashboardView({
@@ -37,7 +34,6 @@ export default function DesktopDashboardView({
   setCurrentTab,
   user,
   bookings,
-  allBookings,
   exportadores,
   locais,
   isOnline,
@@ -56,11 +52,8 @@ export default function DesktopDashboardView({
   handleLogout,
   serverIp,
   handleServerIpChange,
-  pendingFieldCount,
-  selectedClientId,
-  onSelectClient
+  pendingFieldCount
 }) {
-  const clients = useClients();
   // Estados de busca, filtros e paginação
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
@@ -212,7 +205,6 @@ export default function DesktopDashboardView({
           <span>/</span>
           <span className="desktop-breadcrumb-current">
             {currentTab === 'bookings' && 'Bookings e operações'}
-            {currentTab === 'clientes' && 'Cadastro de Clientes'}
             {currentTab === 'yard-inventory' && 'Inventário do Pátio'}
             {currentTab === 'containers-sem-booking' && 'Containers sem Booking'}
             {currentTab === 'analytics-reports' && 'Análise e Relatórios'}
@@ -223,52 +215,6 @@ export default function DesktopDashboardView({
             {currentTab === 'settings' && 'Configurações'}
             {currentTab === 'field-portal' && 'Modo Campo'}
           </span>
-        </div>
-
-        {/* Seletor Rápido de Cliente */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          marginLeft: 'auto',
-          marginRight: '12px',
-          padding: '4px 12px',
-          backgroundColor: 'rgba(255, 255, 255, 0.04)',
-          border: '1px solid rgba(226, 178, 62, 0.4)',
-          borderRadius: '8px'
-        }}>
-          <Building2 size={15} style={{ color: 'var(--color-brand)' }} />
-          <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Painel:
-          </span>
-          <select
-            value={selectedClientId || 'client_interport'}
-            onChange={(e) => {
-              if (e.target.value === '__NEW__') {
-                setCurrentTab('clientes');
-              } else if (onSelectClient) {
-                onSelectClient(e.target.value);
-              }
-            }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#ffffff',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              outline: 'none'
-            }}
-          >
-            {clients.map(c => (
-              <option key={c.id} value={c.id} style={{ backgroundColor: '#131b2e', color: '#ffffff' }}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-            <option value="__NEW__" style={{ backgroundColor: '#131b2e', color: 'var(--color-brand)' }}>
-              + Cadastrar Novo Cliente...
-            </option>
-          </select>
         </div>
 
         <div className="desktop-header-actions">
@@ -317,19 +263,6 @@ export default function DesktopDashboardView({
               setActiveReport(null);
               if (activeReport.id) setSelectedBookingId(activeReport.id);
             }}
-          />
-        ) : currentTab === 'dashboard-geral' ? (
-          <UnispectGeneralDashboard
-            allBookings={allBookings || bookings}
-            clients={clients}
-            user={user}
-            selectedClientId={selectedClientId}
-            onSelectClient={onSelectClient}
-            onAccessOperation={(clientId) => {
-              if (onSelectClient) onSelectClient(clientId);
-              setCurrentTab('bookings');
-            }}
-            onRefresh={handleSystemRefresh}
           />
         ) : currentTab === 'bookings' ? (
           <>
@@ -819,28 +752,11 @@ export default function DesktopDashboardView({
                           colSpan="9"
                           style={{
                             textAlign: 'center',
-                            padding: '44px 20px',
+                            padding: '36px',
                             color: 'var(--text-muted)'
                           }}
                         >
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                            <Building2 size={32} style={{ opacity: 0.3, color: 'var(--color-brand)' }} />
-                            <span style={{ fontSize: '14px', fontWeight: '600' }}>
-                              {totalItems === 0
-                                ? 'Nenhum booking cadastrado para este cliente.'
-                                : 'Nenhum booking encontrado com os filtros aplicados.'}
-                            </span>
-                            {totalItems === 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setShowCreateModal(true)}
-                                className="btn btn-primary"
-                                style={{ marginTop: '8px', padding: '6px 14px', fontSize: '12px', fontWeight: '700' }}
-                              >
-                                + Cadastrar primeiro romaneio deste cliente
-                              </button>
-                            )}
-                          </div>
+                          Nenhum booking encontrado com os filtros aplicados.
                         </td>
                       </tr>
                     )}
@@ -919,15 +835,6 @@ export default function DesktopDashboardView({
               </div>
             </div>
           </>
-        ) : currentTab === 'clientes' ? (
-          <ClientsList
-            selectedClientId={selectedClientId}
-            onSelectClient={(id) => {
-              if (onSelectClient) onSelectClient(id);
-              setCurrentTab('bookings');
-            }}
-            onDataChange={handleRefreshData}
-          />
         ) : currentTab === 'yard-inventory' ? (
           <YardInventoryView user={user} />
         ) : currentTab === 'containers-sem-booking' ? (

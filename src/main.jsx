@@ -1,4 +1,3 @@
-import './firebase.js';
 import {startBookingPhotoQueue} from './utils/bookingPhotoQueue.js';
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -8,7 +7,7 @@ import { db } from './db'
 import { registerSW } from 'virtual:pwa-register'
 
 // Controle de versão do build para invalidar caches antigos no navegador do usuário
-const CURRENT_APP_BUILD = '2026.11.01.r1';
+const CURRENT_APP_BUILD = '2026.11.01.r2';
 try {
   const cachedBuild = localStorage.getItem('unispect_app_build');
   if (cachedBuild !== CURRENT_APP_BUILD) {

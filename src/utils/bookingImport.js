@@ -153,11 +153,7 @@ export function assertUniqueContainers(containers) {
 
 // Adapter permits deterministic transaction tests without connecting to production.
 export function createBookingRepository({ listBookings, reference, newId, transaction, now }) {
-  const keyRef = (number, clientId = 'client_interport') => {
-    const cid = clientId || 'client_interport';
-    return reference('bookingNumberKeys', `${cid}__${encodeURIComponent(normalizeBookingNumber(number))}`);
-  };
-  const legacyKeyRef = number => reference('bookingNumberKeys', encodeURIComponent(normalizeBookingNumber(number)));
+  const keyRef = number => reference('bookingNumberKeys', encodeURIComponent(normalizeBookingNumber(number)));
   const certificateRef = () => reference('bookingCounters', 'certificate');
   const certificateSeed = (list, year) => list.reduce((max, b) => {
     const match = String(b.certificateNumber || '').match(new RegExp(`^UN(\\d+)/${year}$`));
@@ -168,22 +164,16 @@ export function createBookingRepository({ listBookings, reference, newId, transa
 
   return {
     async importBooking(incoming, { expectedPreview, sourceName = '', actor = null, relatedRecords = [] } = {}) {
-      const targetClientId = incoming.clientId || 'client_interport';
       const key = normalizeBookingNumber(incoming.bookingNumber);
       if (!key) throw new Error('Informe um número de Booking válido.');
       const list = await listBookings();
-      // Isolamento multi-cliente: busca apenas nos bookings pertencentes ao mesmo cliente
-      const clientList = list.filter(b => (b.clientId || 'client_interport') === targetClientId);
-      const legacy = findBooking(clientList, incoming.bookingNumber);
+      const legacy = findBooking(list, incoming.bookingNumber);
       const id = newId('booking');
       const operationId = newId('import');
       const timestamp = now();
       const year = new Date(timestamp).getFullYear();
       return transaction(async tx => {
-        let index = await read(tx, keyRef(key, targetClientId));
-        if (!index && targetClientId === 'client_interport') {
-          index = await read(tx, legacyKeyRef(key));
-        }
+        const index = await read(tx, keyRef(key));
         const bookingId = index?.bookingId || legacy?.id || id;
         const bookingRef = reference('bookings', bookingId);
         const existing = await read(tx, bookingRef);
@@ -197,10 +187,7 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         const counter = !current && !incoming.certificateNumber ? await read(tx, certificateRef()) : null;
         const fieldRecords = new Map();
         for (const number of new Set((incoming.containers || []).map(c => normalizeContainerNumber(c.containerNumber)))) {
-          let field = await read(tx, reference('fieldContainers', `${targetClientId}__${number}`));
-          if (!field && targetClientId === 'client_interport') {
-            field = await read(tx, reference('fieldContainers', number));
-          }
+          const field = await read(tx, reference('fieldContainers', number));
           if (field) fieldRecords.set(number, field);
         }
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
@@ -303,7 +290,6 @@ export function createBookingRepository({ listBookings, reference, newId, transa
 
           booking = {
             ...current,
-            clientId: targetClientId,
             ...fieldUpdates,
             containers: [
               ...mergedExistingContainers,
@@ -313,7 +299,7 @@ export function createBookingRepository({ listBookings, reference, newId, transa
           };
         } else {
           if (!incoming.exporterId || !incoming.locationId) throw new Error('Selecione o exportador e o recinto.');
-          booking = { ...incoming, id: bookingId, clientId: targetClientId, bookingNumber: String(incoming.bookingNumber).trim().toUpperCase(),
+          booking = { ...incoming, id: bookingId, bookingNumber: String(incoming.bookingNumber).trim().toUpperCase(),
             containers: plan.added.map(c => ({ ...c, id: newId('container') })), _revision: 1,
             certificateNumber: incoming.certificateNumber || `UN${next}/${year}` };
           if (!incoming.certificateNumber) tx.set(certificateRef(), { year, value: next });
@@ -331,19 +317,12 @@ export function createBookingRepository({ listBookings, reference, newId, transa
           tx.set(bookingRef, booking);
         }
         for (const field of attached.linked) {
-          const docRef = field.id.startsWith(`${targetClientId}__`)
-            ? reference('fieldContainers', field.id)
-            : (targetClientId === 'client_interport' ? reference('fieldContainers', field.id) : reference('fieldContainers', `${targetClientId}__${field.id}`));
-          tx.update(docRef, {
+          tx.update(reference('fieldContainers', field.id), {
             status: 'linked', bookingId, linkedContainerId: field.linkedContainerId, linkedAt: timestamp
           });
         }
-        tx.set(keyRef(key, targetClientId), { bookingId, normalizedNumber: key, clientId: targetClientId });
-        if (targetClientId === 'client_interport') {
-          tx.set(legacyKeyRef(key), { bookingId, normalizedNumber: key });
-        }
+        tx.set(keyRef(key), { bookingId, normalizedNumber: key });
         tx.set(reference('bookingImports', operationId), { id: operationId, bookingId, bookingNumber: booking.bookingNumber,
-          clientId: targetClientId,
           createdAt: timestamp, actor: actor ? { id: actor.id || '', name: actor.name || '' } : null, sourceName,
           added: plan.added.map(c => c.containerNumber), addedIds: booking.containers.slice(current?.containers?.length || 0).map(c => c.id),
           existing: plan.preserved.map(c => normalizeContainerNumber(c.containerNumber)), repeated: plan.repeated,
@@ -358,47 +337,25 @@ export function createBookingRepository({ listBookings, reference, newId, transa
       const key = normalizeBookingNumber(incoming.bookingNumber);
       if (!key) throw new Error('Informe um número de Booking válido.');
       assertUniqueContainers(incoming.containers);
-      const targetClientId = incoming.clientId || 'client_interport';
       const list = await listBookings();
-      // Isolamento multi-cliente: verifica duplicidade de número apenas dentro do mesmo cliente
-      const clientList = list.filter(b => (b.clientId || 'client_interport') === targetClientId);
-      const duplicate = findBooking(clientList.filter(b => b.id !== id), key);
+      const duplicate = findBooking(list.filter(b => b.id !== id), key);
       if (duplicate) throw new Error('Já existe um Booking com este número. Use a importação incremental.');
       const year = new Date(now()).getFullYear();
       return transaction(async tx => {
         const bookingRef = reference('bookings', id);
         const current = await read(tx, bookingRef);
         if ((current?._revision || 0) !== (incoming._revision || 0)) throw conflictError();
-
-        let index = await read(tx, keyRef(key, targetClientId));
-        if (!index && targetClientId === 'client_interport') {
-          index = await read(tx, legacyKeyRef(key));
-        }
+        const index = await read(tx, keyRef(key));
         if (index && index.bookingId !== id) throw new Error('Já existe um Booking com este número.');
-
         const oldKey = current && normalizeBookingNumber(current.bookingNumber);
-        let oldIndex = null;
-        if (oldKey && oldKey !== key) {
-          oldIndex = await read(tx, keyRef(oldKey, targetClientId));
-          if (!oldIndex && targetClientId === 'client_interport') {
-            oldIndex = await read(tx, legacyKeyRef(oldKey));
-          }
-        }
+        const oldIndex = oldKey && oldKey !== key ? await read(tx, keyRef(oldKey)) : null;
         const counter = !current && !incoming.certificateNumber ? await read(tx, certificateRef()) : null;
         const next = Math.max(counter?.year === year ? counter.value : 999, certificateSeed(list, year)) + 1;
-        const booking = { ...incoming, id, clientId: targetClientId, containers: incoming.containers || [], _revision: (current?._revision || 0) + 1,
+        const booking = { ...incoming, id, containers: incoming.containers || [], _revision: (current?._revision || 0) + 1,
           certificateNumber: incoming.certificateNumber || current?.certificateNumber || `UN${next}/${year}` };
         tx.set(bookingRef, booking);
-        tx.set(keyRef(key, targetClientId), { bookingId: id, normalizedNumber: key, clientId: targetClientId });
-        if (targetClientId === 'client_interport') {
-          tx.set(legacyKeyRef(key), { bookingId: id, normalizedNumber: key });
-        }
-        if (oldIndex?.bookingId === id) {
-          tx.delete(keyRef(oldKey, targetClientId));
-          if (targetClientId === 'client_interport') {
-            tx.delete(legacyKeyRef(oldKey));
-          }
-        }
+        tx.set(keyRef(key), { bookingId: id, normalizedNumber: key });
+        if (oldIndex?.bookingId === id) tx.delete(keyRef(oldKey));
         if (!current && !incoming.certificateNumber) tx.set(certificateRef(), { year, value: next });
         return booking;
       });
@@ -409,19 +366,10 @@ export function createBookingRepository({ listBookings, reference, newId, transa
         const bookingRef = reference('bookings', id);
         const current = await read(tx, bookingRef);
         if (!current) return;
-        const targetClientId = current.clientId || 'client_interport';
         const key = normalizeBookingNumber(current.bookingNumber);
-        let index = key ? await read(tx, keyRef(key, targetClientId)) : null;
-        if (!index && key && targetClientId === 'client_interport') {
-          index = await read(tx, legacyKeyRef(key));
-        }
+        const index = key ? await read(tx, keyRef(key)) : null;
         tx.delete(bookingRef);
-        if (index?.bookingId === id) {
-          tx.delete(keyRef(key, targetClientId));
-          if (targetClientId === 'client_interport') {
-            tx.delete(legacyKeyRef(key));
-          }
-        }
+        if (index?.bookingId === id) tx.delete(keyRef(key));
       });
     }
   };

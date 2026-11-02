@@ -19,38 +19,6 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { dbFirestore } from '../firebase';
-
-function getActiveSessionUser() {
-  if (typeof globalThis !== 'undefined' && globalThis.__unispectActiveUser) {
-    return globalThis.__unispectActiveUser;
-  }
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const raw = localStorage.getItem('containtrack_user');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function matchesYardOwner(user, ownerId) {
-  if (!user || !ownerId) return false;
-  const target = String(ownerId).trim().toLowerCase();
-  const candidates = [
-    user.id,
-    user.uid,
-    user.login,
-    user.username,
-    user.email,
-    user.email?.split('@')[0],
-    user.displayName,
-    user.name
-  ].filter(Boolean).map(s => String(s).trim().toLowerCase());
-  return candidates.includes(target);
-}
-
 import {
   normalizeContainerCode,
   generateYardPassageId,
@@ -177,21 +145,13 @@ export async function submitYardReading({
   if (!normalizedNumber) throw new Error('Número de container inválido.');
 
   const timestamp = Date.now();
-  const currentUser = getActiveSessionUser();
-  const resolvedClientId = (typeof localStorage !== 'undefined' && localStorage.getItem('unispect_active_client_id')) ||
-    currentUser?.selectedClientId ||
-    (currentUser?.authorizedClients?.[0] !== '*' ? currentUser?.authorizedClients?.[0] : null) ||
-    'client_interport';
-  const ownerId = String(actor?.id || currentUser?.login || currentUser?.username || currentUser?.id || currentUser?.uid || 'inspetor');
   const item = {
     id: `read_${normalizedNumber}_${timestamp}`,
     auditId,
     yardId,
-    clientId: resolvedClientId,
-    ownerId,
     containerNumber: containerNumber.trim(),
     normalizedNumber,
-    actor: { id: ownerId || 'sys', name: actor?.name || currentUser?.displayName || currentUser?.name || 'Inspetor', role: actor?.role || 'Inspector' },
+    actor: { id: actor?.id || 'sys', name: actor?.name || 'Inspetor', role: actor?.role || 'Inspector' },
     notes,
     timestamp,
     photoData: photo || null,
@@ -324,42 +284,6 @@ export async function syncYardQueueNow() {
   let synced = 0;
 
   for (const item of queue) {
-    // Comprovação rigorosa de origem: Identidade estável do usuário E clientId de origem são OBRIGATÓRIOS.
-    // actor, inspectorName ou yardId isolados NÃO devem ser considerados prova suficiente de autorização.
-    const itemOwnerId = item.ownerId || (typeof item.actor === 'object' && item.actor?.id !== 'sys' ? item.actor?.id : null);
-    const itemClientId = item.clientId;
-
-    if (!itemOwnerId || !itemClientId) {
-      item.status = 'requires_reconciliation';
-      item.lastError = 'Origem não comprovada (identidade estável ou clientId ausente). Registro mantido protegido para reconciliação.';
-      remaining.push(item);
-      continue;
-    }
-
-    // Validação do usuário atualmente autenticado:
-    const currentUser = getActiveSessionUser();
-    if (!currentUser) {
-      // Desconectado: mantém pendente sem enviar
-      remaining.push(item);
-      continue;
-    }
-
-    const isMaster = Boolean(currentUser.isUnispectMaster || currentUser.normalizedRole === 'MASTER');
-    const isOwner = matchesYardOwner(currentUser, itemOwnerId);
-    // B não envia as pendências de A
-    if (!isMaster && !isOwner) {
-      remaining.push(item);
-      continue;
-    }
-
-    // Usuário deve ter autorização para o clientId de origem da leitura
-    const hasAuthList = Array.isArray(currentUser.authorizedClients);
-    const isAuthorized = isMaster || !hasAuthList || currentUser.authorizedClients.includes(itemClientId) || currentUser.authorizedClients.includes('*');
-    if (!isAuthorized) {
-      remaining.push(item);
-      continue;
-    }
-
     try {
       await processReadingRemote(item);
       addSyncedRecord({ ...item, syncedAt: Date.now() });

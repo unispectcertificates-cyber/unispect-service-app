@@ -3,30 +3,16 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   Search, Camera, Image, Trash2, ArrowLeft, X,
   CheckCircle2, Package, ClipboardList, Settings,
-  ChevronRight, Loader2, User, LogOut, RefreshCw, Layers,
-  Building2, Key
+  ChevronRight, Loader2, User, LogOut, RefreshCw, Layers
 } from 'lucide-react';
-import { changeUserPassword } from '../utils/authService';
-import { db, useBookings, useClients, useExportadores, useLocais, useUsers, useInspectors, getSealText, matchesBooking, getMatchedContainers } from '../db';
+import { db, useBookings, useExportadores, useLocais, getSealText, matchesBooking, getMatchedContainers } from '../db';
 import FieldCapturePanel from './FieldCapturePanel';
 import FieldCaptureNotice from './FieldCaptureNotice';
 import YardFieldFlow from './YardFieldFlow';
-import InspectionTimeline from './InspectionTimeline';
-import {
-  applyViewAccessToContainer,
-  transferContainerResponsibility
-} from '../utils/inspectionAudit';
 import { startFieldSynchronization } from '../utils/fieldService';
 import { startYardSynchronization } from '../utils/yardService';
 import { recognizeContainerPhoto, validateIso6346CheckDigit } from '../utils/containerOcr';
 import { normalizeContainerNumber } from '../utils/containerIdentity';
-import { mergeContainerProvisionalSeals } from '../utils/bookingConcurrent';
-import {
-  processContainerProvisionalSeals,
-  getPendingDoubtfulSealReviews,
-  confirmDoubtfulSealReview,
-  dismissDoubtfulSealReview
-} from '../utils/provisionalSealQueue';
 import PhotoDownloadButton from './PhotoDownloadButton';
 import PhotoEnlargedModal from './PhotoEnlargedModal';
 
@@ -206,40 +192,7 @@ function BottomNav({ activeTab, onTabChange, hasContainer }) {
 // ────────────────────────────────────────────────────────────────────────────
 // Painel de Ajustes
 // ────────────────────────────────────────────────────────────────────────────
-function AjustesPanel({ user, onLogout, onRefresh, isRefreshing, onSwitchToManagement }) {
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', success: '' });
-
-  const handleChangePasswordSubmit = async (e) => {
-    e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      setPasswordStatus({ loading: false, error: 'A nova senha deve ter no mínimo 6 caracteres.', success: '' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordStatus({ loading: false, error: 'As senhas informadas não coincidem.', success: '' });
-      return;
-    }
-
-    setPasswordStatus({ loading: true, error: '', success: '' });
-    try {
-      await changeUserPassword(newPassword);
-      setPasswordStatus({ loading: false, error: '', success: 'Senha alterada com sucesso!' });
-      setTimeout(() => {
-        setShowPasswordModal(false);
-        setNewPassword('');
-        setConfirmPassword('');
-        setPasswordStatus({ loading: false, error: '', success: '' });
-      }, 1500);
-    } catch (err) {
-      setPasswordStatus({ loading: false, error: err.message || 'Erro ao alterar a senha.', success: '' });
-    }
-  };
-
-  const isAdm = String(user?.role || '').toUpperCase() === 'ADM' || user?.isUnispectMaster;
-
+function AjustesPanel({ user, onLogout, onRefresh, isRefreshing }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <h2 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-primary)' }}>
@@ -263,68 +216,18 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing, onSwitchToManag
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: '900', fontSize: '16px', color: 'var(--text-primary)' }}>
-            {user?.name || user?.displayName || user?.login || 'Usuário'}
+            {user?.name || 'Usuário'}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>
-            {isAdm ? 'ADMINISTRADOR (MASTER)' : (user?.role || 'INSPETOR')}
+            {user?.role || 'Inspector'}
           </div>
           {user?.login && (
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Usuário: {user.login}
+              Login: {user.login}
             </div>
           )}
         </div>
       </div>
-
-      {/* Botão de Troca de Senha */}
-      <button
-        type="button"
-        onClick={() => setShowPasswordModal(true)}
-        style={{
-          padding: '14px 16px',
-          borderRadius: '14px',
-          border: '1px solid var(--border-color)',
-          backgroundColor: 'var(--bg-secondary)',
-          color: 'var(--text-primary)',
-          fontWeight: '800',
-          fontSize: '14px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '10px',
-          boxShadow: 'var(--shadow-sm)'
-        }}
-      >
-        <Key size={18} style={{ color: 'var(--color-brand)' }} />
-        <span>Alterar Minha Senha</span>
-      </button>
-
-      {/* Botão de Alternar para Painel de Gestão (para ADM no celular) */}
-      {isAdm && onSwitchToManagement && (
-        <button
-          type="button"
-          onClick={onSwitchToManagement}
-          style={{
-            padding: '14px 16px',
-            borderRadius: '14px',
-            border: '1px solid var(--color-brand)',
-            backgroundColor: 'rgba(226, 178, 62, 0.1)',
-            color: 'var(--color-brand)',
-            fontWeight: '800',
-            fontSize: '14px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            boxShadow: 'var(--shadow-sm)'
-          }}
-        >
-          <Building2 size={18} />
-          <span>Acessar Painel de Gestão</span>
-        </button>
-      )}
 
       {/* Botão de Atualizar e Sincronizar Sistema */}
       <button
@@ -397,149 +300,6 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing, onSwitchToManag
           Sair do App
         </button>
       )}
-
-      {/* Modal de Troca de Senha */}
-      {showPasswordModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100000,
-            padding: '20px'
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '16px',
-              padding: '24px',
-              width: '100%',
-              maxWidth: '380px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-              boxShadow: 'var(--shadow-xl)'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Key size={18} style={{ color: 'var(--color-brand)' }} />
-                <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: 'var(--text-primary)' }}>
-                  Alterar Minha Senha
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPasswordModal(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {passwordStatus.error && (
-              <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid #ef4444',
-                color: '#ef4444',
-                padding: '10px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: '600'
-              }}>
-                {passwordStatus.error}
-              </div>
-            )}
-
-            {passwordStatus.success && (
-              <div style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                border: '1px solid #10b981',
-                color: '#10b981',
-                padding: '10px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: '600'
-              }}>
-                {passwordStatus.success}
-              </div>
-            )}
-
-            <form onSubmit={handleChangePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={S.label}>Nova Senha (mínimo 6 caracteres)</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  style={S.input}
-                  disabled={passwordStatus.loading}
-                />
-              </div>
-
-              <div>
-                <label style={S.label}>Confirmar Nova Senha</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  style={S.input}
-                  disabled={passwordStatus.loading}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordModal(false)}
-                  disabled={passwordStatus.loading}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    color: 'var(--text-secondary)',
-                    fontWeight: '700',
-                    fontSize: '13px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={passwordStatus.loading}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    backgroundColor: 'var(--color-brand)',
-                    color: '#fff',
-                    fontWeight: '800',
-                    fontSize: '13px',
-                    cursor: passwordStatus.loading ? 'wait' : 'pointer'
-                  }}
-                >
-                  {passwordStatus.loading ? 'Salvando...' : 'Confirmar'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -547,7 +307,7 @@ function AjustesPanel({ user, onLogout, onRefresh, isRefreshing, onSwitchToManag
 // ────────────────────────────────────────────────────────────────────────────
 // Componente Principal
 // ────────────────────────────────────────────────────────────────────────────
-export default function MobileAppView({ user, onLogout, hideHeader = false, onRefresh, isRefreshing: parentRefreshing = false, onSwitchToManagement }) {
+export default function MobileAppView({ user, onLogout, hideHeader = false, onRefresh, isRefreshing: parentRefreshing = false }) {
   useEffect(() => {
     const role = String(user?.role || '').trim().toUpperCase();
     if (role === 'ADM' || role === 'INSPECTOR') {
@@ -559,37 +319,9 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       };
     }
   }, [user?.role]);
-  const allBookings   = useBookings();
-  const clients       = useClients();
-  const exportadores  = useExportadores();
-  const locais        = useLocais();
-  const usersList     = useUsers();
-  const inspectorsList = useInspectors();
-  const collaboratorOptions = useMemo(() => {
-    const map = new Map();
-    for (const u of usersList || []) {
-      if (u && (u.id || u.uid) && u.name) map.set(String(u.id || u.uid), u);
-    }
-    for (const ins of inspectorsList || []) {
-      if (ins && ins.id && ins.name && !map.has(String(ins.id))) {
-        map.set(String(ins.id), { ...ins, role: 'Inspector' });
-      }
-    }
-    return [...map.values()];
-  }, [usersList, inspectorsList]);
-
-  const [selectedClientId, setSelectedClientId] = useState(() => {
-    return localStorage.getItem('unispect_active_client_id') || 'client_interport';
-  });
-
-  const bookings = useMemo(() => {
-    return (allBookings || []).filter(b => {
-      if (selectedClientId === 'client_interport') {
-        return !b.clientId || b.clientId === 'client_interport';
-      }
-      return b.clientId === selectedClientId;
-    });
-  }, [allBookings, selectedClientId]);
+  const bookings     = useBookings();
+  const exportadores = useExportadores();
+  const locais       = useLocais();
 
   // ── Navegação
   const [screen, setScreen]               = useState('list');       // 'list' | 'booking' | 'container' | 'ajustes'
@@ -752,8 +484,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
   // ── Input de lacre provisório
   const [newSealInput, setNewSealInput] = useState('');
-  const [isRecognizingSeals, setIsRecognizingSeals] = useState(false);
-  const [reviewDrafts, setReviewDrafts] = useState({});
 
   const cameraInputRef  = useRef(null);
   const galleryInputRef = useRef(null);
@@ -912,70 +642,9 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     setActiveTab('booking');
   }, []);
 
-  // Dispara reconhecimento de lacres provisórios Interport em segundo plano
-  const triggerMobileSealRecognition = useCallback((targetContainer, options = {}) => {
-    const b = selectedBookingRef.current;
-    if (!targetContainer || !targetContainer.id) return;
-    const photosToAnalyze = options.photos || targetContainer.photos || [];
-    if (!photosToAnalyze.length) return;
-
-    setIsRecognizingSeals(true);
-    void processContainerProvisionalSeals({
-      container: targetContainer,
-      bookingId: b?.id || '',
-      clientId: b?.clientId || 'client_interport',
-      photos: photosToAnalyze,
-      retryFailed: Boolean(options.retryFailed),
-      explicitReview: Boolean(options.explicitReview),
-      onContainerUpdated: (updatedCont) => {
-        if (!isMountedRef.current) return;
-        setSelectedContainer(prev => {
-          if (!prev || prev.id !== updatedCont.id) return prev;
-          return {
-            ...prev,
-            ...updatedCont,
-            photos: prev.photos?.length ? prev.photos : updatedCont.photos
-          };
-        });
-        setSelectedBooking(prev => {
-          if (!prev || prev.id !== b?.id) return prev;
-          return {
-            ...prev,
-            containers: (prev.containers || []).map(c =>
-              c.id === updatedCont.id
-                ? { ...c, ...updatedCont, photos: c.photos?.length ? c.photos : updatedCont.photos }
-                : c
-            )
-          };
-        });
-      }
-    }).finally(() => {
-      if (isMountedRef.current) setIsRecognizingSeals(false);
-    });
-  }, []);
-
-  // ── Navegação: abrir Container (carrega fotos do Firestore + Storage e registra visualização sem atribuir responsável)
+  // ── Navegação: abrir Container (carrega fotos do Firestore + Storage)
   const openContainer = useCallback(async c => {
-    let initialCont = { ...c };
-    const b = selectedBookingRef.current;
-    try {
-      const viewRes = applyViewAccessToContainer({
-        container: initialCont,
-        authenticatedUser: user,
-        clientId: b?.clientId || c.clientId || 'client_interport',
-        bookingId: b?.id || c.bookingId || ''
-      });
-      if (viewRes.recorded) {
-        initialCont = viewRes.container;
-        if (b?.id && db.recordContainerAccess) {
-          void db.recordContainerAccess(b.id, c.id, { authenticatedUser: user }).catch(() => {});
-        }
-      }
-    } catch {
-      // ignore if unauthenticated in test
-    }
-
-    setSelectedContainer(initialCont);
+    setSelectedContainer({ ...c });
     setScreen('container');
     setActiveTab('container');
     setSaveStatus('idle');
@@ -990,25 +659,18 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
       const photoMap = {};
       photos.forEach(p => { photoMap[p.id] = p; });
 
-      const mergedPhotos = (c.photos || []).map(ref => ({
-        ...ref,
-        url: photoMap[ref.id]?.url || ref.url || null,
-        storagePath: photoMap[ref.id]?.storagePath || ref.storagePath || null,
-        sizeBytes: photoMap[ref.id]?.sizeBytes || ref.sizeBytes || 0,
-        compressionVersion: photoMap[ref.id]?.compressionVersion || ref.compressionVersion || '1'
-      }));
 
-      const nextCont = { ...c, photos: mergedPhotos };
+
       if (isMountedRef.current) {
-        setSelectedContainer(prev => prev?.id !== c.id ? prev : nextCont);
-      }
-      if (mergedPhotos.some(p => p.url || p.dataUrl)) {
-        triggerMobileSealRecognition(nextCont, { photos: mergedPhotos });
+        setSelectedContainer(prev => prev?.id !== c.id ? prev : ({...prev, photos:(prev.photos || []).map(ref => ({
+          ...ref, url:photoMap[ref.id]?.url || ref.url || null,
+          storagePath:photoMap[ref.id]?.storagePath || ref.storagePath || null
+        }))}));
       }
     } catch (err) {
       console.warn('Não foi possível carregar fotos do container:', err);
     }
-  }, [triggerMobileSealRecognition]);
+  }, []);
 
   // ── Navegação: voltar para lista de Bookings
   const goToList = useCallback(() => {
@@ -1060,20 +722,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     if (!files.length || !bookingId || !containerId) return;
 
     try {
-      const jobs = await enqueueBookingPhotos(bookingId, containerId, files);
-      // Inicia em segundo plano o reconhecimento dos lacres provisórios Interport nas fotos recém-capturadas
-      const localJobPhotos = (jobs || []).map(j => ({
-        id: j.id,
-        file: j.file,
-        url: j.localUrl || '',
-        sizeBytes: j.file?.size || 0,
-        compressionVersion: '1'
-      }));
-      if (localJobPhotos.length > 0 && selectedContainer) {
-        triggerMobileSealRecognition(selectedContainer, {
-          photos: [...(selectedContainer.photos || []), ...localJobPhotos]
-        });
-      }
+      await enqueueBookingPhotos(bookingId, containerId, files);
+      // Sem avisos intrusivos por captura: as miniaturas surgem imediatamente via photoJobs + displayedPhotos
     } catch (error) {
       if (isMountedRef.current) showToast('Não foi possível gravar a foto no aparelho: ' + (error.message || 'Verifique o espaço disponível.'), 'error');
     }
@@ -1120,96 +770,16 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     }
   };
 
-  const handleAddSeal = async () => {
-    if (!newSealInput.trim() || !selectedContainer) return;
-    const manualSeal = newSealInput.trim();
+  const handleAddSeal = () => {
+    if (!newSealInput.trim()) return;
+    const updated = [...(selectedContainer.provisionalSeals || []), newSealInput.trim().toUpperCase()];
+    updateContField('provisionalSeals', updated);
     setNewSealInput('');
-    const b = selectedBookingRef.current;
-    const mutation = {
-      clientId: b?.clientId || 'client_interport',
-      bookingId: b?.id || '',
-      authenticatedUser: user,
-      forceReinsert: true,
-      addSeals: [{ sealNumber: manualSeal, source: 'manual', clientId: b?.clientId || 'client_interport', bookingId: b?.id || '', containerId: selectedContainer.id }]
-    };
-    const merged = mergeContainerProvisionalSeals(selectedContainer, mutation);
-    setSelectedContainer(merged);
-    if (b?.id && db.mutateContainerProvisionalSeals) {
-      try {
-        await serializeEdit(() => db.mutateContainerProvisionalSeals(b.id, selectedContainer.id, mutation));
-      } catch {
-        updateContField('provisionalSeals', merged.provisionalSeals);
-      }
-    } else {
-      updateContField('provisionalSeals', merged.provisionalSeals);
-    }
   };
 
-  const handleRemoveSeal = async idx => {
-    if (!selectedContainer) return;
-    const targetSeal = getSealText((selectedContainer.provisionalSeals || [])[idx]);
-    if (!targetSeal) return;
-    const b = selectedBookingRef.current;
-    const mutation = {
-      clientId: b?.clientId || 'client_interport',
-      bookingId: b?.id || '',
-      authenticatedUser: user,
-      removeSeals: [{ sealNumber: targetSeal }]
-    };
-    const merged = mergeContainerProvisionalSeals(selectedContainer, mutation);
-    setSelectedContainer(merged);
-    if (b?.id && db.mutateContainerProvisionalSeals) {
-      try {
-        await serializeEdit(() => db.mutateContainerProvisionalSeals(b.id, selectedContainer.id, mutation));
-      } catch {
-        updateContField('provisionalSeals', merged.provisionalSeals);
-      }
-    } else {
-      updateContField('provisionalSeals', merged.provisionalSeals);
-    }
-  };
-
-  const handleConfirmDoubtfulMobile = async (review) => {
-    if (!selectedContainer) return;
-    const b = selectedBookingRef.current;
-    const typed = reviewDrafts[review.reviewKey] !== undefined
-      ? reviewDrafts[review.reviewKey]
-      : review.suggestedNumber;
-    if (!String(typed || '').trim()) {
-      showToast('Informe ou confirme a numeração do lacre provisório.', 'warning');
-      return;
-    }
-    try {
-      await confirmDoubtfulSealReview({
-        container: selectedContainer,
-        bookingId: b?.id || '',
-        clientId: b?.clientId || 'client_interport',
-        reviewKey: review.reviewKey,
-        photoId: review.photoId,
-        photoVersion: review.photoVersion,
-        confirmedNumber: typed,
-        authenticatedUser: user,
-        onContainerUpdated: (nextCont) => {
-          setSelectedContainer(prev => prev?.id === nextCont.id ? { ...prev, ...nextCont, photos: prev.photos } : prev);
-        }
-      });
-    } catch (err) {
-      showToast(err.message || 'Erro ao confirmar lacre.', 'error');
-    }
-  };
-
-  const handleDismissDoubtfulMobile = async (review) => {
-    if (!selectedContainer) return;
-    const b = selectedBookingRef.current;
-    await dismissDoubtfulSealReview({
-      container: selectedContainer,
-      bookingId: b?.id || '',
-      clientId: b?.clientId || 'client_interport',
-      reviewKey: review.reviewKey,
-      onContainerUpdated: (nextCont) => {
-        setSelectedContainer(prev => prev?.id === nextCont.id ? { ...prev, ...nextCont, photos: prev.photos } : prev);
-      }
-    });
+  const handleRemoveSeal = idx => {
+    const updated = (selectedContainer.provisionalSeals || []).filter((_, i) => i !== idx);
+    updateContField('provisionalSeals', updated);
   };
 
   const handleSearchPhotoCaptured = async (e) => {
@@ -1846,37 +1416,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
 
           {/* Lacres Provisórios */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-              <label style={{ ...S.label, marginBottom: 0 }}>Lacres Provisórios (múltiplos)</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                {isRecognizingSeals && (
-                  <span style={{ fontSize: '10px', color: 'var(--color-brand)', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Lendo lacres nas fotos...
-                  </span>
-                )}
-                {!isRecognizingSeals && displayedPhotos.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => triggerMobileSealRecognition(c, { photos: displayedPhotos, explicitReview: true, retryFailed: true })}
-                    style={{
-                      background: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '6px',
-                      padding: '3px 8px',
-                      fontSize: '10px',
-                      fontWeight: '700',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <RefreshCw size={10} /> Revisar fotos
-                  </button>
-                )}
-              </div>
-            </div>
+            <label style={S.label}>Lacres Provisórios</label>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
               <input
                 type="text"
@@ -1906,23 +1446,16 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {(c.provisionalSeals || []).map((seal, idx) => {
                 const sealText = getSealText(seal);
-                const provInfo = c.sealProvenance?.[String(sealText).toUpperCase()];
-                const isAuto = provInfo && provInfo.source !== 'manual';
                 return (
                   <div key={idx} style={{
                     display: 'flex', alignItems: 'center', gap: '6px',
                     padding: '5px 10px',
                     backgroundColor: 'var(--bg-tertiary)',
-                    border: isAuto ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid var(--border-color)',
+                    border: '1px solid var(--border-color)',
                     borderRadius: '20px',
                     fontSize: '12px', fontWeight: '700'
                   }}>
                     <span>{idx + 1}. {sealText}</span>
-                    {isAuto && (
-                      <span style={{ fontSize: '9px', fontWeight: '800', color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.15)', padding: '1px 5px', borderRadius: '4px' }}>
-                        AUTO
-                      </span>
-                    )}
                     <button onClick={() => handleRemoveSeal(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1 }}>
                       <X size={12} />
                     </button>
@@ -1933,64 +1466,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhum lacre provisório.</span>
               )}
             </div>
-
-            {/* Conferência de leituras duvidosas/incompletas (Regra 6) */}
-            {getPendingDoubtfulSealReviews(c).length > 0 && (
-              <div style={{
-                marginTop: '12px',
-                padding: '10px',
-                borderRadius: '10px',
-                border: '1px solid rgba(245, 158, 11, 0.5)',
-                backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px'
-              }}>
-                <div style={{ fontSize: '11px', fontWeight: '800', color: '#f59e0b' }}>
-                  ⚠️ Conferência de Lacre Provisório ({getPendingDoubtfulSealReviews(c).length})
-                </div>
-                {getPendingDoubtfulSealReviews(c).map(rev => {
-                  const draftVal = reviewDrafts[rev.reviewKey] !== undefined ? reviewDrafts[rev.reviewKey] : rev.suggestedNumber;
-                  return (
-                    <div key={rev.reviewKey} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', padding: '8px', borderRadius: '8px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                      {rev.photoUrl && (
-                        <img
-                          src={rev.photoUrl}
-                          alt="Lacre"
-                          style={{ width: '44px', height: '58px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border-color)' }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: '150px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{rev.reason}</div>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <input
-                            type="text"
-                            value={draftVal}
-                            onChange={e => setReviewDrafts(prev => ({ ...prev, [rev.reviewKey]: e.target.value }))}
-                            placeholder="Nº do lacre (ex: 005745)"
-                            style={{ ...S.input, padding: '6px 8px', fontSize: '12px', maxWidth: '150px' }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleConfirmDoubtfulMobile(rev)}
-                            style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 10px', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
-                          >
-                            Confirmar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDismissDoubtfulMobile(rev)}
-                            style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '6px 10px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
-                          >
-                            Ignorar
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
 
@@ -2071,36 +1546,6 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
           </div>
         </div>
 
-        {/* ── Seção: Linha do Tempo de Auditoria e Inspetor Responsável ── */}
-        <InspectionTimeline
-          container={c}
-          booking={selectedBooking || {}}
-          user={user}
-          collaborators={collaboratorOptions}
-          compact
-          onTransferResponsibility={async ({ newResponsibleUser, reason }) => {
-            const b = selectedBookingRef.current;
-            const res = transferContainerResponsibility({
-              container: c,
-              authenticatedUser: user,
-              newResponsibleUser,
-              reason,
-              clientId: b?.clientId || c.clientId || 'client_interport',
-              bookingId: b?.id || c.bookingId || ''
-            });
-            setSelectedContainer(res.container);
-            if (b?.id && db.transferContainerResponsibility) {
-              await serializeEdit(() =>
-                db.transferContainerResponsibility(b.id, c.id, {
-                  authenticatedUser: user,
-                  newResponsibleUser,
-                  reason
-                })
-              );
-            }
-          }}
-        />
-
         {/* Espaço extra para a bottom nav não sobrepor o último card */}
         <div style={{ height: '16px' }} />
       </div>
@@ -2146,34 +1591,8 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
               justifyContent: 'center'
             }}>US</div>
             <div>
-              <div style={{ fontSize: '14px', fontWeight: '800', lineHeight: 1.1 }}>Unispect Service</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '800', textTransform: 'uppercase' }}>CLIENTE:</span>
-                <select
-                  value={selectedClientId || 'client_interport'}
-                  onChange={(e) => {
-                    const newId = e.target.value;
-                    setSelectedClientId(newId);
-                    localStorage.setItem('unispect_active_client_id', newId);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--color-brand)',
-                    fontSize: '10px',
-                    fontWeight: '800',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    padding: 0
-                  }}
-                >
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id} style={{ backgroundColor: '#131b2e', color: '#fff' }}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <div style={{ fontSize: '14px', fontWeight: '800' }}>Unispect Service</div>
+              <div style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Modo Campo</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2290,7 +1709,7 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         {screen === 'booking'   && renderBooking()}
         {screen === 'yard'      && <YardFieldFlow user={user} onBack={() => { setActiveTab('booking'); setScreen(selectedBooking ? 'booking' : 'list'); }} />}
         {screen === 'container' && renderContainer()}
-        {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} onSwitchToManagement={onSwitchToManagement} />}
+        {screen === 'ajustes'   && <AjustesPanel user={user} onLogout={onLogout} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} />}
       </main>
 
       {/* Bottom Navigation */}

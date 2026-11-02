@@ -1,9 +1,9 @@
 import { findBooking, planImport, previewToken, normalizeContainerNumber, importFieldLabels } from './utils/bookingImport';
 import { parseRomaneioPdf } from './utils/pdfParser';
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, LogOut, Building2 } from 'lucide-react';
-import { db, useBookings, useLocais, useExportadores, useClients, getSealText, matchesBooking, getMatchedContainers } from './db';
+import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, LogOut } from 'lucide-react';
+import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
 import { subscribePendingFieldContainers } from './utils/fieldService';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
@@ -16,27 +16,26 @@ import UsersList from './components/UsersList';
 import FieldContainersView from './components/FieldContainersView';
 import Sidebar from './components/Sidebar';
 import DesktopDashboardView from './components/DesktopDashboardView';
-import ClientsList from './components/ClientsList';
-import { subscribeAuthSession, logoutUser } from './utils/authService';
 
-function AuthenticatedApp({ user, onLogout }) {
-  const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth < 900);
+export default function App() {
+  const [isMobileOrTablet, setIsMobileOrTablet] = useState(() => window.innerWidth <= 1024);
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobileOrTablet(window.innerWidth < 900);
+      setIsMobileOrTablet(window.innerWidth <= 1024);
     };
     window.addEventListener('resize', handleResize);
 
+    // DEBUG: Global error handler to catch silent UI freezes
     const origError = window.onerror;
     window.onerror = function (msg, url, line, col, error) {
-      console.error("[ERRO NO SISTEMA]:", msg, "Linha:", line, error);
+      alert("ERRO NO SISTEMA: " + msg + "\nLinha: " + line);
       if (origError) return origError(msg, url, line, col, error);
       return false;
     };
     const origUnhandled = window.onunhandledrejection;
     window.onunhandledrejection = function (event) {
-      console.error("[ERRO ASSÍNCRONO]:", event.reason);
+      alert("ERRO ASSÍNCRONO: " + (event.reason ? event.reason.message || event.reason : 'Unknown'));
       if (origUnhandled) return origUnhandled(event);
     };
 
@@ -47,49 +46,32 @@ function AuthenticatedApp({ user, onLogout }) {
     };
   }, []);
 
-  const isMobile = isMobileOrTablet;
-  const isInspector = user?.role === 'Inspector';
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const [currentTab, setCurrentTab] = useState(() => {
-    const isMob = window.innerWidth < 900;
+    const isMob = window.innerWidth <= 768;
     const usr = db.getUser();
     if (isMob && usr && usr.role !== 'Exportador') {
       return 'field-portal';
     }
-    return 'dashboard-geral';
+    return 'bookings';
   });
-  const isFieldPortal = isMobileOrTablet && (currentTab === 'field-portal' || isInspector);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [activeReport, setActiveReport] = useState(null); // { id, type }
+  const [user, setUser] = useState(db.getUser());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverIp, setServerIp] = useState(localStorage.getItem('containtrack_server_ip') || '');
   const bookings = useBookings();
-  const clients = useClients();
   const exportadores = useExportadores();
   const locais = useLocais();
-
-  // Painel de trabalho do Cliente Ativo
-  const [selectedClientId, setSelectedClientId] = useState(() => {
-    return localStorage.getItem('unispect_active_client_id') || 'client_interport';
-  });
-
-  const handleSelectClient = (clientId) => {
-    setSelectedClientId(clientId);
-    localStorage.setItem('unispect_active_client_id', clientId);
-  };
-
-  // Escopo de dados operacionais por cliente:
-  // - INTERPORT: contém dados vinculados explicitamente OU dados históricos sem clientId
-  // - Novo cliente: contém estritamente seus próprios dados (começa vazio)
-  const clientBookings = useMemo(() => {
-    return (bookings || []).filter(b => {
-      if (selectedClientId === 'client_interport') {
-        return !b.clientId || b.clientId === 'client_interport';
-      }
-      return b.clientId === selectedClientId;
-    });
-  }, [bookings, selectedClientId]);
-
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [pendingFieldCount, setPendingFieldCount] = useState(0);
@@ -123,7 +105,7 @@ function AuthenticatedApp({ user, onLogout }) {
         setPickerPdfError('Não foi possível identificar o número do Booking no arquivo PDF.');
         return;
       }
-      const match = findBooking(clientBookings, parsed.bookingNumber);
+      const match = findBooking(bookings, parsed.bookingNumber);
       if (match) {
         setShowUpdateRomaneioPicker(false);
         setInitialOpenUpdateRomaneio(true);
@@ -170,7 +152,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const [importReferences, setImportReferences] = useState([]);
   let existingImportBooking = null;
   let importError = '';
-  try { existingImportBooking = findBooking(clientBookings, newBookingData.bookingNumber); }
+  try { existingImportBooking = findBooking(bookings, newBookingData.bookingNumber); }
   catch (error) { importError = error.message; }
   const importPlan = planImport(existingImportBooking, newBookingData.containers || []);
   const importPreviewToken = previewToken(existingImportBooking, importPlan);
@@ -239,13 +221,13 @@ function AuthenticatedApp({ user, onLogout }) {
     }
   };
 
-  // Estatísticas operacionais dos Bookings (escopo do cliente ativo)
-  const countPendentes = clientBookings.filter(b => b.status === 'Pendente').length;
-  const countAndamento = clientBookings.filter(b => b.status === 'Em andamento').length;
-  const countFinalizados = clientBookings.filter(b => b.status === 'Finalizado').length;
+  // Estatísticas operacionais dos Bookings
+  const countPendentes = bookings.filter(b => b.status === 'Pendente').length;
+  const countAndamento = bookings.filter(b => b.status === 'Em andamento').length;
+  const countFinalizados = bookings.filter(b => b.status === 'Finalizado').length;
 
   // Filtragem dos Bookings com busca inteligente universal
-  const filteredBookings = clientBookings.filter(b => {
+  const filteredBookings = bookings.filter(b => {
     const matchesSearch = matchesBooking(b, searchQuery, { exportadores, locais });
     const matchesStatus = statusFilter === 'Todos' || b.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -275,7 +257,6 @@ function AuthenticatedApp({ user, onLogout }) {
     try {
       const result = await db.importBooking({
         ...newBookingData,
-        clientId: selectedClientId,
         vesselVoyage: `${newBookingData.vesselName} V.${newBookingData.vesselVoyageNum}`,
         bagsQuantity: parseInt(newBookingData.bagsQuantity, 10) || 0,
         containers: newBookingData.containers || []
@@ -452,10 +433,9 @@ function AuthenticatedApp({ user, onLogout }) {
   };
 
   // Logout
-  const handleLogout = async () => {
-    if (onLogout) {
-      await onLogout();
-    }
+  const handleLogout = () => {
+    setUser(null);
+    db.setUser(null);
     setCurrentTab('bookings');
   };
 
@@ -469,7 +449,7 @@ function AuthenticatedApp({ user, onLogout }) {
   };
 
   if (!user) {
-    return null;
+    return <Login onLogin={setUser} />;
   }
 
   return (
@@ -489,8 +469,6 @@ function AuthenticatedApp({ user, onLogout }) {
               setSelectedBookingId(null);
               setActiveReport({ id: null, type: 'administrative' });
             }}
-            selectedClientId={selectedClientId}
-            onSelectClient={handleSelectClient}
           />
           <DesktopDashboardView
             currentTab={currentTab}
@@ -500,8 +478,7 @@ function AuthenticatedApp({ user, onLogout }) {
               setCurrentTab(tab);
             }}
             user={user}
-            bookings={clientBookings}
-            allBookings={bookings}
+            bookings={bookings}
             exportadores={exportadores}
             locais={locais}
             isOnline={isOnline}
@@ -521,40 +498,20 @@ function AuthenticatedApp({ user, onLogout }) {
             serverIp={serverIp}
             handleServerIpChange={handleServerIpChange}
             pendingFieldCount={pendingFieldCount}
-            selectedClientId={selectedClientId}
-            onSelectClient={handleSelectClient}
           />
         </>
-      ) : activeReport ? (
-        <ReportView
-          bookingId={activeReport.id}
-          reportType={activeReport.type}
-          onBack={() => {
-            setActiveReport(null);
-            if (activeReport.id) setSelectedBookingId(activeReport.id);
-          }}
-        />
-      ) : isFieldPortal ? (
-        <MobileAppView
-          user={user}
-          onLogout={handleLogout}
-          hideHeader={false}
-          onRefresh={handleSystemRefresh}
-          isRefreshing={isRefreshing}
-          onSwitchToManagement={() => setCurrentTab('bookings')}
-        />
       ) : (
         <>
           {/* Mobile Top Bar */}
           <header className="mobile-top-bar no-print">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
                 background: 'linear-gradient(135deg, var(--color-brand), #b88f28)',
                 color: '#0d1127',
                 fontWeight: '800',
-                fontSize: '13px',
-                width: '26px',
-                height: '26px',
+                fontSize: '14px',
+                width: '28px',
+                height: '28px',
                 borderRadius: '6px',
                 display: 'flex',
                 alignItems: 'center',
@@ -563,27 +520,8 @@ function AuthenticatedApp({ user, onLogout }) {
                 US
               </div>
               <div>
-                <h1 style={{ fontSize: '12px', fontWeight: '800', margin: 0, lineHeight: 1.1 }}>Unispect</h1>
-                <select
-                  value={selectedClientId || 'client_interport'}
-                  onChange={(e) => handleSelectClient(e.target.value)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--color-brand)',
-                    fontSize: '10px',
-                    fontWeight: '800',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    padding: 0
-                  }}
-                >
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id} style={{ backgroundColor: '#131b2e', color: '#fff' }}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
+                <h1 style={{ fontSize: '13px', fontWeight: '800', margin: 0 }}>Unispect Service</h1>
+                <span style={{ fontSize: '9px', color: 'var(--color-brand)', fontWeight: '700', textTransform: 'uppercase' }}>Mobile Portal</span>
               </div>
             </div>
 
@@ -649,7 +587,7 @@ function AuthenticatedApp({ user, onLogout }) {
       )}
 
       {/* CONTEÚDO PRINCIPAL (Mobile) */}
-      {isMobileOrTablet && !isFieldPortal && !activeReport && (
+      {isMobileOrTablet && (
         <main className="main-content app-main-content">
 
         {activeReport ? (
@@ -668,7 +606,7 @@ function AuthenticatedApp({ user, onLogout }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h1 style={{ fontSize: '24px', fontWeight: '800' }}>Controle de Certificados Unispect</h1>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Bem-vindo, {user.name || user.displayName || user.username || user.login || 'Colaborador'}</p>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Bem-vindo, {user.username}</p>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1180,19 +1118,6 @@ function AuthenticatedApp({ user, onLogout }) {
                 </motion.div>
               )}
 
-              {currentTab === 'clientes' && (
-                <motion.div key="tab-clientes" {...pageTransition}>
-                  <ClientsList
-                    selectedClientId={selectedClientId}
-                    onSelectClient={(id) => {
-                      handleSelectClient(id);
-                      setCurrentTab('bookings');
-                    }}
-                    onDataChange={handleRefreshData}
-                  />
-                </motion.div>
-              )}
-
               {currentTab === 'exportadores' && (
                 <motion.div key="tab-exportadores" {...pageTransition}>
                   <ExportadoresList onDataChange={handleRefreshData} />
@@ -1211,16 +1136,9 @@ function AuthenticatedApp({ user, onLogout }) {
                 </motion.div>
               )}
 
-              {currentTab === 'field-portal' && (
+              {(currentTab === 'field-portal' || (isMobile && user.role !== 'Exportador')) && (
                 <motion.div key="tab-field-portal" {...pageTransition}>
-                  <MobileAppView
-                    user={user}
-                    onLogout={handleLogout}
-                    hideHeader={false}
-                    onRefresh={handleSystemRefresh}
-                    isRefreshing={isRefreshing}
-                    onSwitchToManagement={() => setCurrentTab('bookings')}
-                  />
+                  <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} onRefresh={handleSystemRefresh} isRefreshing={isRefreshing} />
                 </motion.div>
               )}
 
@@ -1294,14 +1212,6 @@ function AuthenticatedApp({ user, onLogout }) {
                       <h4 style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase', margin: 0 }}>
                         Administração
                       </h4>
-                      <button
-                        onClick={() => setCurrentTab('clientes')}
-                        className="btn btn-secondary"
-                        style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', width: '100%', borderColor: 'var(--color-brand)' }}
-                      >
-                        <span style={{ fontWeight: '700', color: 'var(--color-brand)' }}>🏢 Cadastro de Clientes</span>
-                        <span>→</span>
-                      </button>
                       <button
                         onClick={() => setCurrentTab('locais')}
                         className="btn btn-secondary"
@@ -1934,7 +1844,7 @@ function AuthenticatedApp({ user, onLogout }) {
       )}
 
       {/* Mobile Bottom Navigation */}
-      {isMobileOrTablet && !isFieldPortal && !activeReport && (
+      {isMobileOrTablet && (
         <nav className="mobile-bottom-nav no-print no-select">
           {(user.role === 'Inspector' || user.role === 'ADM') && (
             <button
@@ -1975,7 +1885,7 @@ function AuthenticatedApp({ user, onLogout }) {
       )}
 
       {/* Floating Action Button on Mobile */}
-      {isMobileOrTablet && !isFieldPortal && !activeReport && currentTab === 'bookings' && user.role === 'ADM' && (
+      {isMobileOrTablet && currentTab === 'bookings' && user.role === 'ADM' && (
         <button
           onClick={() => setShowCreateModal(true)}
           className="mobile-fab"
@@ -2009,45 +1919,4 @@ function AuthenticatedApp({ user, onLogout }) {
       )}
     </div>
   );
-}
-
-export default function App() {
-  const [session, setSession] = useState({
-    status: 'checking',
-    user: db.getUser(),
-    message: null
-  });
-
-  useEffect(() => {
-    const unsub = subscribeAuthSession((sessionState) => {
-      setSession(sessionState);
-    });
-    return () => unsub();
-  }, []);
-
-  const handleLogout = async () => {
-    await logoutUser();
-    setSession({ status: 'unauthenticated', user: null, message: null });
-  };
-
-  if (session.status === 'checking') {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ width: '32px', height: '32px', border: '3px solid var(--border-color)', borderTopColor: 'var(--color-brand)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: '600' }}>Confirmando sessão segura...</span>
-        <style dangerouslySetInnerHTML={{__html: `@keyframes spin { to { transform: rotate(360deg); } }`}} />
-      </div>
-    );
-  }
-
-  if (session.status !== 'authenticated' || !session.user) {
-    return (
-      <Login
-        onLogin={(u) => setSession({ status: 'authenticated', user: u, message: null })}
-        initialMessage={session.message}
-      />
-    );
-  }
-
-  return <AuthenticatedApp user={session.user} onLogout={handleLogout} />;
 }

@@ -21,7 +21,6 @@ import {
   FileCheck
 } from 'lucide-react';
 import { useLocais } from '../db';
-import { resolveAuthenticatedActor } from '../utils/inspectionAudit';
 import {
   normalizeContainerCode,
   startYardAuditSession,
@@ -142,11 +141,10 @@ export default function YardFieldFlow({ user, onBack }) {
     if (!selectedYardId) return;
     setIsSubmitting(true);
     try {
-      const authActor = resolveAuthenticatedActor(user);
       const newAudit = startYardAuditSession({
         yardId: selectedYardId,
         yardName: selectedYardName,
-        actor: { id: authActor.id, uid: authActor.uid, name: authActor.name, role: authActor.role }
+        actor: { id: user?.id || 'usr_1', name: user?.name || user?.username || 'Inspetor', role: user?.role || 'Inspector' }
       });
       // Salva no Firestore
       const { setDoc, doc } = await import('firebase/firestore');
@@ -221,12 +219,11 @@ export default function YardFieldFlow({ user, onBack }) {
     setFeedback(null);
 
     try {
-      const authActor = resolveAuthenticatedActor(user);
       const res = await submitYardReading({
         auditId: activeAudit.id,
         yardId: selectedYardId,
         containerNumber: inputNumber.trim().toUpperCase(),
-        actor: { id: authActor.id, uid: authActor.uid, name: authActor.name, role: authActor.role },
+        actor: { id: user?.id || 'usr', name: user?.name || user?.username || 'Inspetor', role: user?.role || 'Inspector' },
         notes: notes.trim()
       });
 

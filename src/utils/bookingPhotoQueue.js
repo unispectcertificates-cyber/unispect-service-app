@@ -22,22 +22,6 @@ const cancelledJobIds = new Set();
 export const photoQueueOwner = () => String(db.getUser()?.id || db.getUser()?.login || db.getUser()?.username || '');
 const notify = () => window.dispatchEvent(new Event('unispect-booking-photo-queue'));
 
-export function isJobOwnerMatch(user, jobOwner) {
-  if (!user || !jobOwner) return false;
-  const target = String(jobOwner).trim().toLowerCase();
-  const candidates = [
-    user.id,
-    user.uid,
-    user.login,
-    user.username,
-    user.email,
-    user.email?.split('@')[0],
-    user.displayName,
-    user.name
-  ].filter(Boolean).map(s => String(s).trim().toLowerCase());
-  return candidates.includes(target);
-}
-
 export function getLocalPhotoUrl(jobId) {
   return localUrls.get(jobId) || null;
 }
@@ -81,42 +65,21 @@ export async function getPhotoBlob(jobId) {
 }
 
 export async function listBookingPhotoJobs() {
-  const user = db.getUser();
-  if (!user) return [];
-  const isMaster = Boolean(user?.isUnispectMaster || user?.normalizedRole === 'MASTER');
-
-  return transaction(['jobs'], 'readonly', (tx, done) => {
-    const req = tx.objectStore('jobs').getAll();
-    req.onsuccess = () => done((req.result || [])
-      // Usuário B não visualiza pendências de A nem pendências órfãs.
-      // Master Unispect visualiza suas próprias ou pendências sinalizadas para reconciliação.
-      .filter(j => (j.owner && isJobOwnerMatch(user, j.owner)) || (isMaster && (!j.owner || !j.clientId || j.status === 'requires_reconciliation')))
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map(j => ({
-        ...j,
-        localUrl: localUrls.get(j.id) || null
-      }))
-    );
+  const owner=photoQueueOwner();
+  return transaction(['jobs'],'readonly',(tx,done)=>{
+    const req=tx.objectStore('jobs').getAll();
+    req.onsuccess=()=>done((req.result || []).filter(j=>!owner || !j.owner || j.owner===owner).sort((a,b)=>a.createdAt-b.createdAt).map(j=>({
+      ...j,
+      localUrl: localUrls.get(j.id) || null
+    })));
   });
 }
 
-export async function enqueueBookingPhotos(bookingId, containerId, files, options = {}) {
-  const user = db.getUser();
-  const owner = photoQueueOwner();
-  if (!owner) throw new Error('É necessário estar autenticado para capturar fotos.');
+export async function enqueueBookingPhotos(bookingId,containerId,files) {
+  const owner=photoQueueOwner();
   if (!bookingId || !containerId) throw new Error('Selecione um container antes de fotografar.');
-
-  // Preserva de forma imutável o cliente e a autoria de origem no momento da captura
-  const clientId = options.clientId || user?.selectedClientId || user?.authorizedClients?.[0] || 'client_interport';
-  const authorId = String(user?.uid || user?.id || owner);
-  const authorName = String(user?.name || user?.displayName || user?.email || owner);
-  const authorRole = String(user?.normalizedRole || user?.role || 'Inspector');
-  const authorEmail = user?.email || user?.login || 'usuario';
-  const captureNowMs = Date.now();
-  const deviceTimestamp = new Date(captureNowMs).toISOString();
-
-  const jobs = Array.from(files).map(file => {
-    const id = 'bookingphoto_' + generateUUID();
+  const jobs=Array.from(files).map(file=>{
+    const id='bookingphoto_'+generateUUID();
     let localUrl = null;
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && file instanceof Blob) {
       try {
@@ -129,20 +92,14 @@ export async function enqueueBookingPhotos(bookingId, containerId, files, option
     return {
       id,
       owner,
-      authorId,
-      authorName,
-      authorRole,
-      authorEmail,
-      clientId,
       bookingId,
       containerId,
       file,
       localUrl,
-      createdAt: captureNowMs,
-      deviceTimestamp,
-      attempts: 0,
-      nextAttempt: 0,
-      error: ''
+      createdAt:Date.now(),
+      attempts:0,
+      nextAttempt:0,
+      error:''
     };
   });
   if (!jobs.length || jobs.some(j=>!(j.file instanceof Blob) || !j.file.size)) throw new Error('Foto vazia ou inválida.');
@@ -192,47 +149,20 @@ async function processJob(job) {
   const idStr = String(job.id);
   try {
     if (cancelledJobIds.has(idStr)) return;
-
-    // Registros legados sem owner ou clientId suficientes: não descarta nem atribui ao usuário atual
-    if (!job.owner || !job.clientId) {
-      if (job.status !== 'requires_reconciliation') {
-        await saveJob({
-          ...job,
-          status: 'requires_reconciliation',
-          error: 'Origem ou cliente não comprovados. Registro protegido aguardando reconciliação.'
-        });
-      }
-      return;
-    }
-
-    const currentUser = db.getUser();
-    // B não envia as pendências de A (e usuário desconectado não envia nada)
-    if (!currentUser || !isJobOwnerMatch(currentUser, job.owner)) return;
-
-    // Usuário deve ter autorização para o clientId de origem da foto
-    const isMaster = Boolean(currentUser?.isUnispectMaster || currentUser?.normalizedRole === 'MASTER');
-    const hasAuthorizedList = Array.isArray(currentUser?.authorizedClients);
-    const isAuthorized = isMaster || !hasAuthorizedList || currentUser.authorizedClients.includes(job.clientId) || currentUser.authorizedClients.includes('*');
-    if (!isAuthorized) return;
-
-    let photo = job.photo;
+    if (photoQueueOwner()!==job.owner) return;
+    let photo=job.photo;
     if (!photo) {
-      const local = await get('blobs', job.id);
+      const local=await get('blobs',job.id);
       if (!local?.blob?.size) {
         if (cancelledJobIds.has(idStr)) return;
         throw new Error('Foto local não encontrada. O registro foi mantido para revisão.');
       }
-      // Envia com o clientId e authorEmail originais da captura, sem herdar a tela ativa
-      photo = await db.uploadPhoto(local.blob, job.containerId, {
-        photoId: job.id,
-        clientId: job.clientId,
-        authorEmail: job.authorEmail
-      });
+      photo=await db.uploadPhoto(local.blob,job.containerId,{photoId:job.id});
       if (cancelledJobIds.has(idStr)) {
         await db.deletePhoto(photo.id, photo.storagePath).catch(() => {});
         return;
       }
-      job = { ...job, photo };
+      job={...job,photo};
       await saveJob(job); // Upload confirmado: retentar vínculo não reenvia o arquivo.
     }
     if (cancelledJobIds.has(idStr)) {
@@ -245,27 +175,7 @@ async function processJob(job) {
       return;
     }
     if (photoQueueOwner()!==job.owner) return;
-    const devTs = job.deviceTimestamp || (job.createdAt ? new Date(job.createdAt).toISOString() : new Date().toISOString());
-    const capturedByActor = {
-      id: String(job.authorId || job.owner),
-      uid: String(job.authorId || job.owner),
-      name: String(job.authorName || job.authorEmail || job.owner),
-      email: String(job.authorEmail || ''),
-      role: String(job.authorRole || 'Inspector')
-    };
-    const photoWithAudit = {
-      ...photo,
-      authorId: capturedByActor.id,
-      authorName: capturedByActor.name,
-      capturedBy: capturedByActor,
-      deviceTimestamp: devTs
-    };
-    const booking=await db.appendBookingPhoto(job.bookingId,job.containerId,photoWithAudit,{
-      isOfflineSync: true,
-      offlineActor: capturedByActor,
-      deviceTimestamp: devTs,
-      eventId: `evt_photo_added_${job.bookingId}_${job.containerId}_${job.id}`
-    });
+    const booking=await db.appendBookingPhoto(job.bookingId,job.containerId,photo);
     // Só remove os bytes locais depois de confirmar upload E vínculo remoto.
     await transaction(['jobs','blobs'],'readwrite',tx=>{
       tx.objectStore('jobs').delete(job.id);tx.objectStore('blobs').delete(job.id);
