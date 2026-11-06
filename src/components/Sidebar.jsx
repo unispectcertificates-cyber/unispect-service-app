@@ -5,6 +5,7 @@ import {
   Users,
   FileText,
   TrendingUp,
+  Coffee,
   Settings,
   Camera,
   LogOut,
@@ -17,6 +18,7 @@ import {
   Layers
 } from 'lucide-react';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
+import { canAccessCoffeeAnalysisModule, isMasterUser } from '../utils/coffeeAnalysisService';
 
 export default function Sidebar({
   currentTab,
@@ -45,7 +47,7 @@ export default function Sidebar({
     }
   }, [currentTab]);
 
-  const isAdm = user?.role === 'ADM';
+  const isAdm = isMasterUser(user) || user?.role === 'ADM';
   const isInspector = user?.role === 'Inspector';
   const isExporter = user?.role === 'Exportador';
 
@@ -160,7 +162,22 @@ export default function Sidebar({
             </button>
           </li>
 
-          {/* 5. Configurações com sub-itens */}
+          {/* 5. Analysis of coffee (imediatamente abaixo de Análise e Relatórios) */}
+          {canAccessCoffeeAnalysisModule(user) && (
+            <li>
+              <button
+                type="button"
+                id="sidebar-item-analysis-of-coffee"
+                onClick={() => setCurrentTab('analysis-of-coffee')}
+                className={`sidebar-nav-item ${currentTab === 'analysis-of-coffee' ? 'active' : ''}`}
+              >
+                <Coffee size={18} className="sidebar-item-icon" />
+                <span className="sidebar-item-text">Analysis of coffee</span>
+              </button>
+            </li>
+          )}
+
+          {/* 6. Configurações com sub-itens */}
           {(isAdm || isInspector) && (
             <li>
               <button

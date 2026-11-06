@@ -26,6 +26,7 @@ import UsersList from './UsersList';
 import FieldContainersView from './FieldContainersView';
 import YardInventoryView from './YardInventoryView';
 import AnalyticsReportsView from './AnalyticsReportsView';
+import CoffeeAnalysisView from './CoffeeAnalysisView';
 import MobileAppView from './MobileAppView';
 import { subscribePendingFieldContainers } from '../utils/fieldService';
 
@@ -208,6 +209,7 @@ export default function DesktopDashboardView({
             {currentTab === 'yard-inventory' && 'Inventário do Pátio'}
             {currentTab === 'containers-sem-booking' && 'Containers sem Booking'}
             {currentTab === 'analytics-reports' && 'Análise e Relatórios'}
+            {currentTab === 'analysis-of-coffee' && 'Analysis of coffee'}
             {currentTab === 'exportadores' && 'Exportadores'}
             {currentTab === 'locais' && 'Locais da Operação'}
             {currentTab === 'inspectors' && 'Cadastro de Inspetores'}
@@ -849,6 +851,12 @@ export default function DesktopDashboardView({
             onOpenBooking={id => setSelectedBookingId(id)}
             onOpenReport={(id, type) => setActiveReport({ id, type: type || 'administrative' })}
             onBackToBookings={() => setCurrentTab('bookings')}
+          />
+        ) : currentTab === 'analysis-of-coffee' ? (
+          <CoffeeAnalysisView
+            user={user}
+            exportadores={exportadores}
+            bookings={bookings}
           />
         ) : currentTab === 'exportadores' ? (
           <ExportadoresList onDataChange={handleRefreshData} />

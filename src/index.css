@@ -2787,6 +2787,26 @@ td {
     display: none !important;
   }
 
+  body.printing-coffee-cert * {
+    visibility: hidden;
+  }
+
+  body.printing-coffee-cert #coffee-certificate-print-root,
+  body.printing-coffee-cert #coffee-certificate-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-coffee-cert #coffee-certificate-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    padding: 1cm 1.3cm 1.2cm 1.3cm !important;
+    background: #ffffff !important;
+  }
+
   body {
     background-color: #ffffff !important;
     color: #000000 !important;

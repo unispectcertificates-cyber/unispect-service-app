@@ -1,12 +1,16 @@
-import { useState } from 'react';
-import { ChevronLeft, Download, Printer } from 'lucide-react';
-import { useLocais, useExportadores, useBookings, getSealText, getExporterDocumentLabel } from '../db';
+import { useState, useMemo } from 'react';
+import { ChevronLeft, Download, Printer, Coffee } from 'lucide-react';
+import { useLocais, useExportadores, useBookings, useCoffeeAnalyses, getSealText, getExporterDocumentLabel } from '../db';
+import CoffeeCertificateReport from './CoffeeCertificateReport';
 
 export default function ReportView({ bookingId, reportType, onBack }) {
   const exporters = useExportadores();
   const locations = useLocais();
   const bookings = useBookings();
+  const coffeeAnalyses = useCoffeeAnalyses();
   const [forceCodeOnly, setForceCodeOnly] = useState(null); // null = segue configuração do exportador | true = só código | false = nome
+  const [includeCoffeeReport, setIncludeCoffeeReport] = useState(true);
+  const [selectedCoffeeAnalysisId, setSelectedCoffeeAnalysisId] = useState('');
   
   const booking = reportType === 'operational' && bookingId 
     ? bookings.find(b => b.id === bookingId) 
@@ -28,6 +32,22 @@ export default function ReportView({ bookingId, reportType, onBack }) {
     if (forceCodeOnly === false) return expObj.name || expObj.code || 'N/A';
     return getExporterDocumentLabel(expObj);
   };
+
+  // Laudos de café finalizados/emitidos vinculados a este booking
+  const matchingCoffeeReports = useMemo(() => {
+    if (!booking) return [];
+    return (coffeeAnalyses || []).filter(
+      c => String(c.bookingId) === String(booking.id) && (c.status === 'Emitido' || c.status === 'Aguardando assinatura')
+    );
+  }, [coffeeAnalyses, booking]);
+
+  const activeCoffeeReport = useMemo(() => {
+    if (!matchingCoffeeReports.length) return null;
+    if (selectedCoffeeAnalysisId) {
+      return matchingCoffeeReports.find(c => String(c.id) === String(selectedCoffeeAnalysisId)) || matchingCoffeeReports[0];
+    }
+    return matchingCoffeeReports[0];
+  }, [matchingCoffeeReports, selectedCoffeeAnalysisId]);
 
   // Exportar Word (.docx) via Blob HTML de forma robusta e compatível com Word
   const handleExportWord = () => {
@@ -557,6 +577,33 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               : `Omitir Nome do Exportador (${currentExporterObj?.code || 'Usar Código'})`}
           </button>
 
+          {/* Opção de Emissão Conjunta com o Laudo de Classificação de Café */}
+          {matchingCoffeeReports.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: 'var(--bg-tertiary)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={includeCoffeeReport}
+                  onChange={e => setIncludeCoffeeReport(e.target.checked)}
+                />
+                <Coffee size={14} style={{ color: 'var(--color-brand)' }} />
+                <span>Anexar Laudo de Café</span>
+              </label>
+
+              {includeCoffeeReport && matchingCoffeeReports.length > 1 && (
+                <select
+                  value={activeCoffeeReport?.id || ''}
+                  onChange={e => setSelectedCoffeeAnalysisId(e.target.value)}
+                  style={{ fontSize: '11px', padding: '2px 6px' }}
+                >
+                  {matchingCoffeeReports.map(c => (
+                    <option key={c.id} value={c.id}>{c.laudoNumber} ({c.status})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
           {reportType === 'administrative' && (
             <button onClick={handleExportExcel} className="btn btn-primary" style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700' }}>
               📊 Exportar Excel
@@ -911,6 +958,17 @@ export default function ReportView({ bookingId, reportType, onBack }) {
               );
             });
           })()}
+
+          {/* ANEXO OFICIAL DO LAUDO DE CAFÉ (LAYOUT A4 RETRATO AZUL) QUANDO SELECIONADO NA EMISSÃO CONJUNTA */}
+          {reportType === 'operational' && booking && includeCoffeeReport && activeCoffeeReport && (
+            <CoffeeCertificateReport
+              laudo={activeCoffeeReport}
+              isDraftPreview={activeCoffeeReport.status !== 'Emitido'}
+              pageNumber={getReportPages().length + 1}
+              totalPages={getReportPages().length + 1}
+              id="coffee-certificate-attached-root"
+            />
+          )}
         </div>
 
         {/* RELATÓRIO GERAL ADMINISTRATIVO */}

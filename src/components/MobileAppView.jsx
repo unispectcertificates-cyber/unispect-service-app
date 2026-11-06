@@ -332,6 +332,9 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
   // ── Busca
   const [searchQuery, setSearchQuery] = useState('');
 
+  // ── Filtro de Status para Modo Campo (Mobile)
+  const [statusFilter, setStatusFilter] = useState('Todos'); // 'Todos' | 'Em andamento' | 'Pendentes' | 'Finalizados'
+
   // ── Auto-save
   const [saveStatus, setSaveStatus]   = useState('idle');  // 'idle' | 'saving' | 'saved'
   const debounceTimerRef              = useRef(null);
@@ -629,10 +632,60 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
     setSelectedBooking(updated);
   },[scheduleEdit]);
 
-  // ── Filtro de bookings com busca universal e inteligente
-  const filteredBookings = bookings.filter(b => 
-    matchesBooking(b, searchQuery, { exportadores, locais })
-  );
+  // ── Contadores de status para os filtros do Modo Campo
+  const statusCounts = useMemo(() => {
+    let todos = 0;
+    let emAndamento = 0;
+    let pendentes = 0;
+    let finalizados = 0;
+
+    bookings.forEach(b => {
+      if (searchQuery.trim() && !matchesBooking(b, searchQuery, { exportadores, locais })) {
+        return;
+      }
+      todos++;
+      const finished = isFinished(b);
+      const raw = (b.status || '').toLowerCase().trim();
+      if (finished) {
+        finalizados++;
+      } else if (raw === 'em andamento') {
+        emAndamento++;
+      } else {
+        pendentes++;
+      }
+    });
+
+    return {
+      Todos: todos,
+      'Em andamento': emAndamento,
+      Pendentes: pendentes,
+      Finalizados: finalizados
+    };
+  }, [bookings, searchQuery, exportadores, locais]);
+
+  // ── Filtro de bookings com busca universal e inteligente + filtro de status
+  const filteredBookings = useMemo(() => {
+    return bookings.filter(b => {
+      if (searchQuery.trim() && !matchesBooking(b, searchQuery, { exportadores, locais })) {
+        return false;
+      }
+      if (statusFilter === 'Todos') return true;
+
+      const finished = isFinished(b);
+      const raw = (b.status || '').toLowerCase().trim();
+
+      if (statusFilter === 'Finalizados') {
+        return finished;
+      }
+      if (statusFilter === 'Em andamento') {
+        return !finished && raw === 'em andamento';
+      }
+      if (statusFilter === 'Pendentes') {
+        return !finished && raw !== 'em andamento';
+      }
+      return true;
+    });
+  }, [bookings, searchQuery, statusFilter, exportadores, locais]);
 
   // ── Navegação: abrir Booking
   const openBooking = useCallback(b => {
@@ -988,17 +1041,115 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
         />
       </div>
 
-      {/* Contador */}
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {searchQuery
-          ? `Resultados (${filteredBookings.length})`
-          : `📋 Todos os Bookings (${filteredBookings.length})`}
+      {/* Filtro de Status no Modo Campo */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        overflowX: 'auto',
+        padding: '2px 0 4px 0',
+        scrollbarWidth: 'none',
+        WebkitOverflowScrolling: 'touch'
+      }}>
+        {[
+          { id: 'Todos', label: 'Todos', count: statusCounts.Todos, color: 'var(--color-brand)', dot: '📋' },
+          { id: 'Em andamento', label: 'Em andamento', count: statusCounts['Em andamento'], color: '#f59e0b', dot: '🟡' },
+          { id: 'Pendentes', label: 'Pendentes', count: statusCounts.Pendentes, color: '#ef4444', dot: '🔴' },
+          { id: 'Finalizados', label: 'Finalizados', count: statusCounts.Finalizados, color: '#10b981', dot: '🟢' },
+        ].map(filter => {
+          const isActive = statusFilter === filter.id;
+          return (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => setStatusFilter(filter.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 12px',
+                borderRadius: '20px',
+                border: isActive ? `2px solid ${filter.color}` : '1px solid var(--border-color)',
+                backgroundColor: isActive ? `${filter.color}1F` : 'var(--bg-secondary)',
+                color: isActive ? filter.color : 'var(--text-secondary)',
+                fontSize: '12px',
+                fontWeight: isActive ? '800' : '600',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                transition: 'all 0.15s ease',
+                boxShadow: isActive ? '0 1px 4px rgba(0,0,0,0.08)' : 'none'
+              }}
+            >
+              <span>{filter.dot}</span>
+              <span>{filter.label}</span>
+              <span style={{
+                fontSize: '10px',
+                fontWeight: '800',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                backgroundColor: isActive ? filter.color : 'var(--bg-tertiary, rgba(0,0,0,0.08))',
+                color: isActive ? '#ffffff' : 'var(--text-muted)'
+              }}>
+                {filter.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Contador e Indicador de Filtro Ativo */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {searchQuery || statusFilter !== 'Todos'
+            ? `Resultados (${filteredBookings.length})${statusFilter !== 'Todos' ? ` · ${statusFilter}` : ''}`
+            : `📋 Todos os Bookings (${filteredBookings.length})`}
+        </div>
+        {statusFilter !== 'Todos' && (
+          <button
+            type="button"
+            onClick={() => setStatusFilter('Todos')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-brand)',
+              fontSize: '11px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              padding: '2px 4px'
+            }}
+          >
+            Mostrar todos
+          </button>
+        )}
       </div>
 
       {/* Lista de cards */}
       {filteredBookings.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: '13px' }}>
-          Nenhum booking encontrado.
+          {statusFilter !== 'Todos' ? (
+            <div>
+              <p style={{ margin: '0 0 10px 0' }}>Nenhum booking com status <strong>{statusFilter}</strong> encontrado.</p>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('Todos')}
+                style={{
+                  background: 'var(--color-brand)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                Ver todos os bookings
+              </button>
+            </div>
+          ) : (
+            'Nenhum booking encontrado.'
+          )}
         </div>
       ) : filteredBookings.map(b => {
         const exp = exportadores.find(e => e.id === b.exporterId)?.name || 'N/A';
@@ -1093,12 +1244,28 @@ export default function MobileAppView({ user, onLogout, hideHeader = false, onRe
               <div style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Certificado</div>
               <div style={{ fontSize: '22px', fontWeight: '900', color: 'var(--color-brand)', lineHeight: 1.1 }}>{b.certificateNumber}</div>
             </div>
-            <span style={{
-              fontSize: '10px', fontWeight: '800', padding: '4px 10px',
-              borderRadius: '6px', backgroundColor: `${sc}1A`, color: sc
-            }}>
-              {b.status || 'Pendente'}
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+              <select
+                value={b.status || 'Pendente'}
+                onChange={e => updateBookingField('status', e.target.value)}
+                title="Alterar status do Booking"
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  padding: '4px 8px',
+                  borderRadius: '8px',
+                  backgroundColor: `${sc}1F`,
+                  color: sc,
+                  border: `1px solid ${sc}66`,
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                <option value="Pendente">🔴 Pendente</option>
+                <option value="Em andamento">🟡 Em andamento</option>
+                <option value="Finalizado">🟢 Finalizado</option>
+              </select>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>

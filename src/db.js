@@ -11,9 +11,14 @@ import {
   normalizeExportadoresWithCodes,
   getExporterDocumentLabel
 } from './utils/exporterUtils';
+import {
+  COFFEE_ANALYSES_COL,
+  COFFEE_ANALYSIS_AUDIT_COL,
+  createCoffeeAnalysisRepository
+} from './utils/coffeeAnalysisService';
 import { useState, useEffect, useMemo } from 'react';
 import { dbFirestore, storage } from './firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // Coleções
@@ -40,13 +45,84 @@ const defaultExportadores = [
 ];
 
 const defaultInspectors = [
-  { id: 'ins_1', name: 'Carlos Santos', email: 'carlos@unispect.com', phone: '(27) 99991-2233' },
-  { id: 'ins_2', name: 'Marcos Oliveira', email: 'marcos@unispect.com', phone: '(27) 99882-3344' }
+  {
+    id: 'ins_bruno',
+    name: 'Bruno O. G. Lobo',
+    email: 'bruno@unispect.com',
+    phone: '(27) 99999-0001',
+    role: 'Signatory',
+    isOperational: true,
+    signatureImageUrl: '/assinatura.jpg'
+  },
+  {
+    id: 'ins_marcos',
+    name: 'Marcos Oliveira',
+    email: 'marcos@unispect.com',
+    phone: '(27) 99882-3344',
+    role: 'Inspector',
+    isOperational: true,
+    signatureImageUrl: null
+  },
+  // Perfil demonstrativo EXCLUSIVO para testes locais e simulação de múltiplos usuários
+  {
+    id: 'ins_carlos_test',
+    name: 'Carlos Santos [Demonstração / Teste]',
+    email: 'carlos.teste@unispect.demo',
+    phone: '(27) 90000-0000',
+    role: 'Inspector',
+    isOperational: false,
+    isTestDemonstrationUser: true,
+    signatureImageUrl: '/assinatura_carlos.svg'
+  }
 ];
 
 const defaultUsers = [
-  { id: 'usr_master', name: 'Master Supervisor', login: 'admin', password: '123', role: 'ADM' },
-  { id: 'usr_inspector', name: 'Carlos Santos', login: 'carlos', password: '123', role: 'Inspector' }
+  {
+    id: 'usr_bruno',
+    uid: 'usr_bruno',
+    name: 'Bruno O. G. Lobo',
+    login: 'blobo',
+    password: '123',
+    role: 'ADM',
+    isSignatory: true,
+    isOperational: true,
+    signatureImageUrl: '/assinatura.jpg'
+  },
+  {
+    id: 'usr_master',
+    uid: 'usr_master',
+    name: 'Master Supervisor',
+    login: 'admin',
+    password: '123',
+    role: 'ADM',
+    isSignatory: true,
+    isOperational: true,
+    signatureImageUrl: null
+  },
+  {
+    id: 'usr_marcos',
+    uid: 'usr_marcos',
+    name: 'Marcos Oliveira',
+    login: 'marcos',
+    password: '123',
+    role: 'Inspector',
+    isSignatory: false,
+    isOperational: true,
+    signatureImageUrl: null
+  },
+  // Perfil demonstrativo EXCLUSIVO para testes locais de concorrência e autorização
+  {
+    id: 'usr_carlos_test',
+    uid: 'usr_carlos_test',
+    name: 'Carlos Santos [Demonstração / Teste]',
+    login: 'carlos_teste',
+    password: '123',
+    role: 'Inspector',
+    isSignatory: true,
+    isOperational: false,
+    isTestDemonstrationUser: true,
+    signatureImageUrl: '/assinatura_carlos.svg'
+  }
 ];
 
 // Funções de Inicialização (se a coleção estiver vazia)
@@ -80,6 +156,36 @@ const bookingRepository = createBookingRepository({
 const concurrent = createConcurrentRepository({
   reference: (col, id) => doc(dbFirestore, col, id),
   transaction: callback => runTransaction(dbFirestore, callback)
+});
+
+const coffeeAnalysisRepository = createCoffeeAnalysisRepository({
+  listRecords: async () => {
+    const snap = await getDocs(collection(dbFirestore, COFFEE_ANALYSES_COL));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  },
+  getRecord: async id => {
+    const d = await getDoc(doc(dbFirestore, COFFEE_ANALYSES_COL, String(id)));
+    return d.exists() ? { ...d.data(), id: d.id } : null;
+  },
+  saveRecord: async record => {
+    await setDoc(doc(dbFirestore, COFFEE_ANALYSES_COL, String(record.id)), record);
+    return record;
+  },
+  appendAuditEvent: async event => {
+    await setDoc(doc(dbFirestore, COFFEE_ANALYSIS_AUDIT_COL, String(event.id)), event);
+    return event;
+  },
+  listAuditEvents: async laudoId => {
+    const snap = await getDocs(
+      query(collection(dbFirestore, COFFEE_ANALYSIS_AUDIT_COL), where('laudoId', '==', String(laudoId)))
+    );
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  },
+  reference: (col, id) => doc(dbFirestore, col, String(id)),
+  transaction: callback => runTransaction(dbFirestore, callback),
+  serverTimestamp: () => serverTimestamp(),
+  now: () => Date.now(),
+  auditAvailable: true
 });
 
 export const db = {
@@ -194,6 +300,23 @@ export const db = {
       }
     });
     return `UN${maxNum + 1}/2026`;
+  },
+
+  // ── Analysis of coffee (Laudos de Classificação de Café) ───────────────────
+  async getCoffeeAnalyses(user) {
+    return coffeeAnalysisRepository.listForUser(user || this.getUser());
+  },
+  async createCoffeeAnalysisDraft(params, options = {}) {
+    return coffeeAnalysisRepository.createDraft(params, options);
+  },
+  async openCoffeeAnalysisDraft(params) {
+    return coffeeAnalysisRepository.openDraftForConsultation(params);
+  },
+  async updateCoffeeAnalysisDraftLinks(params) {
+    return coffeeAnalysisRepository.updateDraftLinks(params);
+  },
+  async getCoffeeAnalysisAuditTimeline(laudoId, user) {
+    return coffeeAnalysisRepository.getAuditTimeline(laudoId, user || this.getUser());
   },
 
   // Perfil ativo
@@ -348,7 +471,10 @@ export const db = {
 
   // Métodos de Sync Obsoletos (mantidos vazios para não quebrar componentes não migrados)
   async syncPull() { return false; },
-  async syncPush() {}
+  async syncPush() {},
+
+  // Coffee Analysis Repository Methods
+  coffeeAnalysis: coffeeAnalysisRepository
 };
 
 // --- REACT HOOKS PARA TEMPO REAL --- //
@@ -369,6 +495,33 @@ export function useCollectionRealtime(colName) {
   return data;
 }
 
+export function useCoffeeAnalysesWithState() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    const unsubscribe = onSnapshot(
+      collection(dbFirestore, COFFEE_ANALYSES_COL),
+      snapshot => {
+        const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setData(items);
+        setLoading(false);
+        setError('');
+      },
+      err => {
+        console.error('Error fetching coffeeAnalyses:', err);
+        setError(err.message || 'Erro ao carregar laudos de café.');
+        setLoading(false);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  return { data, loading, error };
+}
+
 export function useLocais() { return useCollectionRealtime(LOCALS_COL); }
 export function useExportadores() {
   const raw = useCollectionRealtime(EXPORTERS_COL);
@@ -377,6 +530,35 @@ export function useExportadores() {
 export function useInspectors() { return useCollectionRealtime(INSPECTORS_COL); }
 export function useBookings() { return useCollectionRealtime(BOOKINGS_COL); }
 export function useUsers() { return useCollectionRealtime(USERS_COL); }
+export function useCoffeeAnalyses() { return useCollectionRealtime(COFFEE_ANALYSES_COL); }
+
+export function useCoffeeAnalysisAuditEvents(laudoId) {
+  const [events, setEvents] = useState([]);
+
+  useEffect(() => {
+    if (!laudoId) {
+      setEvents([]);
+      return undefined;
+    }
+    const q = query(
+      collection(dbFirestore, COFFEE_ANALYSIS_AUDIT_COL),
+      where('laudoId', '==', String(laudoId))
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      snapshot => {
+        const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setEvents(items);
+      },
+      err => {
+        console.error('Error fetching coffeeAnalysisAuditEvents:', err);
+      }
+    );
+    return () => unsubscribe();
+  }, [laudoId]);
+
+  return events;
+}
 
 import { normalizeText, normalizeCode, matchesContainerQuery, matchesBooking, getMatchedContainers } from './utils/searchUtils';
 

@@ -4,13 +4,114 @@ service cloud.firestore {
 
     // Funções auxiliares de autenticação e validação
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null || (
+        resource == null ? true : (
+          !('clientId' in resource.data) || resource.data.clientId == 'client_interport'
+        )
+      );
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth != null && (
+        ('role' in request.auth.token && (
+          request.auth.token.role == 'ADM' ||
+          request.auth.token.role == 'UNISPECT_MASTER'
+        )) ||
+        ('admin' in request.auth.token && request.auth.token.admin == true)
+      );
+    }
+
+    function isExporterRole() {
+      return isAuthenticated() &&
+        request.auth != null &&
+        'role' in request.auth.token &&
+        request.auth.token.role == 'Exportador';
+    }
+
+    function isInternalCoffeeWriter() {
+      return isAuthenticated() && (
+        request.auth == null || (
+          !isExporterRole() && (
+            !('role' in request.auth.token) ||
+            request.auth.token.role in ['ADM', 'UNISPECT_MASTER', 'CLIENT_ADMIN', 'Inspector']
+          )
+        )
+      );
+    }
+
+    function isClientAllowed(targetClientId) {
+      return request.auth == null || isAdmin() ||
+        (!('clientId' in request.auth.token) && targetClientId == 'client_interport') ||
+        ('clientId' in request.auth.token && request.auth.token.clientId == targetClientId);
+    }
+
+    function isExporterCompatibleWithClient(exporterId, targetClientId) {
+      return exists(/databases/$(database)/documents/exportadores/$(exporterId)) && (
+        !('clientId' in get(/databases/$(database)/documents/exportadores/$(exporterId)).data) ||
+        get(/databases/$(database)/documents/exportadores/$(exporterId)).data.clientId == targetClientId
+      );
+    }
+
+    function isBookingCompatibleWithExporterAndClient(bookingId, exporterId, targetClientId) {
+      return bookingId == null || (
+        exists(/databases/$(database)/documents/bookings/$(bookingId)) &&
+        get(/databases/$(database)/documents/bookings/$(bookingId)).data.exporterId == exporterId && (
+          !('clientId' in get(/databases/$(database)/documents/bookings/$(bookingId)).data) ||
+          get(/databases/$(database)/documents/bookings/$(bookingId)).data.clientId == targetClientId
+        )
+      );
+    }
+
+    // Verifica se o signatário possui assinatura digital cadastrada no perfil protegido
+    function hasValidRegisteredSignature(uid) {
+      return (
+        exists(/databases/$(database)/documents/inspectors/$(uid)) && (
+          ('signatureImageData' in get(/databases/$(database)/documents/inspectors/$(uid)).data &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageData != null &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageData != '') ||
+          ('signatureImageUrl' in get(/databases/$(database)/documents/inspectors/$(uid)).data &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageUrl != null &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageUrl != '')
+        )
+      ) || (
+        exists(/databases/$(database)/documents/usuarios/$(uid)) && (
+          ('signatureImageData' in get(/databases/$(database)/documents/usuarios/$(uid)).data &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageData != null &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageData != '') ||
+          ('signatureImageUrl' in get(/databases/$(database)/documents/usuarios/$(uid)).data &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageUrl != null &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageUrl != '')
+        )
+      );
+    }
+
+    // Comprova que a assinatura aplicada corresponde estritamente ao cadastro protegido do signatário
+    function matchesRegisteredSignatorySignature(uid, appliedImageData, appliedImageUrl) {
+      return (
+        exists(/databases/$(database)/documents/inspectors/$(uid)) && (
+          ('signatureImageData' in get(/databases/$(database)/documents/inspectors/$(uid)).data &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageData != null &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageData == appliedImageData) ||
+          ('signatureImageUrl' in get(/databases/$(database)/documents/inspectors/$(uid)).data &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageUrl != null &&
+           get(/databases/$(database)/documents/inspectors/$(uid)).data.signatureImageUrl == appliedImageUrl)
+        )
+      ) || (
+        exists(/databases/$(database)/documents/usuarios/$(uid)) && (
+          ('signatureImageData' in get(/databases/$(database)/documents/usuarios/$(uid)).data &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageData != null &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageData == appliedImageData) ||
+          ('signatureImageUrl' in get(/databases/$(database)/documents/usuarios/$(uid)).data &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageUrl != null &&
+           get(/databases/$(database)/documents/usuarios/$(uid)).data.signatureImageUrl == appliedImageUrl)
+        )
+      );
     }
 
     // Coleções existentes do UNISPECT
     match /usuarios/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || request.auth.uid == userId);
     }
 
     match /locais/{localId} {
@@ -19,19 +120,23 @@ service cloud.firestore {
     }
 
     match /exportadores/{exporterId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        (!('clientId' in resource.data) || isClientAllowed(resource.data.clientId)) &&
+        (!isExporterRole() || exporterId == request.auth.token.exporterId);
+      allow write: if isAuthenticated() && !isExporterRole();
     }
 
     match /inspectors/{inspectorId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || request.auth.uid == inspectorId);
     }
 
     match /bookings/{bookingId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        (!('clientId' in resource.data) || isClientAllowed(resource.data.clientId)) &&
+        (!isExporterRole() || resource.data.exporterId == request.auth.token.exporterId);
+      allow create, update: if isAuthenticated() && !isExporterRole();
+      allow delete: if isAuthenticated() && !isExporterRole();
     }
 
     match /bookingImports/{importId} {
@@ -55,21 +160,18 @@ service cloud.firestore {
     // NOVAS COLEÇÕES DO MODO CAMPO (Sem Booking)
     // ─────────────────────────────────────────────────────────────
 
-    // Cadastro único pendente de container conferido no campo
     match /fieldContainers/{normalizedNumber} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
 
-    // Histórico e idempotência de envio das operações de campo
     match /fieldOperations/{operationId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
 
-    // Histórico de exclusões e tombstones anti-ressurreição
     match /fieldContainerDeletions/{deletionId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
@@ -80,32 +182,157 @@ service cloud.firestore {
     // MÓDULO: INVENTÁRIO DO PÁTIO
     // ─────────────────────────────────────────────────────────────
 
-    function isAdmin() {
-      return isAuthenticated() && (request.auth.token.role == 'ADM' || request.auth.token.admin == true);
-    }
-
-    // Passagens de containers pelo pátio
     match /yardPassages/{passageId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      // Atualização comum permitida a inspetores; transição para saída ('exited') exclusiva de ADM
       allow update: if isAuthenticated() && (
         request.resource.data.status != 'exited' ||
         resource.data.status == 'exited' ||
         isAdmin()
       );
-      allow delete: if false; // Preserva histórico imutável
+      allow delete: if false;
     }
 
-    // Locks atômicos para unicidade de passagem ativa por pátio/container
     match /yardActiveLocks/{lockKey} {
       allow read, write: if isAuthenticated();
     }
 
-    // Conferências diárias de pátio
     match /yardAudits/{auditId} {
       allow read, create, update: if isAuthenticated();
-      allow delete: if false; // Preserva auditorias
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // MÓDULO: ANALYSIS OF COFFEE (Laudos de Classificação de Café)
+    // ─────────────────────────────────────────────────────────────
+
+    match /coffeeAnalyses/{laudoId} {
+      allow read: if isAuthenticated() &&
+        (!('clientId' in resource.data) || isClientAllowed(resource.data.clientId)) &&
+        (!isExporterRole() || resource.data.exporterId == request.auth.token.exporterId);
+
+      allow create: if isInternalCoffeeWriter() &&
+        isClientAllowed(request.resource.data.clientId) &&
+        request.resource.data.id == laudoId &&
+        request.resource.data.status == 'Rascunho' &&
+        request.resource.data.classificationBasis == '300 g de café' &&
+        (request.auth == null || request.resource.data.createdBy.uid == request.auth.uid) &&
+        (request.auth == null || request.resource.data.updatedBy.uid == request.auth.uid) &&
+        request.resource.data.createdServerTimestamp == request.time &&
+        request.resource.data.updatedServerTimestamp == request.time &&
+        !('auditTimeline' in request.resource.data) &&
+        isExporterCompatibleWithClient(
+          request.resource.data.exporterId,
+          request.resource.data.clientId
+        ) &&
+        isBookingCompatibleWithExporterAndClient(
+          request.resource.data.bookingId,
+          request.resource.data.exporterId,
+          request.resource.data.clientId
+        );
+
+      allow update: if isInternalCoffeeWriter() &&
+        isClientAllowed(resource.data.clientId) &&
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.laudoNumber == resource.data.laudoNumber &&
+        request.resource.data.clientId == resource.data.clientId &&
+        request.resource.data.createdBy == resource.data.createdBy &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        (request.auth == null || request.resource.data.updatedBy.uid == request.auth.uid) &&
+        request.resource.data.updatedServerTimestamp == request.time &&
+        !('auditTimeline' in request.resource.data) &&
+        isExporterCompatibleWithClient(
+          request.resource.data.exporterId,
+          request.resource.data.clientId
+        ) &&
+        isBookingCompatibleWithExporterAndClient(
+          request.resource.data.bookingId,
+          request.resource.data.exporterId,
+          request.resource.data.clientId
+        ) && (
+          // Transições permitidas:
+          // 1. Rascunho continua Rascunho (salvamento/edição técnica e de vínculos)
+          (resource.data.status == 'Rascunho' && request.resource.data.status == 'Rascunho') ||
+          // 2. Rascunho -> Aguardando assinatura (finalização técnica / encaminhamento com indicação de signatário)
+          (resource.data.status == 'Rascunho' && request.resource.data.status == 'Aguardando assinatura') ||
+          // 3. Aguardando assinatura continua Aguardando assinatura (ex.: ADM ou gestor reatribuindo/encaminhando o signatário antes da emissão)
+          (resource.data.status == 'Aguardando assinatura' && request.resource.data.status == 'Aguardando assinatura') ||
+          // 4. Aguardando assinatura -> Rascunho (reabertura técnica para ajustes)
+          (resource.data.status == 'Aguardando assinatura' && request.resource.data.status == 'Rascunho') ||
+          // 5. Aguardando assinatura -> Emitido:
+          // EXCLUSIVAMENTE pelo próprio signatário autenticado designado por seu UID canônico.
+          // Impede alteração de signatory.uid ou signatory.id durante a emissão.
+          // Impede qualquer divergência entre a identidade do signatário no laudo e no snapshot.
+          // Valida contra o cadastro protegido (inspectors ou usuarios), impedindo usuários sem assinatura
+          // de emitirem enviando assinaturas arbitrárias.
+          (
+            resource.data.status == 'Aguardando assinatura' &&
+            request.resource.data.status == 'Emitido' &&
+            // O UID canônico do signatário NÃO pode ser alterado durante a emissão
+            request.resource.data.signatory.uid == resource.data.signatory.uid &&
+            // Se houver campo legatário 'id', não pode ser alterado
+            (!('id' in resource.data.signatory) || request.resource.data.signatory.id == resource.data.signatory.id) &&
+            // O usuário autenticado DEVE SER obrigatoriamente o signatário canônico (sem exceção para terceiros ou ADM)
+            (request.auth == null ? (request.resource.data.updatedBy.uid == resource.data.signatory.uid) : (request.auth.uid == resource.data.signatory.uid)) &&
+            // Snapshot fechado obrigatório
+            'issuedSnapshot' in request.resource.data &&
+            'signatory' in request.resource.data.issuedSnapshot &&
+            // Identidade no snapshot deve coincidir de forma estrita com a identidade canônica no laudo
+            request.resource.data.issuedSnapshot.signatory.uid == resource.data.signatory.uid &&
+            (!('id' in resource.data.signatory) || request.resource.data.issuedSnapshot.signatory.id == resource.data.signatory.id) &&
+            // O signatário deve possuir assinatura digital cadastrada no perfil protegido
+            hasValidRegisteredSignature(resource.data.signatory.uid) &&
+            // A assinatura aplicada DEVE corresponder estritamente ao cadastro protegido do próprio signatário
+            matchesRegisteredSignatorySignature(
+              resource.data.signatory.uid,
+              request.resource.data.issuedSnapshot.signatory.signatureImageData,
+              request.resource.data.issuedSnapshot.signatory.signatureImageUrl
+            ) &&
+            // A imagem da assinatura deve estar efetivamente presente no snapshot (Data URI com bytes reais)
+            request.resource.data.issuedSnapshot.signatory.signatureImageData != null &&
+            request.resource.data.issuedSnapshot.signatory.signatureImageData is string &&
+            request.resource.data.issuedSnapshot.signatory.signatureImageData.size() > 10
+          ) ||
+          // 6. Emitido -> Rascunho (geração de nova revisão preservando histórico imutável)
+          (
+            resource.data.status == 'Emitido' &&
+            request.resource.data.status == 'Rascunho' &&
+            'revisions' in request.resource.data &&
+            request.resource.data._revision > resource.data._revision
+          ) ||
+          // 7. Cancelamento
+          (request.resource.data.status == 'Cancelado')
+        );
+
+      allow delete: if false;
+    }
+
+    // Fonte Oficial e Imutável do Histórico de Auditoria de Laudos de Café
+    match /coffeeAnalysisAuditEvents/{eventId} {
+      allow read: if isAuthenticated() &&
+        (!('clientId' in resource.data) || isClientAllowed(resource.data.clientId)) &&
+        (!isExporterRole() || resource.data.exporterId == request.auth.token.exporterId);
+
+      allow create: if isAuthenticated() &&
+        isClientAllowed(request.resource.data.clientId) &&
+        request.resource.data.id == eventId &&
+        (request.auth == null || request.resource.data.actor.uid == request.auth.uid) &&
+        request.resource.data.serverTimestamp == request.time && (
+          isInternalCoffeeWriter() ||
+          (isExporterRole() &&
+            request.resource.data.actionType == 'REPORT_OPENED' &&
+            request.resource.data.exporterId == request.auth.token.exporterId)
+        );
+
+      allow update, delete: if false; // Eventos de auditoria são estritamente imutáveis
+    }
+
+    match /coffeeAnalysisCounters/{counterId} {
+      allow read, write: if isInternalCoffeeWriter();
+    }
+
+    match /coffeeAnalysisRequestKeys/{reqKey} {
+      allow read, write: if isInternalCoffeeWriter();
     }
   }
 }

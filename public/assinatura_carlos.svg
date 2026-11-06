@@ -1,0 +1,9 @@
+<svg width="220" height="75" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="#0a1c3f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 20 45 Q 35 15, 55 42 Q 75 65, 85 30 Q 95 10, 110 40 Q 130 55, 150 25 Q 170 15, 195 38" />
+    <path d="M 30 55 Q 70 48, 120 52 Q 165 54, 200 48" />
+  </g>
+  <text x="25" y="42" font-family="'Brush Script MT', 'Segoe Script', cursive, sans-serif" font-size="28" font-weight="bold" fill="#0a1c3f">Carlos Santos</text>
+  <text x="28" y="68" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#4a607a">INSPECTOR &amp; SURVEYOR</text>
+</svg>
+

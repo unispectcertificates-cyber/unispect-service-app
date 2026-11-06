@@ -16,18 +16,19 @@ const app = initializeApp(firebaseConfig);
 export const dbFirestore = getFirestore(app);
 export const storage = getStorage(app);
 
-// Conexão com Firebase Emulator se habilitado para testes locais
+// Conexão com Firebase Emulator habilitada por padrão para ambiente local
 if (typeof window !== 'undefined') {
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const forceEmulator = localStorage.getItem('unispect_use_emulator') === 'true';
-  if (isLocal && forceEmulator) {
+  const forceDisable = localStorage.getItem('unispect_use_emulator') === 'false';
+  if (isLocal && !forceDisable) {
     try {
-      connectFirestoreEmulator(dbFirestore, 'localhost', 8080);
-      connectStorageEmulator(storage, 'localhost', 9199);
-      console.log(' Conectado ao Firebase Emulator local (Firestore: 8080, Storage: 9199)');
+      const emulatorHost = window.location.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost';
+      connectFirestoreEmulator(dbFirestore, emulatorHost, 8080);
+      connectStorageEmulator(storage, emulatorHost, 9199);
+      window.__UNISPECT_EMULATOR_CONNECTED__ = true;
+      console.log(` Conectado ao Firebase Emulator local (Firestore: ${emulatorHost}:8080, Storage: ${emulatorHost}:9199)`);
     } catch (e) {
       console.warn('Firebase emulator connection:', e.message);
     }
   }
 }
-

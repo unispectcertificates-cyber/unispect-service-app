@@ -2,9 +2,10 @@ import { findBooking, planImport, previewToken, normalizeContainerNumber, import
 import { parseRomaneioPdf } from './utils/pdfParser';
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, LogOut } from 'lucide-react';
+import { Search, ShieldAlert, Hourglass, CheckCircle2, X, Trash2, UploadCloud, Users, Settings, Camera, RefreshCw, Plus, LogOut, Coffee } from 'lucide-react';
 import { db, useBookings, useLocais, useExportadores, getSealText, matchesBooking, getMatchedContainers } from './db';
 import { subscribePendingFieldContainers } from './utils/fieldService';
+import { canAccessCoffeeAnalysisModule } from './utils/coffeeAnalysisService';
 import BookingManagementModal from './components/BookingManagementModal';
 import ExportadoresList from './components/ExportadoresList';
 import LocaisList from './components/LocaisList';
@@ -14,6 +15,7 @@ import MobileAppView from './components/MobileAppView';
 import Login from './components/Login';
 import UsersList from './components/UsersList';
 import FieldContainersView from './components/FieldContainersView';
+import CoffeeAnalysisView from './components/CoffeeAnalysisView';
 import Sidebar from './components/Sidebar';
 import DesktopDashboardView from './components/DesktopDashboardView';
 
@@ -57,8 +59,17 @@ export default function App() {
   }, []);
 
   const [currentTab, setCurrentTab] = useState(() => {
-    const isMob = window.innerWidth <= 768;
     const usr = db.getUser();
+    const hash = window.location.hash || '';
+    const path = window.location.pathname || '';
+    if (
+      (hash.includes('analysis-of-coffee') || path.endsWith('/analysis-of-coffee')) &&
+      usr &&
+      canAccessCoffeeAnalysisModule(usr)
+    ) {
+      return 'analysis-of-coffee';
+    }
+    const isMob = window.innerWidth <= 768;
     if (isMob && usr && usr.role !== 'Exportador') {
       return 'field-portal';
     }
@@ -83,6 +94,36 @@ export default function App() {
     );
     return () => unsub();
   }, []);
+
+  // Sincronização e proteção da rota direta #/analysis-of-coffee
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash || '';
+      if (hash.includes('analysis-of-coffee')) {
+        if (user && canAccessCoffeeAnalysisModule(user)) {
+          setCurrentTab('analysis-of-coffee');
+        } else {
+          setCurrentTab('bookings');
+        }
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [user]);
+
+  useEffect(() => {
+    if (currentTab === 'analysis-of-coffee') {
+      if (!user || !canAccessCoffeeAnalysisModule(user)) {
+        setCurrentTab('bookings');
+        return;
+      }
+      if (window.location.hash !== '#/analysis-of-coffee') {
+        window.history.replaceState(null, '', '#/analysis-of-coffee');
+      }
+    } else if (window.location.hash === '#/analysis-of-coffee') {
+      window.history.replaceState(null, '', window.location.pathname || '/');
+    }
+  }, [currentTab, user]);
 
   // Modais e Menu Dropdown
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -1136,7 +1177,17 @@ export default function App() {
                 </motion.div>
               )}
 
-              {(currentTab === 'field-portal' || (isMobile && user.role !== 'Exportador')) && (
+              {currentTab === 'analysis-of-coffee' && canAccessCoffeeAnalysisModule(user) && (
+                <motion.div key="tab-analysis-of-coffee" {...pageTransition}>
+                  <CoffeeAnalysisView
+                    user={user}
+                    exportadores={exportadores}
+                    bookings={bookings}
+                  />
+                </motion.div>
+              )}
+
+              {(currentTab === 'field-portal' || (isMobile && user.role !== 'Exportador' && currentTab !== 'analysis-of-coffee')) && (
                 <motion.div key="tab-field-portal" {...pageTransition}>
                   <MobileAppView user={user} onLogout={handleLogout} hideHeader={true} onRefresh={handleSystemRefresh} isRefreshing={isRefreshing} />
                 </motion.div>
@@ -1863,6 +1914,16 @@ export default function App() {
             <Search size={20} />
             <span>Bookings</span>
           </button>
+
+          {canAccessCoffeeAnalysisModule(user) && (
+            <button
+              onClick={() => setCurrentTab('analysis-of-coffee')}
+              className={`mobile-nav-item ${currentTab === 'analysis-of-coffee' ? 'active' : ''}`}
+            >
+              <Coffee size={20} />
+              <span>Analysis of coffee</span>
+            </button>
+          )}
 
           {user.role === 'ADM' && (
             <button
